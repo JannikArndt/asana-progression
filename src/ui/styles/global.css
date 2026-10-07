@@ -1,0 +1,173 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font);
+  font-size: var(--text-m);
+  line-height: var(--leading);
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  min-height: 100dvh;
+  overscroll-behavior-y: none;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+}
+
+h1 {
+  font-size: var(--text-xxl);
+}
+
+h2 {
+  font-size: var(--text-xl);
+}
+
+h3 {
+  font-size: var(--text-l);
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--color-accent-strong);
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.muted {
+  color: var(--color-text-2);
+}
+
+.faint {
+  color: var(--color-text-3);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--touch);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  font-weight: var(--weight-medium);
+  transition: background var(--duration-fast) var(--ease), opacity var(--duration-fast) var(--ease);
+}
+
+.btn:active {
+  background: var(--color-neutral-tint);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn.primary {
+  border-color: transparent;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.btn.primary:active {
+  background: var(--color-accent-strong);
+}
+
+.btn.quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-accent-strong);
+}
+
+.btn.danger {
+  color: var(--color-danger);
+}
+
+/* Surfaces */
+.card {
+  background: var(--color-surface);
+  border-radius: var(--radius-l);
+  border: 1px solid var(--color-hairline);
+}
+
+.hairline {
+  border: 0;
+  border-top: 1px solid var(--color-hairline);
+  margin: 0;
+}
+
+.section-title {
+  font-size: var(--text-s);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Key–value tables for diagnostics */
+.kv {
+  display: grid;
+  grid-template-columns: minmax(0, 40%) minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-s);
+}
+
+.kv dt {
+  color: var(--color-text-2);
+}
+
+.kv dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
