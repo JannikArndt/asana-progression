@@ -16,7 +16,7 @@ import type { DetectionParams } from '../../detection';
 import { newId, type Analysis, type Hold, type ReviewCandidate, type Session, type Video } from '../../model';
 import { app } from './app.svelte';
 import { dialog } from './dialog.svelte';
-import { historyFrom, parseItemKey, sessionEntries, toReviewItems, type SessionEntry } from './session-data';
+import { combineSessions, historyFrom, parseItemKey, sameDaySessions, sessionEntries, toReviewItems, type SessionEntry } from './session-data';
 import { suggestInWorker } from '../workers/suggest-client';
 import { pipeline } from '../pipeline/controller.svelte';
 import { invalidateSamples } from './samples';
@@ -240,6 +240,26 @@ export class SessionReview {
     await app.db.sessions.put(s);
     app.upsertSession(s);
     await this.refreshSuggestions();
+  }
+
+  /** Other sessions recorded on the same day (e.g. clips cut from one practice). */
+  get sameDay(): Session[] {
+    return this.session ? sameDaySessions(app.sessions, this.session) : [];
+  }
+
+  /** Moves the videos and holds of all same-day sessions into this one. */
+  async combineSameDay() {
+    const session = this.session;
+    if (!session) return;
+    const others = sameDaySessions(app.sessions, session);
+    if (!others.length) return;
+    const db = app.db;
+    const r = combineSessions(session, others, app.videos, app.holds);
+    await db.sessions.put(r.session);
+    for (const h of r.holds) await db.holds.put(h);
+    for (const id of r.deleteIds) await db.sessions.delete(id);
+    await app.refresh();
+    await this.load(session.id);
   }
 
   async setNote(note: string) {

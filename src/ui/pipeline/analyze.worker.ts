@@ -159,7 +159,11 @@ async function analyze(req: Extract<WorkerRequest, { type: 'analyze' }>) {
       startIndex,
       skipNonReference: req.skipNonReference,
       // A resumed run must keep the first run's gray conversion (different filters shift gray levels).
-      ...(startIndex > 0 && base.grayMethod ? { grayMethod: base.grayMethod } : {}),
+      ...(startIndex > 0 && base.grayMethod
+        ? { grayMethod: base.grayMethod }
+        : req.debug?.grayMethod
+          ? { grayMethod: req.debug.grayMethod }
+          : {}),
       signal: abort.signal,
       onStats: (s) => (sampler = s),
     });

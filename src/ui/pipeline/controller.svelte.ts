@@ -225,10 +225,12 @@ export class Pipeline {
 }
 
 /** Debug knobs (set in localStorage, used by the end-to-end tests). */
-function debugOptions(): { sampleDelayMs?: number; checkpointMs?: number } | null {
+type DebugOptions = { sampleDelayMs?: number; checkpointMs?: number; grayMethod?: 'canvas' | 'luma' };
+
+function debugOptions(): DebugOptions | null {
   try {
     const raw = localStorage.getItem('asana.debug.pipeline');
-    return raw ? (JSON.parse(raw) as { sampleDelayMs?: number; checkpointMs?: number }) : null;
+    return raw ? (JSON.parse(raw) as DebugOptions) : null;
   } catch {
     return null;
   }

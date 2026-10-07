@@ -13,7 +13,7 @@ export type WorkerRequest =
       skipNonReference: boolean;
       resume: boolean;
       /** Debug/testing: artificial delay per sample (ms) and checkpoint interval override. */
-      debug?: { sampleDelayMs?: number; checkpointMs?: number };
+      debug?: { sampleDelayMs?: number; checkpointMs?: number; grayMethod?: 'canvas' | 'luma' };
     }
   | { type: 'reanalyze'; jobId: number; videoId: string; params: DetectionParams }
   | { type: 'probe-quota'; jobId: number; capBytes: number }

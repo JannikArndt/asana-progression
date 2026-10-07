@@ -130,3 +130,12 @@ test('processing resumes after the page was reloaded mid-way', async ({ page }) 
   await page.getByRole('button', { name: /^Debug/ }).click();
   await expect(page.locator('dd', { hasText: /^1×$/ })).toBeVisible();
 });
+
+test('the luma-plane conversion finds the same holds', async ({ page }) => {
+  await page.goto('./');
+  await page.evaluate(() => localStorage.setItem('asana.debug.pipeline', JSON.stringify({ grayMethod: 'luma' })));
+  await importVideo(page, 'None');
+  await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
+  await page.getByRole('button', { name: /^Debug/ }).click();
+  await expect(page.locator('dt:has-text("Frame → gray") + dd')).toContainText('luma');
+});

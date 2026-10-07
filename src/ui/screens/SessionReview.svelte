@@ -148,6 +148,15 @@
       </p>
     </div>
 
+    {#if review.sameDay.length}
+      <div class="card notice">
+        <p class="small">
+          {review.sameDay.length} other {review.sameDay.length === 1 ? 'session was' : 'sessions were'} recorded on this day.
+        </p>
+        <button class="btn" type="button" onclick={() => review.combineSameDay()}>Combine into this session</button>
+      </div>
+    {/if}
+
     <div class="controls">
       <div class="segmented" role="radiogroup" aria-label="Suggestions">
         <button type="button" role="radio" aria-checked={session.templateId === PRIMARY_SERIES_ID} class:on={session.templateId === PRIMARY_SERIES_ID} onclick={() => review.setTemplate(PRIMARY_SERIES_ID)}>Primary series</button>
@@ -306,6 +315,17 @@
 
   .small {
     font-size: var(--text-s);
+  }
+
+  .notice {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .notice .btn {
+    align-self: flex-start;
   }
 
   .controls {

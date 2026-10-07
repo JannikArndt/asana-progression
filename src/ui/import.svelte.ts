@@ -157,6 +157,20 @@ export async function importFiles(files: File[]): Promise<void> {
     if (!videoId) {
       const recDay = dayOf(meta.recordedAt);
       joinSession = (recDay && batchSessions.get(recDay)) || null;
+      const sameDay = !joinSession && recDay ? app.sessions.find((s) => dayOf(s.date) === recDay) : undefined;
+      if (sameDay) {
+        const choice = await dialog.ask({
+          title: 'Same day as an existing session',
+          message: `${meta.fileName} was recorded on ${recDay}, like a session you already have.`,
+          options: [
+            { id: 'join', label: 'Add to that session', detail: 'For clips cut from the same practice.', kind: 'primary' },
+            { id: 'new', label: 'New session' },
+            { id: 'cancel', label: 'Cancel', kind: 'quiet' },
+          ],
+        });
+        if (choice === 'cancel') continue;
+        if (choice === 'join') joinSession = { ...sameDay };
+      }
       if (!joinSession) {
         const templateId = await chooseTemplate(meta);
         if (templateId === null) continue;

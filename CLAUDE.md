@@ -125,6 +125,11 @@ keeps C above p55 when there are only a few holds; noise-only holds fragment and
 similar-merge; variants with near-identical silhouettes (e.g. Paschimottanasana A then B) can be
 merged — the review step (M2) needs split.
 
+Real data: `src/detection/__fixtures__/real/sarvangasana-finishing.json` is the user's 7.6 min
+finishing-sequence clip (the validation video). All 9 holds are found with correct best frames
+(the long Sirsasana A is split in 3 and merged back); the fixture test replays it and checks the
+named ground truth.
+
 Optimisation: `skipNonReference` drops packets that no other frame references (HEVC sub-layer
 non-reference NAL types 0,2,…,14; H.264 `nal_ref_idc == 0`) before decoding. Default on; toggle
 in Debug. Measured skip ratio is shown on the processing screen.
@@ -193,17 +198,17 @@ neutral grey, dismissed = hatched.
 Fill in from the user's device reports (Settings → "Copy diagnostics report", Video → Debug →
 "Copy diagnostics").
 
-| Topic | Expectation / source | Measured on device |
+| Topic | Expectation / source | Measured on device (iPhone 15, iOS 18.7, Safari tab, 2026-10-07) |
 |---|---|---|
-| File handover from Photos | Photos picker may compress/transcode unless the picker's Options → Format is set to "Current" (iOS 17: "Options", iOS 18: control icon) — https://support.echo360.com/hc/en-us/articles/38604331326093-Troubleshooting-iOS-Uploads ; picking the same video via Files uploads it unchanged — https://developer.apple.com/forums/thread/731042 | pending |
+| File handover from Photos | Photos picker may compress/transcode unless the picker's Options → Format is set to "Current" (iOS 17: "Options", iOS 18: control icon) — https://support.echo360.com/hc/en-us/articles/38604331326093-Troubleshooting-iOS-Uploads ; picking the same video via Files uploads it unchanged — https://developer.apple.com/forums/thread/731042 | Cropped exports arrived as HEVC Main 10 HLG `video/mp4` with Apple metadata (make/model/software, `com.apple.quicktime.creationdate`); `mvhd` creation_time = export time. Photos vs Files comparison still pending. |
 | File handover from Files | Original file | pending |
-| WebCodecs video decode | Available since Safari 16.4 — https://webkit.org/blog/13966/webkit-features-in-safari-16-4/ ; HEVC Main 10 support to be verified on device (Settings → Video decoding) | pending |
-| Decode speed (60 min 4K60 HEVC) | unknown | pending |
-| Memory peak | Safari exposes no JS memory API; use Web Inspector → Timelines → Memory | pending |
-| OPFS quota | Safari 17+: browser apps up to 60 % of disk per origin, Home Screen web apps the same — https://webkit.org/blog/14403/updates-to-storage-policy/ | pending (Settings → Measure) |
-| Persistent storage | Granted by heuristics, e.g. Home Screen web app — same source | pending |
-| HLG → canvas | unknown; HDR probe compares sRGB/P3 canvas, software tone map and `<video>` | pending |
-| Screen Wake Lock | Since Safari 16.4 — https://webkit.org/blog/13966/webkit-features-in-safari-16-4/ | pending |
+| WebCodecs video decode | Available since Safari 16.4 — https://webkit.org/blog/13966/webkit-features-in-safari-16-4/ | HEVC Main 10 4K supported (`hvc1` and `hev1`), also H.264 and VP9. Decoded frames are `NV12`. |
+| Decode speed | — | 4.1–4.5× real time for 3040×1960 @ 59.94 HEVC Main 10 with non-reference skipping (≈ 50 % of packets skipped). Frame → gray via canvas took ≈ 39 ms per sample = 65 % of wall time → added the luma-plane path (`source/convert.ts`), chosen per video by a first-frame benchmark. |
+| Memory peak | Safari exposes no JS memory API; use Web Inspector → Timelines → Memory | not measured |
+| OPFS quota | Safari 17+: browser apps up to 60 % of disk per origin, Home Screen web apps the same — https://webkit.org/blog/14403/updates-to-storage-policy/ | `estimate().quota` 41.2 GB. Writing: first 1 GB in ≈ 1 s, 5 GB in 81 s (≈ 62 MB/s). Safari's `usage` estimate did **not** drop after the test files were deleted (OPFS listing was back to 9.8 MB) — Settings shows the real file list and removes leftovers. |
+| Persistent storage | Granted by heuristics, e.g. Home Screen web app — same source | `persist()` → false in a Safari tab (Home Screen app not tested yet). |
+| HLG → canvas | — | Safari tone-maps HLG to SDR inside the decoder: frames arrive as 8-bit `NV12`, BT.709 / sRGB transfer, full range. sRGB and Display-P3 canvases are identical (luma 3–236) and look SDR, not HDR. Stills are therefore SDR JPEGs; the "original" clip quality (stream copy) keeps HDR for playback. |
+| Screen Wake Lock | Since Safari 16.4 — https://webkit.org/blog/13966/webkit-features-in-safari-16-4/ | available |
 
 ## Milestones
 

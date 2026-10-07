@@ -15,7 +15,7 @@ import {
 } from '../../model';
 import { openVideo, type VideoSource } from '../../source';
 import { SvelteMap } from 'svelte/reactivity';
-import { orphanVideos, SHORT_CLIP_S } from './session-data';
+import { dayOf, groupByDay, orphanVideos, SHORT_CLIP_S } from './session-data';
 
 export interface AnalysisSummary {
   videoId: string;
@@ -80,17 +80,25 @@ class AppState {
     await db.settings.set('catalogVersion', CATALOG_VERSION);
   }
 
-  /** Milestone 1 stored videos without sessions: give each its own session. */
+  /** Videos without a session (milestone-1 data): one session per recording day. */
   private async migrate() {
     const db = this.db;
     const [sessions, videos] = await Promise.all([db.sessions.all(), db.videos.all()]);
-    for (const v of orphanVideos(sessions, videos)) {
+    for (const [day, list] of groupByDay(orphanVideos(sessions, videos))) {
+      const existing = sessions.find((s) => dayOf(s.date) === day);
+      if (existing) {
+        existing.videoIds = [...existing.videoIds, ...list.map((v) => v.id)];
+        await db.sessions.put(existing);
+        continue;
+      }
+      const first = list[0]!;
+      const total = list.reduce((s, v) => s + v.durationS, 0);
       await db.sessions.put({
         id: newId('ses'),
-        date: v.recordedAt ?? v.importedAt,
+        date: first.recordedAt ?? first.importedAt,
         note: '',
-        videoIds: [v.id],
-        ...(v.durationS >= SHORT_CLIP_S ? { templateId: PRIMARY_SERIES_ID } : {}),
+        videoIds: list.map((v) => v.id),
+        ...(total >= SHORT_CLIP_S ? { templateId: PRIMARY_SERIES_ID } : {}),
       });
     }
   }
