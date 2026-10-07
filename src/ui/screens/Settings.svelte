@@ -1,0 +1,269 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { estimateStorage, opfsUsage, requestPersistence, type QuotaProbeResult, type StorageEstimateInfo } from '../../storage';
+  import { app } from '../state/app.svelte';
+  import { router } from '../state/router.svelte';
+  import { dialog } from '../state/dialog.svelte';
+  import { pipeline } from '../pipeline/controller.svelte';
+  import { updates } from '../update.svelte';
+  import { copyText, deviceInfo, formatBytes, type DeviceInfo } from '../diagnostics';
+
+  let est = $state<StorageEstimateInfo | null>(null);
+  let opfs = $state<number | null>(null);
+  let device = $state<DeviceInfo | null>(null);
+  let cap = $state(2e9);
+  let probing = $state<number | null>(null);
+  let probe = $state<(QuotaProbeResult & { at: string; capBytes: number; before: StorageEstimateInfo | null }) | null>(null);
+  let hevc = $state<Record<string, boolean | string>>({});
+  let message = $state<string | null>(null);
+
+  async function refresh() {
+    est = await estimateStorage();
+    opfs = await opfsUsage().catch(() => null);
+  }
+
+  async function checkCodecs() {
+    if (typeof VideoDecoder === 'undefined') {
+      hevc = { webcodecs: 'not available' };
+      return;
+    }
+    const configs: Record<string, VideoDecoderConfig> = {
+      'HEVC Main 10 4K (hvc1)': { codec: 'hvc1.2.4.L153.B0', codedWidth: 3840, codedHeight: 2160 },
+      'HEVC Main 10 4K (hev1)': { codec: 'hev1.2.4.L153.B0', codedWidth: 3840, codedHeight: 2160 },
+      'HEVC Main 1080p': { codec: 'hvc1.1.6.L123.B0', codedWidth: 1920, codedHeight: 1080 },
+      'H.264 High 1080p': { codec: 'avc1.640028', codedWidth: 1920, codedHeight: 1080 },
+      'VP9 1080p': { codec: 'vp09.00.40.08', codedWidth: 1920, codedHeight: 1080 },
+    };
+    const out: Record<string, boolean | string> = {};
+    for (const [name, c] of Object.entries(configs)) {
+      try {
+        out[name] = (await VideoDecoder.isConfigSupported(c)).supported === true;
+      } catch (e) {
+        out[name] = String(e);
+      }
+    }
+    hevc = out;
+  }
+
+  onMount(() => {
+    device = deviceInfo();
+    void refresh();
+    void checkCodecs();
+    void app.db.settings.get<typeof probe>('diag.quotaProbe').then((p) => (probe = p ?? null));
+  });
+
+  async function persist() {
+    const r = await requestPersistence();
+    await app.db.settings.set('persistGranted', r);
+    await refresh();
+  }
+
+  async function runProbe() {
+    const go = await dialog.ask({
+      title: 'Measure writable storage?',
+      message: `Writes up to ${formatBytes(cap)} of test data, then deletes it. This can take a few minutes.`,
+      options: [
+        { id: 'go', label: 'Start', kind: 'primary' },
+        { id: 'cancel', label: 'Cancel', kind: 'quiet' },
+      ],
+    });
+    if (go !== 'go') return;
+    const before = await estimateStorage();
+    probing = 0;
+    try {
+      const r = await pipeline.probeQuota(cap, (b) => (probing = b));
+      probe = { ...r, at: new Date().toISOString(), capBytes: cap, before };
+      await app.db.settings.set('diag.quotaProbe', $state.snapshot(probe));
+    } finally {
+      probing = null;
+      await refresh();
+    }
+  }
+
+  async function copyAll() {
+    const report = {
+      app: { version: __APP_VERSION__, builtAt: __BUILT_AT__ },
+      device,
+      decoders: hevc,
+      storage: { estimate: est, opfsBytes: opfs, persistRequested: await app.db.settings.get('persistRequested'), persistGranted: await app.db.settings.get('persistGranted') },
+      quotaProbe: probe,
+      hdrProbe: await app.db.settings.get('diag.hdrProbe'),
+      videos: await Promise.all(
+        app.videos.map(async (v) => {
+          const a = await app.db.analyses.get(v.id);
+          return { video: v, stats: a?.stats ?? null, candidates: a?.candidates.length ?? null };
+        }),
+      ),
+    };
+    message = (await copyText(JSON.stringify(report, null, 2))) ? 'Report copied.' : 'Copy failed.';
+  }
+
+  async function wipe() {
+    const ok = await dialog.ask({
+      title: 'Delete all data?',
+      message: 'Removes every analysis, stored sample and setting. Original videos are not touched.',
+      options: [
+        { id: 'delete', label: 'Delete everything', kind: 'danger' },
+        { id: 'cancel', label: 'Cancel', kind: 'quiet' },
+      ],
+    });
+    if (ok !== 'delete') return;
+    app.store?.close();
+    await new Promise<void>((resolve) => {
+      const req = indexedDB.deleteDatabase('asana-progression');
+      req.onsuccess = req.onerror = req.onblocked = () => resolve();
+    });
+    try {
+      const root = await navigator.storage.getDirectory();
+      for await (const [name] of (root as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+        await root.removeEntry(name, { recursive: true }).catch(() => {});
+      }
+    } catch {
+      // no OPFS
+    }
+    location.reload();
+  }
+</script>
+
+<main class="settings">
+  <header class="top">
+    <button class="btn quiet back" type="button" onclick={() => router.go({ name: 'home' })}>‹ Videos</button>
+  </header>
+  <h2>Settings</h2>
+
+  <section class="group">
+    <h3 class="section-title">Storage</h3>
+    <dl class="kv">
+      <dt>Quota (estimate)</dt><dd>{formatBytes(est?.quota)}</dd>
+      <dt>Usage (estimate)</dt><dd>{formatBytes(est?.usage)}</dd>
+      <dt>Analysis samples (OPFS)</dt><dd>{formatBytes(opfs)}</dd>
+      <dt>Persistent</dt><dd>{est?.persisted === null || est === null ? 'unknown' : est.persisted ? 'yes' : 'no'}</dd>
+    </dl>
+    <div class="actions">
+      <button class="btn" type="button" onclick={persist}>Request persistent storage</button>
+    </div>
+    <div class="probe">
+      <label class="row">
+        <span>Measure writable space up to</span>
+        <select bind:value={cap}>
+          <option value={1e9}>1 GB</option>
+          <option value={2e9}>2 GB</option>
+          <option value={5e9}>5 GB</option>
+          <option value={20e9}>20 GB</option>
+          <option value={1e12}>until full</option>
+        </select>
+      </label>
+      <button class="btn" type="button" onclick={runProbe} disabled={probing !== null || pipeline.running}>
+        {probing !== null ? `Writing… ${formatBytes(probing)}` : 'Measure'}
+      </button>
+      {#if probe}
+        <p class="small muted">
+          {probe.at.slice(0, 16).replace('T', ' ')}: wrote {formatBytes(probe.bytesWritten)} in {(probe.ms / 1000).toFixed(1)} s,
+          stopped by {probe.stoppedBy}{probe.error ? ` (${probe.error})` : ''}.
+        </p>
+      {/if}
+    </div>
+  </section>
+
+  <section class="group">
+    <h3 class="section-title">Video decoding</h3>
+    <dl class="kv">
+      {#each Object.entries(hevc) as [k, v] (k)}
+        <dt>{k}</dt><dd>{typeof v === 'boolean' ? (v ? 'supported' : 'not supported') : v}</dd>
+      {/each}
+    </dl>
+  </section>
+
+  {#if device}
+    <section class="group">
+      <h3 class="section-title">Device</h3>
+      <dl class="kv">
+        <dt>User agent</dt><dd class="small">{device.userAgent}</dd>
+        <dt>Screen</dt><dd>{device.screen}</dd>
+        <dt>Home Screen app</dt><dd>{device.standalone ? 'yes' : 'no'}</dd>
+        <dt>CPU cores</dt><dd>{device.hardwareConcurrency ?? '–'}</dd>
+        <dt>WebCodecs</dt><dd>{device.webCodecs ? 'yes' : 'no'}</dd>
+        <dt>OffscreenCanvas</dt><dd>{device.offscreenCanvas ? 'yes' : 'no'}</dd>
+        <dt>Wake Lock</dt><dd>{device.wakeLock ? 'yes' : 'no'}</dd>
+        <dt>OPFS</dt><dd>{device.opfs ? 'yes' : 'no'}</dd>
+        <dt>JS heap</dt><dd>{device.jsHeapUsedMb !== null ? `${device.jsHeapUsedMb} MB` : 'not exposed (Safari)'}</dd>
+      </dl>
+    </section>
+  {/if}
+
+  <section class="group">
+    <h3 class="section-title">App</h3>
+    <dl class="kv">
+      <dt>Version</dt><dd class="mono">{__APP_VERSION__}</dd>
+      <dt>Built</dt><dd>{__BUILT_AT__.slice(0, 16).replace('T', ' ')} UTC</dd>
+      <dt>Update</dt><dd>{updates.available ? `available (${updates.remoteVersion})` : updates.lastChecked ? 'up to date' : 'not checked'}</dd>
+    </dl>
+    <div class="actions">
+      <button class="btn" type="button" onclick={() => updates.check()}>Check for update</button>
+      <button class="btn" type="button" onclick={copyAll}>Copy diagnostics report</button>
+    </div>
+    {#if message}<p class="small muted">{message}</p>{/if}
+  </section>
+
+  <section class="group">
+    <div class="actions">
+      <button class="btn danger" type="button" onclick={wipe} disabled={pipeline.running}>Delete all data</button>
+    </div>
+  </section>
+</main>
+
+<style>
+  .settings {
+    padding: calc(var(--space-2) + var(--safe-top)) calc(var(--space-4) + var(--safe-right)) calc(var(--space-7) + var(--safe-bottom))
+      calc(var(--space-4) + var(--safe-left));
+    max-width: 720px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+  }
+
+  .top {
+    margin: 0 calc(-1 * var(--space-3));
+  }
+
+  .group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .probe {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    min-height: var(--touch);
+    font-size: var(--text-s);
+  }
+
+  select {
+    min-height: 36px;
+    font-size: 16px;
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius-s);
+    background: var(--color-surface);
+    padding: 0 var(--space-2);
+  }
+
+  .small {
+    font-size: var(--text-s);
+  }
+</style>
