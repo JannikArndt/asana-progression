@@ -14,9 +14,11 @@
   interface Props {
     video: Video;
     analysis: Analysis | null;
+    /** Re-runs detection and reconciles labels (provided by the review screen). */
+    rerun?: (params: DetectionParams, onProgress: (done: number, total: number) => void) => Promise<void>;
     onchanged: () => void;
   }
-  let { video, analysis, onchanged }: Props = $props();
+  let { video, analysis, rerun: rerunWith, onchanged }: Props = $props();
 
   let params = $state<DetectionParams>({ ...DEFAULT_PARAMS });
   let busy = $state<string | null>(null);
@@ -38,10 +40,15 @@
     busy = 'Re-running detection…';
     message = null;
     try {
-      await pipeline.reanalyze(video.id, $state.snapshot(params), (d, t) => (busy = `Re-running detection… ${Math.round((100 * d) / Math.max(1, t))}%`));
-      invalidateSamples(video.id);
-      await app.refresh();
-      onchanged();
+      const progress = (d: number, t: number) => (busy = `Re-running detection… ${Math.round((100 * d) / Math.max(1, t))}%`);
+      if (rerunWith) {
+        await rerunWith($state.snapshot(params), progress);
+      } else {
+        await pipeline.reanalyze(video.id, $state.snapshot(params), progress);
+        invalidateSamples(video.id);
+        await app.refresh();
+        onchanged();
+      }
       message = 'Detection updated.';
     } catch (e) {
       message = `Failed: ${e instanceof Error ? e.message : String(e)}`;
@@ -133,7 +140,7 @@
   async function remove() {
     const ok = await dialog.ask({
       title: 'Delete this video?',
-      message: 'Removes the analysis and stored samples. The original video file is not touched.',
+      message: 'Removes the analysis, its labeled holds and stored samples. The original video file is not touched.',
       options: [
         { id: 'delete', label: 'Delete', kind: 'danger' },
         { id: 'cancel', label: 'Cancel', kind: 'quiet' },
@@ -143,10 +150,16 @@
     await app.db.analyses.delete(video.id);
     await app.db.jobs.delete(video.id);
     await app.db.videos.delete(video.id);
+    for (const h of await app.db.holds.findBy('videoId', video.id)) await app.db.holds.delete(h.id);
+    for (const s of await app.db.sessions.findBy('videoIds', video.id)) {
+      const videoIds = s.videoIds.filter((v) => v !== video.id);
+      if (videoIds.length) await app.db.sessions.put({ ...s, videoIds });
+      else await app.db.sessions.delete(s.id);
+    }
     await deleteFile(sampleFileName(video.id));
     invalidateSamples(video.id);
     await app.refresh();
-    router.go({ name: 'home' }, true);
+    router.go({ name: 'home', tab: 'sessions' }, true);
   }
 
   $effect(() => {

@@ -13,11 +13,18 @@ export interface Box {
   h: number;
 }
 
+/** Coarse body orientation; a pose model can classify frames into these (crop module, M3). */
+export type PostureClass = 'standing' | 'seated' | 'lying' | 'inverted' | 'arm-balance';
+
 /** Core entity; lettered variants are separate asanas. */
 export interface Asana {
   id: string;
   name: string;
   sided: boolean;
+  /** Catalog section for display, e.g. "Standing". */
+  group?: string;
+  /** Expected posture class (used to sanity-check template suggestions). */
+  posture?: PostureClass;
 }
 
 /** Suggestion data only. */
@@ -64,6 +71,13 @@ export interface ProcessingStats {
   skipNonReference: boolean;
 }
 
+/** A detected (or manually added) hold candidate under review. */
+export interface ReviewCandidate extends Candidate {
+  /** Set when the candidate is labeled. */
+  holdId?: string;
+  origin?: 'detected' | 'manual';
+}
+
 export interface Analysis {
   videoId: string;
   params: DetectionParams;
@@ -75,7 +89,7 @@ export interface Analysis {
   C: Float32Array;
   threshold: number;
   singleStill: boolean;
-  candidates: Candidate[];
+  candidates: ReviewCandidate[];
   preMerge: Candidate[];
   createdAt: string;
   stats: ProcessingStats | null;

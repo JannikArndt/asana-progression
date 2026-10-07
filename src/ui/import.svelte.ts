@@ -1,6 +1,7 @@
 import { fingerprint, openVideo, targetSize, type VideoMeta } from '../source';
 import { estimateStorage, requestPersistence, wouldExceedQuota } from '../storage';
-import { newId, type Video } from '../model';
+import { newId, PRIMARY_SERIES_ID, type Session, type Video } from '../model';
+import { dayOf, sessionOfVideo, SHORT_CLIP_S } from './state/session-data';
 import { app } from './state/app.svelte';
 import { dialog } from './state/dialog.svelte';
 import { router } from './state/router.svelte';
@@ -17,16 +18,39 @@ function estimateSampleBytes(meta: VideoMeta): number {
   return Math.ceil(meta.durationS * p.sampleHz) * frame;
 }
 
+function day(meta: VideoMeta): string {
+  return dayOf(meta.recordedAt);
+}
+
 function dateLabel(iso: string | null): string {
   if (!iso) return 'unknown date';
   return iso.slice(0, 16).replace('T', ' ');
 }
 
-/** Import flow: probe → fingerprint → duplicate/resume dialog → quota check → process. */
+/** Asks which template drives suggestions for a new session. Null = cancelled. */
+async function chooseTemplate(meta: VideoMeta): Promise<string | undefined | null> {
+  const short = meta.durationS < SHORT_CLIP_S;
+  const primary = { id: 'primary', label: 'Primary series', detail: 'Suggest labels in series order.' };
+  const none = { id: 'none', label: 'None', detail: 'Single pose or freeform practice: suggest by recent use.' };
+  const choice = await dialog.ask({
+    title: 'Suggestions for this session',
+    message: `${meta.fileName} · ${Math.round(meta.durationS / 60)} min`,
+    options: [
+      ...(short ? [{ ...none, kind: 'primary' as const }, primary] : [{ ...primary, kind: 'primary' as const }, none]),
+      { id: 'cancel', label: 'Cancel', kind: 'quiet' },
+    ],
+  });
+  if (choice === 'cancel') return null;
+  return choice === 'primary' ? PRIMARY_SERIES_ID : undefined;
+}
+
+/** Import flow: probe → fingerprint → duplicate/resume dialog → session → quota check → process. */
 export async function importFiles(files: File[]): Promise<void> {
   const db = app.db;
   importQueue.total = files.length;
   let lastVideoId: string | null = null;
+  /** Videos recorded on the same day in one batch share a session. */
+  const batchSessions = new Map<string, Session>();
   for (const [i, file] of files.entries()) {
     importQueue.index = i;
     let meta: VideoMeta;
@@ -128,6 +152,24 @@ export async function importFiles(files: File[]): Promise<void> {
       if (go !== 'go') continue;
     }
 
+    let newSession: Session | null = null;
+    let joinSession: Session | null = null;
+    if (!videoId) {
+      const recDay = dayOf(meta.recordedAt);
+      joinSession = (recDay && batchSessions.get(recDay)) || null;
+      if (!joinSession) {
+        const templateId = await chooseTemplate(meta);
+        if (templateId === null) continue;
+        newSession = {
+          id: newId('ses'),
+          date: meta.recordedAt ?? new Date().toISOString(),
+          note: '',
+          videoIds: [],
+          ...(templateId ? { templateId } : {}),
+        };
+      }
+    }
+
     if (!videoId) {
       videoId = newId('vid');
       const video: Video = {
@@ -145,6 +187,10 @@ export async function importFiles(files: File[]): Promise<void> {
         meta: { ...meta } as unknown as Record<string, unknown>,
       };
       await db.videos.put(video);
+      const session = newSession ?? joinSession!;
+      session.videoIds = [...session.videoIds, videoId];
+      await db.sessions.put($state.snapshot(session) as Session);
+      if (day(meta)) batchSessions.set(day(meta), session);
     }
     app.attachFile(videoId, file);
     await app.refresh();
@@ -160,5 +206,9 @@ export async function importFiles(files: File[]): Promise<void> {
     }
   }
   importQueue.total = 0;
-  if (lastVideoId) router.go({ name: 'video', id: lastVideoId }, true);
+  if (lastVideoId) {
+    await app.refresh();
+    const s = sessionOfVideo(app.sessions, lastVideoId);
+    router.go(s ? { name: 'session', id: s.id } : { name: 'home' }, true);
+  }
 }

@@ -33,10 +33,11 @@ API). `src/architecture.test.ts` enforces the allowed dependencies:
 |---|---|---|
 | `detection` | Pure streaming algorithm: pooled gray samples → m(t), C(t), candidates; params; analysis export format | nothing |
 | `source` | File → metadata, fingerprint, gray samples on a 4 Hz grid, exact frame at t, packets for a range, HDR helpers | nothing (+ Mediabunny) |
-| `model` | Shared data model (types only) + `newId` | `detection` types |
+| `model` | Shared data model (types), `newId`, catalog seed + Primary series template | `detection` types |
 | `storage` | `MetadataStore` (IndexedDB, one repository per entity), OPFS sample files, quota helpers | `model` |
-| `ui` | Screens, components, the processing worker; the **only** place modules are wired together | public APIs of all modules |
-| `labeling`, `capture`, `crop`, `progression` | Milestones 2–4 (not created yet) | |
+| `labeling` | Suggestion engine; review edits on candidates (merge, split, add missed, nudge, reconcile); catalog search | `model`, `detection` (best-frame helpers on signals) |
+| `ui` | Screens, components, workers; the **only** place modules are wired together | public APIs of all modules |
+| `capture`, `crop`, `progression` | Milestones 3–4 (not created yet) | |
 
 Imports into another module must go through its `index.ts` or `types.ts`.
 
@@ -56,6 +57,36 @@ the worker restores the detector snapshot and continues from `nextIndex`.
 
 Re-analysis with new parameters reads the stored pooled frames (no decoding) — only
 `sampleHz`, `sampleLongSide` and `pool` require re-importing.
+
+### Labeling (milestone 2)
+
+- Catalog-first: holds reference asanas; a `SequenceTemplate` only drives suggestions. Seeded on
+  first run (`catalogVersion` setting): 62 asanas (21 sided, each with a `group` and a coarse
+  `posture` class) and "Primary series" (84 entries, sided asanas R then L; Utthita Hasta
+  Padangusthasana A/B/C R then A/B/C L; Paschimottanasana A again after Urdhva Dhanurasana;
+  Virabhadrasana B is R then L like everything else — edit in M5 if the practice differs).
+- Sessions: created at import (one per video; files of one batch recorded on the same day share
+  a session). The template is chosen per session at import (default Primary series, "None"
+  preselected for clips < 5 min) and can be switched on the review screen. Milestone-1 videos
+  without a session get one on startup (`AppState.migrate`).
+- Review state lives in `Analysis.candidates` (`ReviewCandidate`: status, `holdId`, `origin`);
+  labels live in `Hold` records. Every action writes immediately — there is never unsaved
+  labeling state.
+- Suggestions (`labeling/suggest.ts`, run in `ui/workers/suggest.worker.ts`): template order,
+  each entry once per session, R before L (template order), skipping allowed. Start after the
+  last confirmed entry; consecutive open cards are projected onto consecutive entries; entries
+  before the next confirmed entry are preferred. If a card's optional posture class contradicts
+  the next entry, look ahead up to 5 entries. Top 3. Without a template (or once it is
+  exhausted): frecency (exp(−age/45 d)) plus a boost for what usually follows the previous
+  asana in past sessions. A label equal to the previous hold's label and side offers a merge
+  (the stiller frame wins).
+- Re-running detection reconciles: labeled holds and manual candidates are kept, dismissals are
+  carried over to overlapping new candidates.
+- Screens: Home (tabs Asanas / Sessions), session review (`#/session/<id>`: timeline, cards with
+  one-tap confirm, picker with search incl. initials like "uhp", actions: choose frame, split,
+  merge with previous, not a pose, full-resolution frame, add missed hold), asana holds list
+  (`#/asana/<id>`, placeholder until the M4 progression view). `#/video/<id>` redirects to the
+  session.
 
 ### Storage layout
 
@@ -129,7 +160,7 @@ candidates and the tiny frames at every best frame). Drop files into
 | `mediabunny` | MP4/MOV demuxing with lazy reads from a `File` (60–90 min 4K files are 10–40 GB), packet access, WebCodecs decoder configs, and MP4 muxing for clip capture (M3) in one tree-shakable, dependency-free TypeScript library. Chosen over mp4box.js, whose push-style `appendBuffer`/`onSamples` API needs manual buffer feeding and has no MP4 writer of comparable ergonomics. |
 | dev: `vite`, `@sveltejs/vite-plugin-svelte` | Build. |
 | dev: `typescript` 6.x, `svelte-check` | Type checking (svelte-check does not support TS 7 yet). |
-| dev: `vitest`, `@vitest/coverage-v8` | Unit tests + coverage thresholds (detection ≥ 98 % lines, storage ≥ 95 %). |
+| dev: `vitest`, `@vitest/coverage-v8` | Unit tests + coverage thresholds (detection, labeling ≥ 98 % lines; storage ≥ 95 %). |
 | dev: `fake-indexeddb` | IndexedDB in Node for storage tests. |
 | dev: `@playwright/test` | Smoke tests in Chromium. |
 
@@ -176,9 +207,9 @@ Fill in from the user's device reports (Settings → "Copy diagnostics report", 
 
 ## Milestones
 
-1. **Spike** (this): source + detection + live timeline graph + debug panel, deployed. ✅ built;
+1. **Spike**: source + detection + live timeline graph + debug panel, deployed. ✅ built;
    waiting for on-device measurements.
-2. Data model + storage + session review / labeling with suggestions.
+2. **Data model + storage + session review / labeling with suggestions.** ✅
 3. Capture (still + clip) + auto-crop with manual override.
 4. Progression view.
 5. Catalog/template editor, backup, re-import flow, design polish.

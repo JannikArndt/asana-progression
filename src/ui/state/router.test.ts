@@ -3,7 +3,16 @@ import { parseHash, routeHash, type Route } from './router.svelte';
 
 describe('router', () => {
   it('round-trips routes', () => {
-    const routes: Route[] = [{ name: 'home' }, { name: 'process' }, { name: 'settings' }, { name: 'video', id: 'vid_a/b' }];
+    const routes: Route[] = [
+      { name: 'home' },
+      { name: 'home', tab: 'sessions' },
+      { name: 'home', tab: 'asanas' },
+      { name: 'process' },
+      { name: 'settings' },
+      { name: 'video', id: 'vid_a/b' },
+      { name: 'session', id: 'ses_1' },
+      { name: 'asana', id: 'navasana' },
+    ];
     for (const r of routes) expect(parseHash(routeHash(r))).toEqual(r);
   });
   it('falls back to home', () => {
