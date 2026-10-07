@@ -69,6 +69,10 @@ export interface ProcessingStats {
   realtimeFactor: number;
   resumedCount: number;
   skipNonReference: boolean;
+  /** Frame → gray implementation and its first-frame benchmark (ms), when known. */
+  grayMethod?: 'canvas' | 'luma' | null;
+  grayBenchmark?: { canvas: number; luma: number } | null;
+  pixelFormat?: string | null;
 }
 
 /** A detected (or manually added) hold candidate under review. */

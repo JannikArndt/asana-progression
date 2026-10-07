@@ -95,7 +95,10 @@
         {#if meta?.codec !== 'hevc' && meta?.codec !== 'avc'}not applicable ({meta?.codec}){:else}{skippedPct}% {pipeline.skipNonReference ? '(non-reference)' : '(skipping off)'}{/if}
       </dd>
       <dt>Frame → gray</dt>
-      <dd>{convertMs.toFixed(1)} ms per sample</dd>
+      <dd>
+        {convertMs.toFixed(1)} ms per sample{s.grayMethod ? ` · ${s.grayMethod}` : ''}{s.pixelFormat ? ` (${s.pixelFormat})` : ''}
+        {#if s.grayBenchmark}<span class="faint"> · canvas {s.grayBenchmark.canvas} ms vs luma {s.grayBenchmark.luma} ms</span>{/if}
+      </dd>
       <dt>Decoder queue max</dt>
       <dd>{s.maxDecodeQueue}</dd>
       <dt>Screen wake lock</dt>

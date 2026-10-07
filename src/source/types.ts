@@ -75,6 +75,11 @@ export interface SamplerStats {
   convertMs: number;
   maxDecodeQueue: number;
   wallMs: number;
+  /** Frame → gray implementation in use, and the first-frame benchmark (ms per frame). */
+  grayMethod: 'canvas' | 'luma' | null;
+  grayBenchmark: { canvas: number; luma: number } | null;
+  /** VideoFrame.format of decoded frames (e.g. NV12). */
+  pixelFormat: string | null;
 }
 
 export interface SampleOptions {
@@ -85,6 +90,8 @@ export interface SampleOptions {
   startIndex?: number;
   /** Skip packets that no other frame references (faster; frames between samples are not needed). */
   skipNonReference?: boolean;
+  /** Pin the frame → gray implementation (otherwise benchmarked on the first frame). */
+  grayMethod?: 'canvas' | 'luma';
   signal?: AbortSignal;
   onStats?: (s: SamplerStats) => void;
 }

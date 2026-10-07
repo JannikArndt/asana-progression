@@ -240,7 +240,7 @@
         <dt>Speed</dt><dd>{stats.realtimeFactor.toFixed(2)}× real time</dd>
         <dt>Frames decoded</dt><dd>{stats.framesDecoded.toLocaleString()} ({(stats.framesDecoded / Math.max(1e-3, stats.decodeWallMs / 1000)).toFixed(0)} fps)</dd>
         <dt>Packets skipped</dt><dd>{stats.packetsSkipped.toLocaleString()} of {stats.packetsRead.toLocaleString()} {stats.skipNonReference ? '' : '(skipping off)'}</dd>
-        <dt>Frame → gray</dt><dd>{analysis ? (stats.convertMs / Math.max(1, analysis.sampleCount)).toFixed(1) : '–'} ms per sample</dd>
+        <dt>Frame → gray</dt><dd>{analysis ? (stats.convertMs / Math.max(1, analysis.sampleCount)).toFixed(1) : '–'} ms per sample{stats.grayMethod ? ` · ${stats.grayMethod}` : ''}{stats.pixelFormat ? ` (${stats.pixelFormat})` : ''}{stats.grayBenchmark ? ` · benchmark canvas ${stats.grayBenchmark.canvas} ms, luma ${stats.grayBenchmark.luma} ms` : ''}</dd>
         <dt>Resumed</dt><dd>{stats.resumedCount}×</dd>
         <dt>Samples</dt><dd>{analysis?.sampleCount.toLocaleString()} × {analysis?.frameWidth}×{analysis?.frameHeight} px = {formatBytes((analysis?.sampleCount ?? 0) * (analysis?.frameWidth ?? 0) * (analysis?.frameHeight ?? 0))}</dd>
         <dt>Threshold C</dt><dd>{analysis?.threshold.toFixed(3)}{analysis?.singleStill ? ' (single-still clip)' : ''}</dd>

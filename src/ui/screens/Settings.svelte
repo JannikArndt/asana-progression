@@ -1,6 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { estimateStorage, opfsUsage, requestPersistence, type QuotaProbeResult, type StorageEstimateInfo } from '../../storage';
+  import {
+    estimateStorage,
+    listOpfs,
+    planCleanup,
+    removeOpfsPath,
+    requestPersistence,
+    sampleFileName,
+    type CleanupPlan,
+    type QuotaProbeResult,
+    type StorageEstimateInfo,
+  } from '../../storage';
   import { app } from '../state/app.svelte';
   import { router } from '../state/router.svelte';
   import { dialog } from '../state/dialog.svelte';
@@ -10,16 +20,50 @@
 
   let est = $state<StorageEstimateInfo | null>(null);
   let opfs = $state<number | null>(null);
+  let plan = $state<CleanupPlan | null>(null);
+  let cleaning = $state(false);
+  let cleanMessage = $state<string | null>(null);
   let device = $state<DeviceInfo | null>(null);
   let cap = $state(2e9);
   let probing = $state<number | null>(null);
-  let probe = $state<(QuotaProbeResult & { at: string; capBytes: number; before: StorageEstimateInfo | null }) | null>(null);
+  let probe = $state<(QuotaProbeResult & { at: string; capBytes: number; before: StorageEstimateInfo | null; after?: StorageEstimateInfo | null }) | null>(null);
   let hevc = $state<Record<string, boolean | string>>({});
   let message = $state<string | null>(null);
 
   async function refresh() {
     est = await estimateStorage();
-    opfs = await opfsUsage().catch(() => null);
+    try {
+      const entries = await listOpfs();
+      opfs = entries.reduce((s, e) => s + Math.max(0, e.size), 0);
+      // Read the references straight from the database so nothing referenced is ever planned for removal.
+      const [videos, assets] = await Promise.all([app.db.videos.all(), app.db.assets.all()]);
+      plan = planCleanup(entries, videos.map((v) => v.id), assets.map((a) => a.storageKey), sampleFileName);
+    } catch {
+      opfs = null;
+      plan = null;
+    }
+  }
+
+  async function cleanUp() {
+    if (!plan || plan.remove.length === 0) return;
+    const ok = await dialog.ask({
+      title: 'Remove leftover files?',
+      message: `${plan.remove.length} file(s), ${formatBytes(plan.removeBytes)}: storage tests and data of deleted videos. Your videos, analyses and labels stay.`,
+      options: [
+        { id: 'go', label: 'Remove', kind: 'primary' },
+        { id: 'cancel', label: 'Cancel', kind: 'quiet' },
+      ],
+    });
+    if (ok !== 'go') return;
+    cleaning = true;
+    const before = est?.usage ?? null;
+    await refresh(); // re-plan against the current database right before deleting
+    const removing = plan?.remove ?? [];
+    const bytes = plan?.removeBytes ?? 0;
+    for (const e of removing) await removeOpfsPath(e.path);
+    await refresh();
+    cleaning = false;
+    cleanMessage = `Removed ${removing.length} file(s), ${formatBytes(bytes)}. Safari's usage estimate: ${formatBytes(before)} → ${formatBytes(est?.usage ?? null)}.`;
   }
 
   async function checkCodecs() {
@@ -45,9 +89,12 @@
     hevc = out;
   }
 
+  $effect(() => {
+    if (app.ready) void refresh();
+  });
+
   onMount(() => {
     device = deviceInfo();
-    void refresh();
     void checkCodecs();
     void app.db.settings.get<typeof probe>('diag.quotaProbe').then((p) => (probe = p ?? null));
   });
@@ -72,7 +119,7 @@
     probing = 0;
     try {
       const r = await pipeline.probeQuota(cap, (b) => (probing = b));
-      probe = { ...r, at: new Date().toISOString(), capBytes: cap, before };
+      probe = { ...r, at: new Date().toISOString(), capBytes: cap, before, after: await estimateStorage() };
       await app.db.settings.set('diag.quotaProbe', $state.snapshot(probe));
     } finally {
       probing = null;
@@ -136,12 +183,30 @@
     <dl class="kv">
       <dt>Quota (estimate)</dt><dd>{formatBytes(est?.quota)}</dd>
       <dt>Usage (estimate)</dt><dd>{formatBytes(est?.usage)}</dd>
-      <dt>Analysis samples (OPFS)</dt><dd>{formatBytes(opfs)}</dd>
+      <dt>Files in app storage</dt><dd>{formatBytes(opfs)}</dd>
       <dt>Persistent</dt><dd>{est?.persisted === null || est === null ? 'unknown' : est.persisted ? 'yes' : 'no'}</dd>
     </dl>
+    {#if plan}
+      <dl class="kv">
+        <dt>Kept</dt><dd>{plan.keep.length} file(s), {formatBytes(plan.keep.reduce((s, e) => s + Math.max(0, e.size), 0))}</dd>
+        <dt>Leftovers</dt><dd>{plan.remove.length ? `${plan.remove.length} file(s), ${formatBytes(plan.removeBytes)}` : 'none'}</dd>
+      </dl>
+      {#if plan.remove.length}
+        <ul class="leftovers small muted">
+          {#each plan.remove as e (e.path)}<li>{e.path} · {formatBytes(e.size)}</li>{/each}
+        </ul>
+      {/if}
+    {/if}
+    <p class="small muted">
+      Safari's usage estimate can stay high after files are deleted; the file list above is what is actually stored.
+    </p>
     <div class="actions">
+      <button class="btn" type="button" onclick={cleanUp} disabled={!plan || plan.remove.length === 0 || cleaning || pipeline.running}>
+        {cleaning ? 'Removing…' : 'Remove leftovers'}
+      </button>
       <button class="btn" type="button" onclick={persist}>Request persistent storage</button>
     </div>
+    {#if cleanMessage}<p class="small muted">{cleanMessage}</p>{/if}
     <div class="probe">
       <label class="row">
         <span>Measure writable space up to</span>
@@ -159,7 +224,9 @@
       {#if probe}
         <p class="small muted">
           {probe.at.slice(0, 16).replace('T', ' ')}: wrote {formatBytes(probe.bytesWritten)} in {(probe.ms / 1000).toFixed(1)} s,
-          stopped by {probe.stoppedBy}{probe.error ? ` (${probe.error})` : ''}.
+          stopped by {probe.stoppedBy}{probe.error ? ` (${probe.error})` : ''}. The test file was deleted right away{probe.after
+            ? `; Safari's estimate afterwards: ${formatBytes(probe.after.usage)}`
+            : ''}.
         </p>
       {/if}
     </div>
@@ -265,5 +332,11 @@
 
   .small {
     font-size: var(--text-s);
+  }
+
+  .leftovers {
+    margin: 0;
+    padding-left: var(--space-4);
+    overflow-wrap: anywhere;
   }
 </style>

@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { asanaStats, dayOf, historyFrom, itemKey, orphanVideos, parseItemKey, sessionEntries, sessionOfVideo, summarizeSession, toReviewItems } from './session-data';
+import {
+  asanaStats,
+  combineSessions,
+  compareVideos,
+  dayOf,
+  groupByDay,
+  historyFrom,
+  itemKey,
+  orphanVideos,
+  parseItemKey,
+  sameDaySessions,
+  sessionEntries,
+  sessionOfVideo,
+  summarizeSession,
+  toReviewItems,
+} from './session-data';
 import type { Analysis, Hold, ReviewCandidate, Session, Video } from '../../model';
 import { DEFAULT_PARAMS } from '../../detection';
 
@@ -70,5 +85,44 @@ describe('session data', () => {
     expect(dayOf(null)).toBe('');
     expect(parseItemKey(itemKey('vid_1', 'cand-12'))).toEqual({ videoId: 'vid_1', candidateId: 'cand-12' });
     expect(sessionOfVideo([s1, s2], 'v3')?.id).toBe('s2');
+  });
+});
+
+describe('same-day sessions', () => {
+  const v = (id: string, fileName: string, recordedAt: string | null, importedAt = '2026-10-07T10:00:00Z'): Video => ({
+    ...video(id, 10),
+    fileName,
+    recordedAt,
+    importedAt,
+  });
+  const clips = [
+    v('a', '7 Sarvangasana.mp4', '2025-08-28T18:04:43+02:00'),
+    v('b', '4 Ubhaya.mp4', '2025-08-28T18:04:43+02:00'),
+    v('c', '10 Savasana.mp4', '2025-08-28T18:04:43+02:00'),
+    v('d', 'other.mp4', '2025-08-29T07:00:00+02:00'),
+    v('e', 'nodate.mp4', null, '2026-01-02T03:04:05Z'),
+  ];
+
+  it('orders videos by time, then numerically by name', () => {
+    expect([...clips].sort(compareVideos).map((x) => x.id)).toEqual(['e', 'b', 'a', 'c', 'd']);
+  });
+
+  it('groups by recording day', () => {
+    const g = groupByDay(clips);
+    expect(g.get('2025-08-28')!.map((x) => x.id)).toEqual(['b', 'a', 'c']);
+    expect(g.get('2026-01-02')!.map((x) => x.id)).toEqual(['e']);
+  });
+
+  it('finds and combines same-day sessions', () => {
+    const t: Session = { id: 't', date: '2025-08-28T18:04:43+02:00', note: 'warm', videoIds: ['a'], templateId: 'primary-series' };
+    const o1: Session = { id: 'o1', date: '2025-08-28T18:04:43+02:00', note: '', videoIds: ['b'] };
+    const o2: Session = { id: 'o2', date: '2025-08-28T19:00:00+02:00', note: 'tired', videoIds: ['c', 'zz'] };
+    const other: Session = { id: 'x', date: '2025-08-29T07:00:00+02:00', note: '', videoIds: ['d'] };
+    expect(sameDaySessions([t, o1, o2, other], t).map((s) => s.id)).toEqual(['o1', 'o2']);
+    const holds = [hold('h1', 'o1', 'b', 'ubhaya-padangusthasana', 1), hold('h2', 't', 'a', 'salamba-sarvangasana', 1), hold('h3', 'x', 'd', 'navasana', 1)];
+    const r = combineSessions(t, [o1, o2], clips, holds);
+    expect(r.session).toMatchObject({ id: 't', videoIds: ['b', 'a', 'c', 'zz'], note: 'warm · tired', templateId: 'primary-series' });
+    expect(r.holds).toEqual([{ ...holds[0], sessionId: 't' }]);
+    expect(r.deleteIds).toEqual(['o1', 'o2']);
   });
 });

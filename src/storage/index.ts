@@ -9,3 +9,4 @@ export {
   sampleFileName,
 } from './samples';
 export { estimateStorage, requestPersistence, wouldExceedQuota, probeOpfsQuota, probeWritable } from './quota';
+export { listOpfs, removeOpfsPath, planCleanup, type OpfsEntry, type CleanupPlan } from './opfs';

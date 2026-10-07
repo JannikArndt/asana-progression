@@ -167,3 +167,21 @@ describe('nextEntries', () => {
     expect(nextEntries([open('x')], 'x', primary, catalog).length).toBe(8);
   });
 });
+
+describe('real session: finishing sequence', () => {
+  it('suggests the next eight finishing asanas after confirming Salamba Sarvangasana', () => {
+    const start = idx('salamba-sarvangasana');
+    const items = [labeled('h0', 'salamba-sarvangasana', null, start), ...Array.from({ length: 8 }, (_, i) => open(`h${i + 1}`))];
+    const s = suggest(items, catalog, primary, []);
+    expect(Array.from({ length: 8 }, (_, i) => s[`h${i + 1}`]![0]!.asanaId)).toEqual([
+      'halasana',
+      'karnapidasana',
+      'urdhva-padmasana',
+      'pindasana',
+      'matsyasana',
+      'uttana-padasana',
+      'sirsasana-a',
+      'sirsasana-b',
+    ]);
+  });
+});

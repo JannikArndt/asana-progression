@@ -48,6 +48,7 @@ function emptyStats(skip: boolean): ProcessingStats {
 
 function combine(base: ProcessingStats, run: SamplerStats | null, mediaS: number): ProcessingStats {
   if (!run) return base;
+  const method = run.grayMethod ?? base.grayMethod ?? null;
   const wall = base.decodeWallMs + run.wallMs;
   const prevMedia = base.realtimeFactor * (base.decodeWallMs / 1000);
   return {
@@ -58,6 +59,9 @@ function combine(base: ProcessingStats, run: SamplerStats | null, mediaS: number
     packetsSkipped: base.packetsSkipped + run.packetsSkipped,
     convertMs: base.convertMs + run.convertMs,
     realtimeFactor: wall > 0 ? (prevMedia + mediaS) / (wall / 1000) : 0,
+    grayMethod: method,
+    grayBenchmark: run.grayBenchmark ?? base.grayBenchmark ?? null,
+    pixelFormat: run.pixelFormat ?? base.pixelFormat ?? null,
   };
 }
 
@@ -154,6 +158,8 @@ async function analyze(req: Extract<WorkerRequest, { type: 'analyze' }>) {
       longSide: p.sampleLongSide,
       startIndex,
       skipNonReference: req.skipNonReference,
+      // A resumed run must keep the first run's gray conversion (different filters shift gray levels).
+      ...(startIndex > 0 && base.grayMethod ? { grayMethod: base.grayMethod } : {}),
       signal: abort.signal,
       onStats: (s) => (sampler = s),
     });
