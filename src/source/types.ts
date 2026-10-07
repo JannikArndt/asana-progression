@@ -111,6 +111,14 @@ export interface ExactFrame {
   timestampS: number;
 }
 
+/** A decoded frame with its display rotation (caller must close `frame`). */
+export interface TimedFrame {
+  frame: VideoFrame;
+  rotation: Rotation;
+  timestampS: number;
+  durationS: number;
+}
+
 /** Opaque encoded packet for stream-copy (clip capture). */
 export interface SourcePacket {
   data: Uint8Array;
@@ -128,5 +136,9 @@ export interface VideoSource {
   frameAt(timestampS: number): Promise<ExactFrame | null>;
   /** Encoded packets from the key frame at or before `startS` up to `endS` (decode order). */
   packets(startS: number, endS: number): AsyncGenerator<SourcePacket, void, void>;
+  /** Decoded frames with start timestamps in [startS, endS), in presentation order. */
+  frames(startS: number, endS: number): AsyncGenerator<TimedFrame, void, void>;
+  /** WebCodecs decoder config of the video track (for muxing copied packets), null if unknown. */
+  decoderConfig(): Promise<VideoDecoderConfig | null>;
   close(): void;
 }

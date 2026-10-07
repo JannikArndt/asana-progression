@@ -122,7 +122,14 @@ export interface Asset {
   width: number;
   height: number;
   bytes: number;
+  /** Path of the file in the asset store (OPFS), e.g. "assets/<id>.jpg". */
   storageKey: string;
+  /** Still/thumb: captured frame time; clip: captured range (seconds of the source video). */
+  atS?: number;
+  startS?: number;
+  endS?: number;
+  quality?: '720p' | '1080p' | 'original';
+  createdAt?: string;
 }
 
 /** Resumable processing state (one per video being analysed). */

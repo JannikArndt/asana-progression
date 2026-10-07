@@ -55,6 +55,16 @@ export interface SampleReader {
   readRange(from: number, to: number): Promise<Uint8Array>;
 }
 
+/** Binary assets (stills, thumbnails, clips) in OPFS, addressed by storage key ("assets/<id>.jpg"). */
+export interface AssetStore {
+  /** Writes (or replaces) a file. Uses a sync access handle in workers, createWritable elsewhere. */
+  put(key: string, data: Blob): Promise<void>;
+  get(key: string): Promise<Blob | null>;
+  delete(key: string): Promise<void>;
+  /** Total bytes of all assets. */
+  usage(): Promise<number>;
+}
+
 export interface StorageEstimateInfo {
   quota: number | null;
   usage: number | null;
