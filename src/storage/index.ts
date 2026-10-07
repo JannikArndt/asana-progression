@@ -10,3 +10,4 @@ export {
 } from './samples';
 export { estimateStorage, requestPersistence, wouldExceedQuota, probeOpfsQuota, probeWritable } from './quota';
 export { listOpfs, removeOpfsPath, planCleanup, type OpfsEntry, type CleanupPlan } from './opfs';
+export { OpfsAssetStore, MemoryAssetStore, assetKey, mimeForKey, ASSET_DIR } from './assets';
