@@ -14,8 +14,8 @@ export type * from './types';
 export { DEFAULT_PARAMS, PARAM_SPECS, normalizeParams, needsResample, SAMPLING_PARAM_KEYS } from './params';
 export type { ParamSpec } from './params';
 export { poolGray } from './signals';
-export { findCandidates } from './candidates';
-export { percentile, meanAbsDiff } from './stats';
+export { findCandidates, bestIndex as bestFrameIndex } from './candidates';
+export { percentile, meanAbsDiff, lowestWindow as lowestSumWindow } from './stats';
 
 export interface DetectionOutput {
   signals: Signals;

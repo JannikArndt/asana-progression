@@ -37,7 +37,8 @@ export function joinGaps(runs: Array<[number, number]>, maxGap: number): Array<[
   return out;
 }
 
-function bestIndex(m: Float32Array, start: number, end: number, middle: number): number {
+/** Best frame: argmin m inside the middle `middle` fraction of [start, end). */
+export function bestIndex(m: ArrayLike<number>, start: number, end: number, middle: number): number {
   const len = end - start;
   const margin = Math.floor((len * (1 - middle)) / 2);
   const a = start + margin;

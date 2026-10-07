@@ -1,24 +1,46 @@
 import { DEFAULT_PARAMS, normalizeParams, type DetectionParams } from '../../detection';
 import { openMetadataStore, type MetadataStore } from '../../storage';
-import type { Analysis, ProcessingJob, Video } from '../../model';
+import {
+  newId,
+  primarySeriesTemplate,
+  PRIMARY_SERIES_ID,
+  SEED_ASANAS,
+  type Analysis,
+  type Asana,
+  type Hold,
+  type ProcessingJob,
+  type SequenceTemplate,
+  type Session,
+  type Video,
+} from '../../model';
 import { openVideo, type VideoSource } from '../../source';
 import { SvelteMap } from 'svelte/reactivity';
+import { orphanVideos, SHORT_CLIP_S } from './session-data';
 
 export interface AnalysisSummary {
   videoId: string;
-  candidates: number;
+  candidates: Analysis['candidates'];
   sampleCount: number;
+  sampleHz: number;
+  frameWidth: number;
+  frameHeight: number;
   createdAt: string;
 }
+
+const CATALOG_VERSION = 1;
 
 /** App-wide state: the metadata store, lists for the home screen, session-only file handles. */
 class AppState {
   store: MetadataStore | null = null;
   ready = $state(false);
   error = $state<string | null>(null);
-  videos = $state<Video[]>([]);
-  summaries = $state<Record<string, AnalysisSummary>>({});
-  jobs = $state<ProcessingJob[]>([]);
+  videos = $state.raw<Video[]>([]);
+  sessions = $state.raw<Session[]>([]);
+  holds = $state.raw<Hold[]>([]);
+  asanas = $state.raw<Asana[]>([]);
+  templates = $state.raw<SequenceTemplate[]>([]);
+  summaries = $state.raw<Record<string, AnalysisSummary>>({});
+  jobs = $state.raw<ProcessingJob[]>([]);
   params = $state<DetectionParams>({ ...DEFAULT_PARAMS });
   skipNonReference = $state(true);
   /** Files picked in this browser session, by video id (needed for exact frames). */
@@ -34,6 +56,8 @@ class AppState {
       ]);
       this.params = normalizeParams(params);
       this.skipNonReference = skip ?? true;
+      await this.seedCatalog();
+      await this.migrate();
       await this.refresh();
       this.ready = true;
     } catch (e) {
@@ -46,15 +70,55 @@ class AppState {
     return this.store;
   }
 
+  /** Seeds the asana catalog and the Primary series template on first run. */
+  private async seedCatalog() {
+    const db = this.db;
+    const version = (await db.settings.get<number>('catalogVersion')) ?? 0;
+    if (version >= CATALOG_VERSION) return;
+    if ((await db.asanas.all()).length === 0) for (const a of SEED_ASANAS) await db.asanas.put({ ...a });
+    if (!(await db.templates.get(PRIMARY_SERIES_ID))) await db.templates.put(primarySeriesTemplate());
+    await db.settings.set('catalogVersion', CATALOG_VERSION);
+  }
+
+  /** Milestone 1 stored videos without sessions: give each its own session. */
+  private async migrate() {
+    const db = this.db;
+    const [sessions, videos] = await Promise.all([db.sessions.all(), db.videos.all()]);
+    for (const v of orphanVideos(sessions, videos)) {
+      await db.sessions.put({
+        id: newId('ses'),
+        date: v.recordedAt ?? v.importedAt,
+        note: '',
+        videoIds: [v.id],
+        ...(v.durationS >= SHORT_CLIP_S ? { templateId: PRIMARY_SERIES_ID } : {}),
+      });
+    }
+  }
+
   async refresh() {
     const db = this.db;
-    const [videos, analyses, jobs] = await Promise.all([db.videos.all(), db.analyses.all(), db.jobs.all()]);
+    const [videos, analyses, jobs, sessions, holds, asanas, templates] = await Promise.all([
+      db.videos.all(),
+      db.analyses.all(),
+      db.jobs.all(),
+      db.sessions.all(),
+      db.holds.all(),
+      db.asanas.all(),
+      db.templates.all(),
+    ]);
     videos.sort((a, b) => (b.recordedAt ?? b.importedAt).localeCompare(a.recordedAt ?? a.importedAt));
+    sessions.sort((a, b) => b.date.localeCompare(a.date));
+    const order = new Map(SEED_ASANAS.map((a, i) => [a.id, i]));
+    asanas.sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9) || a.name.localeCompare(b.name));
     this.videos = videos;
     const summaries: Record<string, AnalysisSummary> = {};
     for (const a of analyses) summaries[a.videoId] = summarize(a);
     this.summaries = summaries;
     this.jobs = jobs;
+    this.sessions = sessions;
+    this.holds = holds;
+    this.asanas = asanas;
+    this.templates = templates;
   }
 
   async saveParams(p: DetectionParams) {
@@ -80,6 +144,24 @@ class AppState {
     return s;
   }
 
+  /** Incremental updates after review edits (avoid reloading everything). */
+  upsertHold(h: Hold) {
+    this.holds = [...this.holds.filter((x) => x.id !== h.id), h];
+  }
+
+  removeHold(id: string) {
+    this.holds = this.holds.filter((x) => x.id !== id);
+  }
+
+  setCandidates(videoId: string, candidates: Analysis['candidates']) {
+    const s = this.summaries[videoId];
+    if (s) this.summaries = { ...this.summaries, [videoId]: { ...s, candidates } };
+  }
+
+  upsertSession(session: Session) {
+    this.sessions = [...this.sessions.filter((x) => x.id !== session.id), session].sort((a, b) => b.date.localeCompare(a.date));
+  }
+
   attachFile(videoId: string, file: File) {
     if (this.files.get(videoId) !== file) {
       this.files.set(videoId, file);
@@ -91,7 +173,15 @@ class AppState {
 }
 
 export function summarize(a: Analysis): AnalysisSummary {
-  return { videoId: a.videoId, candidates: a.candidates.length, sampleCount: a.sampleCount, createdAt: a.createdAt };
+  return {
+    videoId: a.videoId,
+    candidates: a.candidates,
+    sampleCount: a.sampleCount,
+    sampleHz: a.sampleHz,
+    frameWidth: a.frameWidth,
+    frameHeight: a.frameHeight,
+    createdAt: a.createdAt,
+  };
 }
 
 export const app = new AppState();

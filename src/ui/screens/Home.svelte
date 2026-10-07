@@ -1,9 +1,16 @@
 <script lang="ts">
+  import TinyFrame from '../components/TinyFrame.svelte';
   import { app } from '../state/app.svelte';
   import { router } from '../state/router.svelte';
   import { importFiles } from '../import.svelte';
   import { pipeline } from '../pipeline/controller.svelte';
   import { formatDuration, formatTime } from '../components/timeline';
+  import { asanaStats, summarizeSession } from '../state/session-data';
+
+  interface Props {
+    tab?: 'asanas' | 'sessions';
+  }
+  let { tab = 'sessions' }: Props = $props();
 
   let busy = $state(false);
 
@@ -20,14 +27,29 @@
     }
   }
 
-  function dateOf(iso: string | null): string {
-    if (!iso) return 'Unknown date';
-    const d = new Date(iso.length > 19 ? iso : iso + 'Z');
-    if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
-    return iso.slice(0, 10) + ' · ' + iso.slice(11, 16);
+  function shortDate(iso: string | null | undefined): string {
+    if (!iso) return '';
+    const d = new Date(iso.slice(0, 10) + 'T12:00:00Z');
+    return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  }
+
+  function longDate(iso: string): string {
+    const d = new Date(iso.slice(0, 10) + 'T12:00:00Z');
+    return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
   }
 
   const interrupted = $derived(app.jobs.filter((j) => !(pipeline.running && pipeline.videoId === j.videoId)));
+  const stats = $derived(asanaStats(app.sessions, app.holds));
+  const groups = $derived.by(() => {
+    const out: Array<{ group: string; asanas: typeof app.asanas }> = [];
+    for (const a of app.asanas) {
+      const g = a.group ?? 'Other';
+      const last = out[out.length - 1];
+      if (last && last.group === g) last.asanas.push(a);
+      else out.push({ group: g, asanas: [a] });
+    }
+    return out;
+  });
 </script>
 
 <main class="home">
@@ -73,22 +95,57 @@
     <p class="error">{app.error}</p>
   {/if}
 
-  <section class="list">
-    <h2 class="section-title">Videos</h2>
-    {#if app.ready && app.videos.length === 0}
-      <p class="muted empty">No videos yet. Import a practice video to find the holds.</p>
-    {/if}
-    {#each app.videos as v (v.id)}
-      {@const s = app.summaries[v.id]}
-      <button class="row" type="button" onclick={() => router.go({ name: 'video', id: v.id })}>
-        <div class="row-main">
-          <span class="name">{v.fileName}</span>
-          <span class="muted small tabular">{dateOf(v.recordedAt)} · {formatDuration(v.durationS)}</span>
-        </div>
-        <span class="count tabular" class:faint={!s}>{s ? `${s.candidates} holds` : 'not analysed'}</span>
-      </button>
-    {/each}
-  </section>
+  <div class="tabs" role="tablist">
+    <button role="tab" type="button" aria-selected={tab === 'asanas'} class:on={tab === 'asanas'} onclick={() => router.go({ name: 'home', tab: 'asanas' }, true)}>Asanas</button>
+    <button role="tab" type="button" aria-selected={tab === 'sessions'} class:on={tab === 'sessions'} onclick={() => router.go({ name: 'home', tab: 'sessions' }, true)}>Sessions</button>
+  </div>
+
+  {#if tab === 'sessions'}
+    <section class="list" role="tabpanel">
+      {#if app.ready && app.sessions.length === 0}
+        <p class="muted empty">No sessions yet. Import a practice video to find the holds.</p>
+      {/if}
+      {#each app.sessions as s (s.id)}
+        {@const sum = summarizeSession(s, app.videos, app.summaries)}
+        <button class="row" type="button" onclick={() => router.go({ name: 'session', id: s.id })}>
+          <div class="row-main">
+            <span class="name">{longDate(s.date)}</span>
+            <span class="muted small tabular">
+              {formatDuration(sum.durationS)} · {sum.labeled} labeled{sum.open ? ` · ${sum.open} open` : ''}{s.note ? ` · ${s.note}` : ''}
+            </span>
+          </div>
+          <span class="chev">›</span>
+        </button>
+      {/each}
+    </section>
+  {:else}
+    <section class="list" role="tabpanel">
+      {#each groups as g (g.group)}
+        <h2 class="section-title group">{g.group}</h2>
+        {#each g.asanas as a (a.id)}
+          {@const st = stats.get(a.id)}
+          {@const sum = st?.latest ? app.summaries[st.latest.videoId] : undefined}
+          <button class="row asana" class:empty-asana={!st} type="button" onclick={() => router.go({ name: 'asana', id: a.id })}>
+            <div class="thumb">
+              {#if st?.latest && sum}
+                <TinyFrame
+                  videoId={st.latest.videoId}
+                  frameWidth={sum.frameWidth}
+                  frameHeight={sum.frameHeight}
+                  index={Math.round(st.latest.bestS * sum.sampleHz)}
+                  alt=""
+                />
+              {/if}
+            </div>
+            <div class="row-main">
+              <span class="name">{a.name}</span>
+              <span class="muted small tabular">{st ? `${st.count} ${st.count === 1 ? 'hold' : 'holds'} · ${shortDate(st.latestDate)}` : 'No holds yet'}</span>
+            </div>
+          </button>
+        {/each}
+      {/each}
+    </section>
+  {/if}
 </main>
 
 <style>
@@ -149,6 +206,28 @@
     }
   }
 
+  .tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 2px;
+    border-radius: var(--radius-m);
+    background: var(--color-neutral-tint);
+  }
+
+  .tabs button {
+    min-height: 40px;
+    border: 0;
+    border-radius: calc(var(--radius-m) - 2px);
+    background: transparent;
+    font-weight: var(--weight-medium);
+    color: var(--color-text-2);
+  }
+
+  .tabs button.on {
+    background: var(--color-surface);
+    color: var(--color-text);
+  }
+
   .small {
     font-size: var(--text-s);
   }
@@ -156,11 +235,10 @@
   .list {
     display: flex;
     flex-direction: column;
-    margin-top: var(--space-3);
   }
 
-  .list h2 {
-    margin-bottom: var(--space-2);
+  .group {
+    margin: var(--space-4) 0 var(--space-1);
   }
 
   .empty {
@@ -170,7 +248,6 @@
   .row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: var(--space-3);
     min-height: 60px;
     padding: var(--space-2) 0;
@@ -184,6 +261,7 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+    flex: 1;
   }
 
   .name {
@@ -193,10 +271,24 @@
     white-space: nowrap;
   }
 
-  .count {
+  .chev {
+    color: var(--color-text-3);
+    font-size: var(--text-xl);
+  }
+
+  .thumb {
     flex: none;
-    font-size: var(--text-s);
-    color: var(--color-text-2);
+    width: 72px;
+    aspect-ratio: 16 / 9;
+    border-radius: var(--radius-s);
+    overflow: hidden;
+    background: var(--color-neutral-tint);
+    display: flex;
+    align-items: center;
+  }
+
+  .empty-asana {
+    opacity: 0.45;
   }
 
   .error {

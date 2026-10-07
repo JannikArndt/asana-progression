@@ -8,11 +8,12 @@ import { describe, expect, it } from 'vitest';
  *  - detection, source: no imports from other modules
  *  - model: type-only imports from detection/types
  *  - storage: may import model
+ *  - labeling: may import model and detection (best-frame helpers on signals)
  *  - ui: the only composition layer; imports other modules only through their index (or types)
  * Tests and fixtures are exempt.
  */
 const SRC = resolve(import.meta.dirname);
-const MODULES = ['detection', 'source', 'storage', 'model', 'ui'] as const;
+const MODULES = ['detection', 'source', 'storage', 'model', 'labeling', 'ui'] as const;
 type Module = (typeof MODULES)[number];
 
 const ALLOWED: Record<Module, Module[]> = {
@@ -20,7 +21,8 @@ const ALLOWED: Record<Module, Module[]> = {
   source: [],
   model: ['detection'],
   storage: ['model'],
-  ui: ['detection', 'source', 'storage', 'model'],
+  labeling: ['model', 'detection'],
+  ui: ['detection', 'source', 'storage', 'model', 'labeling'],
 };
 
 function files(dir: string): string[] {
@@ -65,7 +67,7 @@ describe('module boundaries', () => {
   });
 
   it('every module has types.ts and index.ts', () => {
-    for (const mod of ['detection', 'source', 'storage', 'model']) {
+    for (const mod of ['detection', 'source', 'storage', 'model', 'labeling']) {
       expect(statSync(join(SRC, mod, 'types.ts')).isFile()).toBe(true);
       expect(statSync(join(SRC, mod, 'index.ts')).isFile()).toBe(true);
     }

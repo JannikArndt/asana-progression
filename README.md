@@ -8,9 +8,10 @@ no uploads, no backend.
 
 ## Status
 
-Milestone 1 (spike): import a video, watch the posture-change graph draw itself while the video
-is decoded, review the detected holds on a zoomable timeline, tune detection parameters, and
-collect device diagnostics (decode speed, file handover, HDR rendering, storage quota).
+Milestones 1–2: import a video, watch the posture-change graph draw itself while the video
+is decoded, label the detected holds with one tap (suggestions follow the Primary series or your
+recent practice), fix them up (choose frame, split, merge, add missed holds), browse holds per
+asana, tune detection parameters, and collect device diagnostics.
 
 ## Development
 
