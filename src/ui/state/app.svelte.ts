@@ -5,8 +5,10 @@ import {
   primarySeriesTemplate,
   PRIMARY_SERIES_ID,
   SEED_ASANAS,
+  sortCatalog,
   type Analysis,
   type Asana,
+  type Asset,
   type Hold,
   type ProcessingJob,
   type SequenceTemplate,
@@ -15,7 +17,7 @@ import {
 } from '../../model';
 import { openVideo, type VideoSource } from '../../source';
 import { SvelteMap } from 'svelte/reactivity';
-import { orphanVideos, SHORT_CLIP_S } from './session-data';
+import { dayOf, groupByDay, orphanVideos, SHORT_CLIP_S } from './session-data';
 
 export interface AnalysisSummary {
   videoId: string;
@@ -41,6 +43,8 @@ class AppState {
   templates = $state.raw<SequenceTemplate[]>([]);
   summaries = $state.raw<Record<string, AnalysisSummary>>({});
   jobs = $state.raw<ProcessingJob[]>([]);
+  assets = $state.raw<Asset[]>([]);
+  clipQuality = $state<'720p' | '1080p' | 'original'>('1080p');
   params = $state<DetectionParams>({ ...DEFAULT_PARAMS });
   skipNonReference = $state(true);
   /** Files picked in this browser session, by video id (needed for exact frames). */
@@ -56,6 +60,7 @@ class AppState {
       ]);
       this.params = normalizeParams(params);
       this.skipNonReference = skip ?? true;
+      this.clipQuality = (await this.store.settings.get<'720p' | '1080p' | 'original'>('clipQuality')) ?? '1080p';
       await this.seedCatalog();
       await this.migrate();
       await this.refresh();
@@ -80,24 +85,32 @@ class AppState {
     await db.settings.set('catalogVersion', CATALOG_VERSION);
   }
 
-  /** Milestone 1 stored videos without sessions: give each its own session. */
+  /** Videos without a session (milestone-1 data): one session per recording day. */
   private async migrate() {
     const db = this.db;
     const [sessions, videos] = await Promise.all([db.sessions.all(), db.videos.all()]);
-    for (const v of orphanVideos(sessions, videos)) {
+    for (const [day, list] of groupByDay(orphanVideos(sessions, videos))) {
+      const existing = sessions.find((s) => dayOf(s.date) === day);
+      if (existing) {
+        existing.videoIds = [...existing.videoIds, ...list.map((v) => v.id)];
+        await db.sessions.put(existing);
+        continue;
+      }
+      const first = list[0]!;
+      const total = list.reduce((s, v) => s + v.durationS, 0);
       await db.sessions.put({
         id: newId('ses'),
-        date: v.recordedAt ?? v.importedAt,
+        date: first.recordedAt ?? first.importedAt,
         note: '',
-        videoIds: [v.id],
-        ...(v.durationS >= SHORT_CLIP_S ? { templateId: PRIMARY_SERIES_ID } : {}),
+        videoIds: list.map((v) => v.id),
+        ...(total >= SHORT_CLIP_S ? { templateId: PRIMARY_SERIES_ID } : {}),
       });
     }
   }
 
   async refresh() {
     const db = this.db;
-    const [videos, analyses, jobs, sessions, holds, asanas, templates] = await Promise.all([
+    const [videos, analyses, jobs, sessions, holds, asanas, templates, assets] = await Promise.all([
       db.videos.all(),
       db.analyses.all(),
       db.jobs.all(),
@@ -105,11 +118,10 @@ class AppState {
       db.holds.all(),
       db.asanas.all(),
       db.templates.all(),
+      db.assets.all(),
     ]);
     videos.sort((a, b) => (b.recordedAt ?? b.importedAt).localeCompare(a.recordedAt ?? a.importedAt));
     sessions.sort((a, b) => b.date.localeCompare(a.date));
-    const order = new Map(SEED_ASANAS.map((a, i) => [a.id, i]));
-    asanas.sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9) || a.name.localeCompare(b.name));
     this.videos = videos;
     const summaries: Record<string, AnalysisSummary> = {};
     for (const a of analyses) summaries[a.videoId] = summarize(a);
@@ -117,8 +129,31 @@ class AppState {
     this.jobs = jobs;
     this.sessions = sessions;
     this.holds = holds;
-    this.asanas = asanas;
-    this.templates = templates;
+    this.asanas = sortCatalog(asanas);
+    this.templates = templates.sort((a, b) => a.name.localeCompare(b.name));
+    this.assets = assets;
+  }
+
+  /** Reloads catalog and templates after an edit. */
+  async refreshCatalog() {
+    const [asanas, templates] = await Promise.all([this.db.asanas.all(), this.db.templates.all()]);
+    this.asanas = sortCatalog(asanas);
+    this.templates = templates.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async setClipQuality(q: '720p' | '1080p' | 'original') {
+    this.clipQuality = q;
+    await this.db.settings.set('clipQuality', q);
+  }
+
+  addAssets(list: Asset[]) {
+    const ids = new Set(list.map((a) => a.id));
+    this.assets = [...this.assets.filter((a) => !ids.has(a.id)), ...list];
+  }
+
+  removeAssets(ids: string[]) {
+    const drop = new Set(ids);
+    this.assets = this.assets.filter((a) => !drop.has(a.id));
   }
 
   async saveParams(p: DetectionParams) {

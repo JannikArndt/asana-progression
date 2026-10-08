@@ -5,12 +5,16 @@ export type Route =
   | { name: 'video'; id: string }
   | { name: 'session'; id: string }
   | { name: 'asana'; id: string }
-  | { name: 'settings' };
+  | { name: 'settings' }
+  | { name: 'catalog' }
+  | { name: 'template'; id: string };
 
 export function parseHash(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
   if (parts[0] === 'process') return { name: 'process' };
   if (parts[0] === 'settings') return { name: 'settings' };
+  if (parts[0] === 'catalog') return { name: 'catalog' };
+  if (parts[0] === 'template' && parts[1]) return { name: 'template', id: parts[1] };
   if (parts[0] === 'video' && parts[1]) return { name: 'video', id: parts[1] };
   if (parts[0] === 'session' && parts[1]) return { name: 'session', id: parts[1] };
   if (parts[0] === 'asana' && parts[1]) return { name: 'asana', id: parts[1] };
@@ -33,6 +37,10 @@ export function routeHash(r: Route): string {
       return `#/session/${encodeURIComponent(r.id)}`;
     case 'asana':
       return `#/asana/${encodeURIComponent(r.id)}`;
+    case 'catalog':
+      return '#/catalog';
+    case 'template':
+      return `#/template/${encodeURIComponent(r.id)}`;
   }
 }
 

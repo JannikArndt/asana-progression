@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openMetadataStore } from './metadata';
 import { MemorySamples, sampleFileName, openSampleReader, openSampleWriter, deleteFile, opfsUsage } from './samples';
 import { estimateStorage, probeWritable, requestPersistence, wouldExceedQuota } from './quota';
+import { listOpfs, planCleanup, removeOpfsPath } from './opfs';
 import { openDatabase } from './idb';
 import type { Analysis, Hold, Video } from '../model/types';
 import { DEFAULT_PARAMS } from '../detection/params';
@@ -130,6 +131,8 @@ describe('OPFS wrappers without OPFS', () => {
     expect(await openSampleReader('x', 4)).toBeNull();
     await expect(deleteFile('x')).resolves.toBeUndefined();
     await expect(opfsUsage()).rejects.toThrow(/OPFS/);
+    await expect(listOpfs()).rejects.toThrow(/OPFS/);
+    await expect(removeOpfsPath('x/y')).resolves.toBeUndefined();
   });
 });
 
@@ -212,6 +215,23 @@ describe('OPFS wrappers with a fake OPFS', () => {
     const r = await probeOpfsQuota(1024);
     expect(r).toMatchObject({ bytesWritten: 1024, stoppedBy: 'cap' });
     expect(files.has('quota-probe.bin')).toBe(false);
+  });
+
+  it('lists, plans and removes leftovers', async () => {
+    const files = fakeOpfs();
+    files.set('samples-v1.bin', new Uint8Array(10));
+    files.set('samples-gone.bin', new Uint8Array(5));
+    files.set('quota-probe.bin', new Uint8Array(7));
+    const entries = await listOpfs();
+    expect(entries.map((e) => e.path)).toEqual(['quota-probe.bin', 'samples-gone.bin', 'samples-v1.bin']);
+    const plan = planCleanup(entries, ['v1'], [], sampleFileName);
+    expect(plan.keep.map((e) => e.path)).toEqual(['samples-v1.bin']);
+    expect(plan.remove.map((e) => e.path)).toEqual(['quota-probe.bin', 'samples-gone.bin']);
+    expect(plan.removeBytes).toBe(12);
+    for (const e of plan.remove) await removeOpfsPath(e.path);
+    await removeOpfsPath('does-not-exist');
+    await removeOpfsPath('');
+    expect([...files.keys()]).toEqual(['samples-v1.bin']);
   });
 
   it('detects short writes', async () => {

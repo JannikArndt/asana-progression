@@ -36,8 +36,10 @@ API). `src/architecture.test.ts` enforces the allowed dependencies:
 | `model` | Shared data model (types), `newId`, catalog seed + Primary series template | `detection` types |
 | `storage` | `MetadataStore` (IndexedDB, one repository per entity), OPFS sample files, quota helpers | `model` |
 | `labeling` | Suggestion engine; review edits on candidates (merge, split, add missed, nudge, reconcile); catalog search | `model`, `detection` (best-frame helpers on signals) |
+| `capture` | Still (exact frame → JPEG q 0.9 + 512 px thumb + preview for the cropper) and clip (720p/1080p H.264 re-encode via WebCodecs, or `original` = stream copy snapped to key frames; falls back to `original` when AVC encoding is unavailable) | `source`, `model` |
+| `crop` | `Cropper` interface; MediaPipe Pose Landmarker (lite, CPU, lazy, Cache Storage `mediapipe-pose-v1` for offline) → body box + coarse posture class; `nullCropper` fallback | `model` |
+| `progression` | Views over holds + assets: items per asana (oldest first), display crop, tile aspect, grid density, swipe, flipbook timing | `model` |
 | `ui` | Screens, components, workers; the **only** place modules are wired together | public APIs of all modules |
-| `capture`, `crop`, `progression` | Milestones 3–4 (not created yet) | |
 
 Imports into another module must go through its `index.ts` or `types.ts`.
 
@@ -84,9 +86,34 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   carried over to overlapping new candidates.
 - Screens: Home (tabs Asanas / Sessions), session review (`#/session/<id>`: timeline, cards with
   one-tap confirm, picker with search incl. initials like "uhp", actions: choose frame, split,
-  merge with previous, not a pose, full-resolution frame, add missed hold), asana holds list
-  (`#/asana/<id>`, placeholder until the M4 progression view). `#/video/<id>` redirects to the
-  session.
+  merge with previous, not a pose, full-resolution frame, add missed hold), asana progression
+  (`#/asana/<id>`). `#/video/<id>` redirects to the session.
+- Labeled holds keep `templateEntryIndex`; `alignToTemplate` re-maps it whenever the session's
+  template was switched or edited, so suggestions never follow stale indices.
+
+### Capture and crop (milestone 3)
+
+- `ui/state/capture.svelte.ts` (`CaptureQueue`) captures in `ui/pipeline/capture.worker.ts`, one
+  video at a time, for every labeled hold whose still/thumb/clip is missing or stale
+  (`capture-plan.ts`: best frame or clip window changed, clip quality changed). Needs the video
+  file picked in this page session; otherwise the hold shows "re-attach" (review banner checks the
+  fingerprint).
+- Files live in OPFS under `assets/<assetId>.<ext>` (`OpfsAssetStore`, written in the worker with
+  sync access handles); records in the `assets` store. Replaced assets are deleted.
+- The cropper runs on the 640 px preview; `crop.auto` = body box + padding. Crops are display
+  metadata only (`manual ?? auto ?? full frame`); `CropEditor` writes `crop.manual`.
+- MediaPipe wasm loader/binary are emitted by the `mediapipe-wasm` Vite plugin at
+  `<base>mediapipe/`, the model is `public/models/pose_landmarker_lite.task` (Apache-2.0).
+  Debug switch: `localStorage['asana.debug.capture'] = '{"cropper":"none"}'` (used by e2e).
+- Safari tone-maps HLG in the decoder, so stills are SDR; only `original` clips keep HDR.
+
+### Progression (milestone 4)
+
+`#/asana/<id>` (`screens/AsanaProgression.svelte`): feed (newest first, date, side, note) or grid
+(2–4 columns, pinch or ctrl+wheel; tiles share the median crop aspect), side filter, viewer
+(`HoldViewer`: swipe through all holds oldest → newest, tap plays the looping clip, pin a hold →
+split slider or crossfade, edit crop, jump to session), flipbook (`Flipbook`: stills in date order,
+0.5–12 per second, preloads ahead). Holds without a still fall back to the tiny analysis frame.
 
 ### Storage layout
 
@@ -125,6 +152,11 @@ keeps C above p55 when there are only a few holds; noise-only holds fragment and
 similar-merge; variants with near-identical silhouettes (e.g. Paschimottanasana A then B) can be
 merged — the review step (M2) needs split.
 
+Real data: `src/detection/__fixtures__/real/sarvangasana-finishing.json` is the user's 7.6 min
+finishing-sequence clip (the validation video). All 9 holds are found with correct best frames
+(the long Sirsasana A is split in 3 and merged back); the fixture test replays it and checks the
+named ground truth.
+
 Optimisation: `skipNonReference` drops packets that no other frame references (HEVC sub-layer
 non-reference NAL types 0,2,…,14; H.264 `nal_ref_idc == 0`) before decoding. Default on; toggle
 in Debug. Measured skip ratio is shown on the processing screen.
@@ -158,6 +190,7 @@ candidates and the tiny frames at every best frame). Drop files into
 |---|---|
 | `svelte` | UI framework (compiled, small runtime). Required by the spec. |
 | `mediabunny` | MP4/MOV demuxing with lazy reads from a `File` (60–90 min 4K files are 10–40 GB), packet access, WebCodecs decoder configs, and MP4 muxing for clip capture (M3) in one tree-shakable, dependency-free TypeScript library. Chosen over mp4box.js, whose push-style `appendBuffer`/`onSamples` API needs manual buffer feeding and has no MP4 writer of comparable ergonomics. |
+| `@mediapipe/tasks-vision` | Pose landmarks for the automatic crop (Apache-2.0). Loaded lazily in the capture worker only; wasm + model self-hosted and cached for offline use. |
 | dev: `vite`, `@sveltejs/vite-plugin-svelte` | Build. |
 | dev: `typescript` 6.x, `svelte-check` | Type checking (svelte-check does not support TS 7 yet). |
 | dev: `vitest`, `@vitest/coverage-v8` | Unit tests + coverage thresholds (detection, labeling ≥ 98 % lines; storage ≥ 95 %). |
@@ -193,23 +226,25 @@ neutral grey, dismissed = hatched.
 Fill in from the user's device reports (Settings → "Copy diagnostics report", Video → Debug →
 "Copy diagnostics").
 
-| Topic | Expectation / source | Measured on device |
+| Topic | Expectation / source | Measured on device (iPhone 15, iOS 18.7, Safari tab, 2026-10-07) |
 |---|---|---|
-| File handover from Photos | Photos picker may compress/transcode unless the picker's Options → Format is set to "Current" (iOS 17: "Options", iOS 18: control icon) — https://support.echo360.com/hc/en-us/articles/38604331326093-Troubleshooting-iOS-Uploads ; picking the same video via Files uploads it unchanged — https://developer.apple.com/forums/thread/731042 | pending |
+| File handover from Photos | Photos picker may compress/transcode unless the picker's Options → Format is set to "Current" (iOS 17: "Options", iOS 18: control icon) — https://support.echo360.com/hc/en-us/articles/38604331326093-Troubleshooting-iOS-Uploads ; picking the same video via Files uploads it unchanged — https://developer.apple.com/forums/thread/731042 | Cropped exports arrived as HEVC Main 10 HLG `video/mp4` with Apple metadata (make/model/software, `com.apple.quicktime.creationdate`); `mvhd` creation_time = export time. Photos vs Files comparison still pending. |
 | File handover from Files | Original file | pending |
-| WebCodecs video decode | Available since Safari 16.4 — https://webkit.org/blog/13966/webkit-features-in-safari-16-4/ ; HEVC Main 10 support to be verified on device (Settings → Video decoding) | pending |
-| Decode speed (60 min 4K60 HEVC) | unknown | pending |
-| Memory peak | Safari exposes no JS memory API; use Web Inspector → Timelines → Memory | pending |
-| OPFS quota | Safari 17+: browser apps up to 60 % of disk per origin, Home Screen web apps the same — https://webkit.org/blog/14403/updates-to-storage-policy/ | pending (Settings → Measure) |
-| Persistent storage | Granted by heuristics, e.g. Home Screen web app — same source | pending |
-| HLG → canvas | unknown; HDR probe compares sRGB/P3 canvas, software tone map and `<video>` | pending |
-| Screen Wake Lock | Since Safari 16.4 — https://webkit.org/blog/13966/webkit-features-in-safari-16-4/ | pending |
+| WebCodecs video decode | Available since Safari 16.4 — https://webkit.org/blog/13966/webkit-features-in-safari-16-4/ | HEVC Main 10 4K supported (`hvc1` and `hev1`), also H.264 and VP9. Decoded frames are `NV12`. |
+| Decode speed | — | 4.1–4.5× real time for 3040×1960 @ 59.94 HEVC Main 10 with non-reference skipping (≈ 50 % of packets skipped). Frame → gray via canvas took ≈ 39 ms per sample = 65 % of wall time → added the luma-plane path (`source/convert.ts`), chosen per video by a first-frame benchmark. |
+| Memory peak | Safari exposes no JS memory API; use Web Inspector → Timelines → Memory | not measured |
+| OPFS quota | Safari 17+: browser apps up to 60 % of disk per origin, Home Screen web apps the same — https://webkit.org/blog/14403/updates-to-storage-policy/ | `estimate().quota` 41.2 GB. Writing: first 1 GB in ≈ 1 s, 5 GB in 81 s (≈ 62 MB/s). Safari's `usage` estimate did **not** drop after the test files were deleted (OPFS listing was back to 9.8 MB) — Settings shows the real file list and removes leftovers. |
+| Persistent storage | Granted by heuristics, e.g. Home Screen web app — same source | `persist()` → false in a Safari tab (Home Screen app not tested yet). |
+| HLG → canvas | — | Safari tone-maps HLG to SDR inside the decoder: frames arrive as 8-bit `NV12`, BT.709 / sRGB transfer, full range. sRGB and Display-P3 canvases are identical (luma 3–236) and look SDR, not HDR. Stills are therefore SDR JPEGs; the "original" clip quality (stream copy) keeps HDR for playback. |
+| Screen Wake Lock | Since Safari 16.4 — https://webkit.org/blog/13966/webkit-features-in-safari-16-4/ | available |
 
 ## Milestones
 
-1. **Spike**: source + detection + live timeline graph + debug panel, deployed. ✅ built;
-   waiting for on-device measurements.
+1. **Spike**: source + detection + live timeline graph + debug panel, deployed. ✅ measured on
+   device (see above).
 2. **Data model + storage + session review / labeling with suggestions.** ✅
-3. Capture (still + clip) + auto-crop with manual override.
-4. Progression view.
-5. Catalog/template editor, backup, re-import flow, design polish.
+3. **Capture (still + clip) + auto-crop with manual override.** ✅
+4. **Progression view.** ✅
+5. Catalog/template editor ✅ (`#/catalog`, `#/template/<id>`; asanas: add/edit/delete when
+   unused; templates: new, rename, insert/move/remove entries, duplicate, delete). Re-import
+   reuses labels and re-captures ✅. Still open: backup export/import (zip), design polish.

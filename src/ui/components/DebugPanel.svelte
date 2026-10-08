@@ -8,6 +8,7 @@
   import { dialog } from '../state/dialog.svelte';
   import { invalidateSamples, sampleReader } from '../state/samples';
   import { pipeline } from '../pipeline/controller.svelte';
+  import { capture, deleteAssets } from '../state/capture.svelte';
   import { assessHandover, copyText, deviceInfo, formatBytes, shareOrDownload } from '../diagnostics';
   import { formatDuration } from './timeline';
 
@@ -110,6 +111,7 @@
         return;
       }
       app.attachFile(video.id, file);
+      capture.request(app.holds.filter((h) => h.videoId === video.id));
       message = 'File attached for this session.';
       void checkSupport();
     } catch (e) {
@@ -150,7 +152,10 @@
     await app.db.analyses.delete(video.id);
     await app.db.jobs.delete(video.id);
     await app.db.videos.delete(video.id);
-    for (const h of await app.db.holds.findBy('videoId', video.id)) await app.db.holds.delete(h.id);
+    for (const h of await app.db.holds.findBy('videoId', video.id)) {
+      await deleteAssets(app.assets.filter((a) => a.holdId === h.id));
+      await app.db.holds.delete(h.id);
+    }
     for (const s of await app.db.sessions.findBy('videoIds', video.id)) {
       const videoIds = s.videoIds.filter((v) => v !== video.id);
       if (videoIds.length) await app.db.sessions.put({ ...s, videoIds });
@@ -240,7 +245,7 @@
         <dt>Speed</dt><dd>{stats.realtimeFactor.toFixed(2)}× real time</dd>
         <dt>Frames decoded</dt><dd>{stats.framesDecoded.toLocaleString()} ({(stats.framesDecoded / Math.max(1e-3, stats.decodeWallMs / 1000)).toFixed(0)} fps)</dd>
         <dt>Packets skipped</dt><dd>{stats.packetsSkipped.toLocaleString()} of {stats.packetsRead.toLocaleString()} {stats.skipNonReference ? '' : '(skipping off)'}</dd>
-        <dt>Frame → gray</dt><dd>{analysis ? (stats.convertMs / Math.max(1, analysis.sampleCount)).toFixed(1) : '–'} ms per sample</dd>
+        <dt>Frame → gray</dt><dd>{analysis ? (stats.convertMs / Math.max(1, analysis.sampleCount)).toFixed(1) : '–'} ms per sample{stats.grayMethod ? ` · ${stats.grayMethod}` : ''}{stats.pixelFormat ? ` (${stats.pixelFormat})` : ''}{stats.grayBenchmark ? ` · benchmark canvas ${stats.grayBenchmark.canvas} ms, luma ${stats.grayBenchmark.luma} ms` : ''}</dd>
         <dt>Resumed</dt><dd>{stats.resumedCount}×</dd>
         <dt>Samples</dt><dd>{analysis?.sampleCount.toLocaleString()} × {analysis?.frameWidth}×{analysis?.frameHeight} px = {formatBytes((analysis?.sampleCount ?? 0) * (analysis?.frameWidth ?? 0) * (analysis?.frameHeight ?? 0))}</dd>
         <dt>Threshold C</dt><dd>{analysis?.threshold.toFixed(3)}{analysis?.singleStill ? ' (single-still clip)' : ''}</dd>

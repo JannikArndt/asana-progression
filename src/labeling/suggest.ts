@@ -232,3 +232,37 @@ export function nextEntries(
   }
   return out;
 }
+
+/**
+ * Re-maps the template entry of every labeled item onto `template`: an index is kept while it
+ * still points at an unused entry with the same asana and side; otherwise (template switched or
+ * edited) the first unused matching entry after the previous labeled one is used, else none.
+ */
+export function alignToTemplate(items: ReviewItem[], template: SequenceTemplate | null): ReviewItem[] {
+  const n = template?.entries.length ?? 0;
+  const taken = new Set<number>();
+  let cursor = -1;
+  return items.map((it) => {
+    if (it.status !== 'labeled' || !it.label) return it;
+    const { templateEntryIndex: idx, ...label } = it.label;
+    const matches = (i: number) => {
+      const e = template!.entries[i]!;
+      return !taken.has(i) && e.asanaId === label.asanaId && (e.side ?? null) === (label.side ?? null);
+    };
+    let found: number | undefined;
+    if (template && idx !== undefined && idx < n && matches(idx)) found = idx;
+    for (let i = cursor + 1; found === undefined && i < n; i++) if (matches(i)) found = i;
+    for (let i = 0; found === undefined && i <= cursor && i < n; i++) if (matches(i)) found = i;
+    if (found === idx) {
+      if (found !== undefined) {
+        taken.add(found);
+        cursor = found;
+      }
+      return it;
+    }
+    if (found === undefined) return { ...it, label };
+    taken.add(found);
+    cursor = found;
+    return { ...it, label: { ...label, templateEntryIndex: found } };
+  });
+}

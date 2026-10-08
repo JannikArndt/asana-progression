@@ -1,5 +1,6 @@
 import { EncodedPacketSink, type InputVideoTrack } from 'mediabunny';
-import { drawRotated, rgbaToGray, targetSize } from './gray';
+import { targetSize } from './gray';
+import { canvasConverter, lumaBits, lumaConverter, timeConverter, type GrayConverter, type GrayMethod } from './convert';
 import { isNonReference, nalLengthSize, type NalCodec } from './nal';
 import type { GraySample, Rotation, SampleOptions, SamplerStats } from './types';
 
@@ -67,18 +68,11 @@ function waitForDequeue(decoder: VideoDecoder): Promise<void> {
   });
 }
 
-function getContext(canvas: OffscreenCanvas, readback: boolean): OffscreenCanvasRenderingContext2D {
-  const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: readback });
-  if (!ctx) throw new Error('OffscreenCanvas 2D is not available');
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  return ctx;
-}
-
 /**
  * Decodes a track sequentially with WebCodecs and yields grayscale frames on the grid t = k / hz.
- * Sample k uses the first decoded frame with timestamp ≥ k / hz. Frames are downscaled in two
- * steps (to ~4× the target, then to the target) to limit aliasing, then converted to luma.
+ * Sample k uses the first decoded frame with timestamp ≥ k / hz. Conversion to gray uses the
+ * faster of a canvas path and a luma-plane path (see convert.ts), chosen on the first frame unless
+ * `opts.grayMethod` pins it (resume must keep the method of the first run).
  */
 export async function* sampleTrack(track: InputVideoTrack, opts: SampleOptions): AsyncGenerator<GraySample, SamplerStats, void> {
   const resolved = await resolveDecoderConfig(track);
@@ -94,10 +88,11 @@ export async function* sampleTrack(track: InputVideoTrack, opts: SampleOptions):
   const dh = await track.getDisplayHeight();
   const target = targetSize(dw, dh, opts.longSide);
   const mid = targetSize(dw, dh, Math.min(Math.max(dw, dh), opts.longSide * 4));
-  const midCanvas = new OffscreenCanvas(mid.width, mid.height);
-  const midCtx = getContext(midCanvas, false);
-  const outCanvas = new OffscreenCanvas(target.width, target.height);
-  const outCtx = getContext(outCanvas, true);
+  const converters: Record<GrayMethod, () => GrayConverter> = {
+    canvas: () => canvasConverter(rotation, mid, target),
+    luma: () => lumaConverter(rotation, target),
+  };
+  let converter: GrayConverter | null = opts.grayMethod ? converters[opts.grayMethod]() : null;
 
   const hz = opts.hz;
   let next = Math.max(0, opts.startIndex ?? 0);
@@ -112,36 +107,69 @@ export async function* sampleTrack(track: InputVideoTrack, opts: SampleOptions):
     convertMs: 0,
     maxDecodeQueue: 0,
     wallMs: 0,
+    grayMethod: converter?.method ?? null,
+    grayBenchmark: null,
+    pixelFormat: null,
   };
+  /** Decoded frames needed for samples, with the sample indices they cover; converted in order. */
+  const pending: Array<{ frame: VideoFrame; indices: number[] }> = [];
   const ready: GraySample[] = [];
   let failure: unknown = null;
 
   const decoder = new VideoDecoder({
     output(frame) {
       stats.framesDecoded++;
-      try {
-        const ts = frame.timestamp / 1e6;
-        if (ts > stats.mediaTimeS) stats.mediaTimeS = ts;
-        if (ts + GRID_TOLERANCE_S < next / hz) return;
-        const t0 = performance.now();
-        drawRotated(midCtx, frame, rotation, mid.width, mid.height);
-        outCtx.drawImage(midCanvas, 0, 0, target.width, target.height);
-        const data = rgbaToGray(outCtx.getImageData(0, 0, target.width, target.height).data);
-        stats.convertMs += performance.now() - t0;
-        while (next / hz <= ts + GRID_TOLERANCE_S) {
-          ready.push({ index: next, timestampS: ts, width: target.width, height: target.height, data });
-          next++;
-        }
-      } catch (e) {
-        failure ??= e;
-      } finally {
+      const ts = frame.timestamp / 1e6;
+      if (ts > stats.mediaTimeS) stats.mediaTimeS = ts;
+      if (ts + GRID_TOLERANCE_S < next / hz) {
         frame.close();
+        return;
       }
+      const indices: number[] = [];
+      while (next / hz <= ts + GRID_TOLERANCE_S) indices.push(next++);
+      pending.push({ frame, indices });
     },
     error(e) {
       failure ??= e;
     },
   });
+
+  /** Picks the faster converter on the first frame (luma only if the pixel format allows it). */
+  async function choose(frame: VideoFrame): Promise<GrayConverter> {
+    stats.pixelFormat = (frame.format as string | null) ?? null;
+    const canvas = converters.canvas();
+    if (!lumaBits(stats.pixelFormat)) {
+      stats.grayMethod = 'canvas';
+      return canvas;
+    }
+    const luma = converters.luma();
+    try {
+      const [c, l] = [await timeConverter(canvas, frame), await timeConverter(luma, frame)];
+      stats.grayBenchmark = { canvas: Math.round(c * 10) / 10, luma: Math.round(l * 10) / 10 };
+      const winner = l < c ? luma : canvas;
+      stats.grayMethod = winner.method;
+      return winner;
+    } catch {
+      stats.grayMethod = 'canvas';
+      return canvas;
+    }
+  }
+
+  async function convertPending() {
+    while (pending.length) {
+      const { frame, indices } = pending.shift()!;
+      try {
+        converter ??= await choose(frame);
+        const ts = frame.timestamp / 1e6;
+        const t0 = performance.now();
+        const data = await converter.convert(frame);
+        stats.convertMs += performance.now() - t0;
+        for (const index of indices) ready.push({ index, timestampS: ts, width: target.width, height: target.height, data });
+      } finally {
+        frame.close();
+      }
+    }
+  }
 
   const sink = new EncodedPacketSink(track);
   let lastStats = 0;
@@ -171,6 +199,7 @@ export async function* sampleTrack(track: InputVideoTrack, opts: SampleOptions):
       while (decoder.decodeQueueSize >= MAX_DECODE_QUEUE) await waitForDequeue(decoder);
       decoder.decode(packet.toEncodedVideoChunk());
       if (decoder.decodeQueueSize > stats.maxDecodeQueue) stats.maxDecodeQueue = decoder.decodeQueueSize;
+      await convertPending();
       while (ready.length) {
         stats.samplesEmitted++;
         yield ready.shift()!;
@@ -180,6 +209,7 @@ export async function* sampleTrack(track: InputVideoTrack, opts: SampleOptions):
     if (!opts.signal?.aborted) {
       await decoder.flush();
       if (failure) throw failure;
+      await convertPending();
       while (ready.length) {
         stats.samplesEmitted++;
         yield ready.shift()!;
@@ -188,6 +218,7 @@ export async function* sampleTrack(track: InputVideoTrack, opts: SampleOptions):
     report(true);
     return stats;
   } finally {
+    for (const p of pending.splice(0)) p.frame.close();
     if (decoder.state !== 'closed') decoder.close();
   }
 }

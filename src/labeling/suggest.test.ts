@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchTemplateEntry, mergeCandidateFor, nextEntries, nextSide, suggest, usedEntries } from './suggest';
+import { alignToTemplate, matchTemplateEntry, mergeCandidateFor, nextEntries, nextSide, suggest, usedEntries } from './suggest';
 import { primarySeriesTemplate, SEED_ASANAS } from '../model/seed';
 import type { Asana, SequenceTemplate } from '../model/types';
 import type { HistoryEntry, ReviewItem } from './types';
@@ -165,5 +165,58 @@ describe('nextEntries', () => {
     expect(nextEntries(items, 'b', primary, catalog, 3).map((l) => l.templateEntryIndex)).toEqual([3, 5, 6]);
     expect(nextEntries(items, 'b', null, catalog)).toEqual([]);
     expect(nextEntries([open('x')], 'x', primary, catalog).length).toBe(8);
+  });
+});
+
+describe('real session: finishing sequence', () => {
+  it('suggests the next eight finishing asanas after confirming Salamba Sarvangasana', () => {
+    const start = idx('salamba-sarvangasana');
+    const items = [labeled('h0', 'salamba-sarvangasana', null, start), ...Array.from({ length: 8 }, (_, i) => open(`h${i + 1}`))];
+    const s = suggest(items, catalog, primary, []);
+    expect(Array.from({ length: 8 }, (_, i) => s[`h${i + 1}`]![0]!.asanaId)).toEqual([
+      'halasana',
+      'karnapidasana',
+      'urdhva-padmasana',
+      'pindasana',
+      'matsyasana',
+      'uttana-padasana',
+      'sirsasana-a',
+      'sirsasana-b',
+    ]);
+  });
+});
+
+describe('alignToTemplate', () => {
+  const t: SequenceTemplate = {
+    id: 't',
+    name: 'T',
+    entries: [{ asanaId: 'a' }, { asanaId: 'b', side: 'R' }, { asanaId: 'b', side: 'L' }, { asanaId: 'a' }],
+  };
+
+  it('keeps valid indices and the identity of unchanged items', () => {
+    const items = [open('o'), labeled('x', 'a', null, 0), labeled('y', 'b', 'R', 1)];
+    const out = alignToTemplate(items, t);
+    expect(out[0]).toBe(items[0]);
+    expect(out[1]).toBe(items[1]);
+    expect(out[2]).toBe(items[2]);
+  });
+
+  it('re-maps indices that point at another entry (template edited or switched)', () => {
+    const out = alignToTemplate([labeled('x', 'b', 'L', 0), labeled('y', 'a', null, 1), labeled('z', 'a', null, 3)], t);
+    expect(out.map((i) => i.label?.templateEntryIndex)).toEqual([2, 3, 0]);
+  });
+
+  it('drops indices without a matching entry and never uses an entry twice', () => {
+    const out = alignToTemplate([labeled('x', 'a', null, 0), labeled('y', 'a', null, 0), labeled('z', 'a', null, 0), labeled('w', 'c', null, 2)], t);
+    expect(out.map((i) => i.label?.templateEntryIndex)).toEqual([0, 3, undefined, undefined]);
+    expect(out[3]!.label).toEqual({ asanaId: 'c', side: null });
+  });
+
+  it('assigns entries to labels that had none, and clears all without a template', () => {
+    expect(alignToTemplate([labeled('x', 'b', 'R')], t)[0]!.label?.templateEntryIndex).toBe(1);
+    const items = [labeled('x', 'b', 'R', 1)];
+    expect(alignToTemplate(items, null)[0]!.label).toEqual({ asanaId: 'b', side: 'R' });
+    const none = [labeled('x', 'q', null)];
+    expect(alignToTemplate(none, null)[0]).toBe(none[0]);
   });
 });

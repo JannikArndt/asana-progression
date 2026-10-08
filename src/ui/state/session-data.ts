@@ -123,3 +123,48 @@ export function orphanVideos(sessions: Session[], videos: Video[]): Video[] {
 
 /** Videos shorter than this default to no template (single-asana clips). */
 export const SHORT_CLIP_S = 5 * 60;
+
+/** Video order inside a session: recording time, then file name with numeric awareness ("4 …" < "10 …"). */
+export function compareVideos(a: Video, b: Video): number {
+  return (a.recordedAt ?? '').localeCompare(b.recordedAt ?? '') || a.fileName.localeCompare(b.fileName, undefined, { numeric: true });
+}
+
+/** Groups videos by recording day (videos without a date use their import day). */
+export function groupByDay(videos: Video[]): Map<string, Video[]> {
+  const out = new Map<string, Video[]>();
+  for (const v of [...videos].sort(compareVideos)) {
+    const d = dayOf(v.recordedAt ?? v.importedAt);
+    const list = out.get(d) ?? [];
+    list.push(v);
+    out.set(d, list);
+  }
+  return out;
+}
+
+/** Other sessions recorded on the same day as `session`. */
+export function sameDaySessions(sessions: Session[], session: Session): Session[] {
+  const d = dayOf(session.date);
+  return sessions.filter((s) => s.id !== session.id && dayOf(s.date) === d);
+}
+
+/**
+ * Combines sessions into `target`: video ids are merged and ordered, holds move to the target.
+ * Returns the updated target, the holds to rewrite and the session ids to delete.
+ */
+export function combineSessions(
+  target: Session,
+  others: Session[],
+  videos: Video[],
+  holds: Hold[],
+): { session: Session; holds: Hold[]; deleteIds: string[] } {
+  const ids = new Set([...target.videoIds, ...others.flatMap((s) => s.videoIds)]);
+  const ordered = videos.filter((v) => ids.has(v.id)).sort(compareVideos).map((v) => v.id);
+  const missing = [...ids].filter((id) => !ordered.includes(id));
+  const otherIds = new Set(others.map((s) => s.id));
+  const notes = [target.note, ...others.map((s) => s.note)].filter(Boolean);
+  return {
+    session: { ...target, videoIds: [...ordered, ...missing], note: [...new Set(notes)].join(' · ') },
+    holds: holds.filter((h) => otherIds.has(h.sessionId)).map((h) => ({ ...h, sessionId: target.id })),
+    deleteIds: [...otherIds],
+  };
+}

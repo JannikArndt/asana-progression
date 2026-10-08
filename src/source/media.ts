@@ -19,6 +19,7 @@ import type {
   Rotation,
   SampleOptions,
   SourcePacket,
+  TimedFrame,
   VideoMeta,
   VideoSource,
 } from './types';
@@ -178,6 +179,21 @@ class MediabunnyVideoSource implements VideoSource {
       if (p.type === 'key' && p.timestamp >= endS && p.sequenceNumber !== first.sequenceNumber) return;
       yield { data: p.data, type: p.type, timestampS: p.timestamp, durationS: p.duration };
     }
+  }
+
+  async *frames(startS: number, endS: number): AsyncGenerator<TimedFrame, void, void> {
+    const sink = new VideoSampleSink(this.track);
+    for await (const sample of sink.samples(startS, endS)) {
+      try {
+        yield { frame: sample.toVideoFrame(), rotation: sample.rotation as Rotation, timestampS: sample.timestamp, durationS: sample.duration };
+      } finally {
+        sample.close();
+      }
+    }
+  }
+
+  async decoderConfig(): Promise<VideoDecoderConfig | null> {
+    return (await resolveDecoderConfig(this.track)).config;
   }
 
   close(): void {
