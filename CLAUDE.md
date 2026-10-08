@@ -245,4 +245,6 @@ Fill in from the user's device reports (Settings → "Copy diagnostics report", 
 2. **Data model + storage + session review / labeling with suggestions.** ✅
 3. **Capture (still + clip) + auto-crop with manual override.** ✅
 4. **Progression view.** ✅
-5. Catalog/template editor, backup, re-import flow, design polish.
+5. Catalog/template editor ✅ (`#/catalog`, `#/template/<id>`; asanas: add/edit/delete when
+   unused; templates: new, rename, insert/move/remove entries, duplicate, delete). Re-import
+   reuses labels and re-captures ✅. Still open: backup export/import (zip), design polish.

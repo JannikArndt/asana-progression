@@ -21,3 +21,10 @@ describe('router', () => {
     expect(parseHash('#/nope')).toEqual({ name: 'home' });
   });
 });
+
+describe('catalog routes', () => {
+  it('round-trips catalog and template routes', () => {
+    expect(parseHash('#/catalog')).toEqual({ name: 'catalog' });
+    expect(parseHash(routeHash({ name: 'template', id: 'a b' }))).toEqual({ name: 'template', id: 'a b' });
+  });
+});

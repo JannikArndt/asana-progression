@@ -5,6 +5,7 @@ import {
   primarySeriesTemplate,
   PRIMARY_SERIES_ID,
   SEED_ASANAS,
+  sortCatalog,
   type Analysis,
   type Asana,
   type Asset,
@@ -121,8 +122,6 @@ class AppState {
     ]);
     videos.sort((a, b) => (b.recordedAt ?? b.importedAt).localeCompare(a.recordedAt ?? a.importedAt));
     sessions.sort((a, b) => b.date.localeCompare(a.date));
-    const order = new Map(SEED_ASANAS.map((a, i) => [a.id, i]));
-    asanas.sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9) || a.name.localeCompare(b.name));
     this.videos = videos;
     const summaries: Record<string, AnalysisSummary> = {};
     for (const a of analyses) summaries[a.videoId] = summarize(a);
@@ -130,9 +129,16 @@ class AppState {
     this.jobs = jobs;
     this.sessions = sessions;
     this.holds = holds;
-    this.asanas = asanas;
-    this.templates = templates;
+    this.asanas = sortCatalog(asanas);
+    this.templates = templates.sort((a, b) => a.name.localeCompare(b.name));
     this.assets = assets;
+  }
+
+  /** Reloads catalog and templates after an edit. */
+  async refreshCatalog() {
+    const [asanas, templates] = await Promise.all([this.db.asanas.all(), this.db.templates.all()]);
+    this.asanas = sortCatalog(asanas);
+    this.templates = templates.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async setClipQuality(q: '720p' | '1080p' | 'original') {

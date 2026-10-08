@@ -179,6 +179,12 @@
   <h2>Settings</h2>
 
   <section class="group">
+    <h3 class="section-title">Catalog</h3>
+    <button class="btn" type="button" onclick={() => router.go({ name: 'catalog' })}>Asanas and templates ›</button>
+    <p class="small muted">Add or edit asanas, and edit the sequence templates used for suggestions.</p>
+  </section>
+
+  <section class="group">
     <h3 class="section-title">Clips</h3>
     <div class="segmented" role="radiogroup" aria-label="Clip quality">
       {#each [['720p', '720p'], ['1080p', '1080p'], ['original', 'Original']] as const as [q, label] (q)}

@@ -167,3 +167,25 @@ test('capture works with the MediaPipe cropper (self-hosted wasm and model)', as
   expect(cached).toEqual(expect.arrayContaining(['vision_wasm_module_internal.wasm', 'pose_landmarker_lite.task']));
   expect(errors).toEqual([]);
 });
+
+test('catalog and template editor', async ({ page }) => {
+  await page.goto('./#/catalog');
+  await page.getByRole('button', { name: 'Add asana' }).click();
+  await page.getByLabel('Name').fill('Parsva Bakasana');
+  await page.getByLabel(/both sides/).check();
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('button', { name: /Parsva Bakasana/ })).toBeVisible();
+
+  await page.getByRole('button', { name: 'New template' }).click();
+  await page.getByLabel('Template name').fill('Arm balances');
+  await page.getByLabel('Template name').press('Enter');
+  await page.getByRole('button', { name: 'Add asanas' }).click();
+  await page.getByPlaceholder('Search asanas').fill('pb');
+  await page.getByRole('button', { name: /^Parsva Bakasana/ }).click();
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(page.locator('.entries li')).toHaveText([/1\s*Parsva Bakasana R/, /2\s*Parsva Bakasana L/]);
+  await page.reload();
+  await expect(page.locator('.entries li')).toHaveCount(2);
+  await page.getByRole('button', { name: '‹ Catalog' }).click();
+  await expect(page.getByRole('button', { name: /Arm balances\s*2 entries/ })).toBeVisible();
+});
