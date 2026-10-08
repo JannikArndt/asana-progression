@@ -1,5 +1,9 @@
 <script lang="ts">
   import TinyFrame from './TinyFrame.svelte';
+  import AssetImage from './AssetImage.svelte';
+  import type { Asset } from '../../model';
+  import type { CaptureStatus } from '../state/capture.svelte';
+  import { effectiveCrop } from '../state/capture-plan';
   import { formatDuration, formatTime } from './timeline';
   import type { Suggestion } from '../../labeling';
   import type { SessionEntry } from '../state/session-data';
@@ -11,13 +15,22 @@
     nameOf: (asanaId: string) => string;
     frame: { width: number; height: number; hz: number };
     selected: boolean;
+    thumb?: Asset | undefined;
+    captureStatus?: CaptureStatus | undefined;
     onselect: () => void;
     onconfirm: () => void;
     onpick: () => void;
     onmore: () => void;
     onrestore: () => void;
   }
-  let { entry, number, suggestion, nameOf, frame, selected, onselect, onconfirm, onpick, onmore, onrestore }: Props = $props();
+  let { entry, number, suggestion, nameOf, frame, selected, thumb, captureStatus, onselect, onconfirm, onpick, onmore, onrestore }: Props = $props();
+  const statusText: Record<CaptureStatus, string> = {
+    queued: 'Waiting to save still…',
+    capturing: 'Saving still and clip…',
+    done: '',
+    error: 'Saving the still failed',
+    'needs-file': 'Select the video again to save the still',
+  };
 
   const c = $derived(entry.candidate);
   const status = $derived(c.status === 'labeled' && entry.hold ? 'labeled' : c.status === 'dismissed' ? 'dismissed' : 'open');
@@ -32,13 +45,17 @@
 
 <article id="card-{entry.key}" class="card review {status}" class:selected data-status={status}>
   <button class="thumb" type="button" onclick={onselect} aria-label="Show hold {number} on the timeline">
-    <TinyFrame
-      videoId={entry.videoId}
-      frameWidth={frame.width}
-      frameHeight={frame.height}
-      index={Math.round(c.bestS * frame.hz)}
-      alt="Best frame of hold {number}"
-    />
+    {#if status === 'labeled' && thumb && entry.hold}
+      <AssetImage asset={thumb} crop={effectiveCrop(entry.hold)} aspect={frame.width / frame.height} alt="Hold {number}" />
+    {:else}
+      <TinyFrame
+        videoId={entry.videoId}
+        frameWidth={frame.width}
+        frameHeight={frame.height}
+        index={Math.round(c.bestS * frame.hz)}
+        alt="Best frame of hold {number}"
+      />
+    {/if}
   </button>
   <div class="info">
     <div class="meta tabular">
@@ -56,6 +73,11 @@
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
         <span>{label}</span>
       </button>
+      {#if captureStatus && statusText[captureStatus]}
+        <span class="capture {captureStatus}" data-capture={captureStatus}>{statusText[captureStatus]}</span>
+      {:else if captureStatus === 'done'}
+        <span class="visually-hidden" data-capture="done">Still saved</span>
+      {/if}
     {:else}
       <div class="row">
         <button class="label suggested" type="button" onclick={onpick}>{label ?? 'Choose label…'}</button>
@@ -175,5 +197,15 @@
   .small {
     min-height: 36px;
     padding: 0 var(--space-2);
+  }
+
+  .capture {
+    font-size: var(--text-xs);
+    color: var(--color-text-3);
+  }
+
+  .capture.error,
+  .capture.needs-file {
+    color: var(--color-danger);
   }
 </style>

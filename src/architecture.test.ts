@@ -9,11 +9,13 @@ import { describe, expect, it } from 'vitest';
  *  - model: type-only imports from detection/types
  *  - storage: may import model
  *  - labeling: may import model and detection (best-frame helpers on signals)
+ *  - capture: may import source (the VideoSource interface) and model
+ *  - crop, progression: may import model
  *  - ui: the only composition layer; imports other modules only through their index (or types)
  * Tests and fixtures are exempt.
  */
 const SRC = resolve(import.meta.dirname);
-const MODULES = ['detection', 'source', 'storage', 'model', 'labeling', 'ui'] as const;
+const MODULES = ['detection', 'source', 'storage', 'model', 'labeling', 'capture', 'crop', 'progression', 'ui'] as const;
 type Module = (typeof MODULES)[number];
 
 const ALLOWED: Record<Module, Module[]> = {
@@ -22,7 +24,10 @@ const ALLOWED: Record<Module, Module[]> = {
   model: ['detection'],
   storage: ['model'],
   labeling: ['model', 'detection'],
-  ui: ['detection', 'source', 'storage', 'model', 'labeling'],
+  capture: ['source', 'model'],
+  crop: ['model'],
+  progression: ['model'],
+  ui: ['detection', 'source', 'storage', 'model', 'labeling', 'capture', 'crop', 'progression'],
 };
 
 function files(dir: string): string[] {
@@ -67,7 +72,7 @@ describe('module boundaries', () => {
   });
 
   it('every module has types.ts and index.ts', () => {
-    for (const mod of ['detection', 'source', 'storage', 'model', 'labeling']) {
+    for (const mod of ['detection', 'source', 'storage', 'model', 'labeling', 'capture', 'crop', 'progression']) {
       expect(statSync(join(SRC, mod, 'types.ts')).isFile()).toBe(true);
       expect(statSync(join(SRC, mod, 'index.ts')).isFile()).toBe(true);
     }

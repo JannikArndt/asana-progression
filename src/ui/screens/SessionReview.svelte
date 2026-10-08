@@ -5,15 +5,21 @@
   import LabelPicker from '../components/LabelPicker.svelte';
   import FrameScrubber from '../components/FrameScrubber.svelte';
   import FrameProbe from '../components/FrameProbe.svelte';
+  import CropEditor from '../components/CropEditor.svelte';
   import DebugPanel from '../components/DebugPanel.svelte';
   import { formatDuration, type Span } from '../components/timeline';
   import { nextEntries, type Label } from '../../labeling';
   import { PRIMARY_SERIES_ID } from '../../model';
   import { app } from '../state/app.svelte';
+  import { pipeline } from '../pipeline/controller.svelte';
+  import { importQueue } from '../import.svelte';
   import { router } from '../state/router.svelte';
   import { dialog } from '../state/dialog.svelte';
   import { SessionReview } from '../state/review.svelte';
   import type { SessionEntry } from '../state/session-data';
+  import { capture } from '../state/capture.svelte';
+  import { setManualCrop } from '../state/hold-actions';
+  import { fingerprint, openVideo } from '../../source';
 
   interface Props {
     id: string;
@@ -25,6 +31,9 @@
   let pickerKey = $state<string | null>(null);
   let scrub = $state<{ mode: 'nudge' | 'split' | 'add'; videoId: string; key?: string } | null>(null);
   let probe = $state<{ videoId: string; t: number } | null>(null);
+  let cropHoldId = $state<string | null>(null);
+  const cropHold = $derived(cropHoldId ? app.holds.find((h) => h.id === cropHoldId) : undefined);
+  const cropStill = $derived(cropHoldId ? app.assets.find((a) => a.holdId === cropHoldId && a.kind === 'still') : undefined);
   let graphOpen = $state(true);
   let debugOpen = $state<Record<string, boolean>>({});
 
@@ -75,10 +84,12 @@
   async function more(entry: SessionEntry) {
     const prev = review.previousOf(entry.key);
     const hasFile = app.files.has(entry.videoId);
+    const hasStill = !!entry.hold && app.assets.some((a) => a.holdId === entry.hold!.id && a.kind === 'still');
     const choice = await dialog.ask({
       title: `Hold at ${Math.floor(entry.candidate.startS / 60)}:${String(Math.floor(entry.candidate.startS % 60)).padStart(2, '0')}`,
       options: [
         { id: 'label', label: 'Choose label…' },
+        ...(hasStill ? [{ id: 'crop', label: 'Edit crop…' }] : []),
         { id: 'nudge', label: 'Choose frame…' },
         { id: 'split', label: 'Split…' },
         ...(prev ? [{ id: 'merge', label: 'Merge with previous' }] : []),
@@ -90,6 +101,9 @@
     switch (choice) {
       case 'label':
         pickerKey = entry.key;
+        break;
+      case 'crop':
+        cropHoldId = entry.hold?.id ?? null;
         break;
       case 'nudge':
         scrub = { mode: 'nudge', videoId: entry.videoId, key: entry.key };
@@ -127,6 +141,30 @@
     }
   }
 
+  const waiting = $derived(capture.waitingForFile(review.holds));
+  let attachError = $state<string | null>(null);
+
+  async function reattach(e: Event, videoId: string, fp: string) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    attachError = null;
+    try {
+      const src = await openVideo(file);
+      const ok = (await fingerprint(file, src.meta.durationS)) === fp;
+      src.close();
+      if (!ok) {
+        attachError = 'That is a different video.';
+        return;
+      }
+      app.attachFile(videoId, file);
+      review.recapture(videoId);
+    } catch (err) {
+      attachError = `Cannot read the file: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
   const scrubEntry = $derived(scrub?.key ? review.entry(scrub.key) : undefined);
   const pickerEntry = $derived(pickerKey ? review.entry(pickerKey) : undefined);
   const sessionLabels = $derived(review.items.filter((i) => i.status === 'labeled' && i.label).map((i) => i.label!));
@@ -148,7 +186,7 @@
       </p>
     </div>
 
-    {#if review.sameDay.length}
+    {#if review.sameDay.length && !pipeline.running && importQueue.total === 0}
       <div class="card notice">
         <p class="small">
           {review.sameDay.length} other {review.sameDay.length === 1 ? 'session was' : 'sessions were'} recorded on this day.
@@ -176,6 +214,16 @@
       {@const entries = review.entries.filter((e) => e.videoId === video.id)}
       <section class="video">
         {#if review.videos.length > 1}<h3 class="section-title">{video.fileName}</h3>{/if}
+        {#if waiting.has(video.id)}
+          <div class="card notice">
+            <p class="small">Select <strong>{video.fileName}</strong> again to save full-resolution stills and clips of the labeled holds.</p>
+            <label class="btn">
+              Select video
+              <input class="visually-hidden" type="file" accept="video/*" onchange={(e) => reattach(e, video.id, video.fingerprint)} />
+            </label>
+            {#if attachError}<p class="small error">{attachError}</p>{/if}
+          </div>
+        {/if}
         {#if analysis}
           <button class="disclosure" type="button" aria-expanded={graphOpen} onclick={() => (graphOpen = !graphOpen)}>
             <span class="section-title">Timeline</span>
@@ -204,6 +252,8 @@
                 {nameOf}
                 frame={frameOf(video.id)}
                 selected={selectedKey === entry.key}
+                thumb={entry.hold ? app.assets.find((a) => a.holdId === entry.hold!.id && a.kind === 'thumb') : undefined}
+                captureStatus={entry.hold ? capture.status[entry.hold.id] : undefined}
                 onselect={() => (selectedKey = entry.key)}
                 onconfirm={() => review.confirm(entry.key)}
                 onpick={() => (pickerKey = entry.key)}
@@ -292,6 +342,20 @@
   <FrameProbe videoId={probe.videoId} timestampS={probe.t} onclose={() => (probe = null)} />
 {/if}
 
+{#if cropHold && cropStill}
+  <CropEditor
+    hold={cropHold}
+    still={cropStill}
+    title={nameOf(cropHold.asanaId)}
+    onsave={async (m) => {
+      const id = cropHoldId!;
+      cropHoldId = null;
+      await setManualCrop(id, m);
+    }}
+    onclose={() => (cropHoldId = null)}
+  />
+{/if}
+
 <style>
   .review-screen {
     padding: calc(var(--space-2) + var(--safe-top)) calc(var(--space-4) + var(--safe-right)) calc(var(--space-7) + var(--safe-bottom))
@@ -326,6 +390,10 @@
 
   .notice .btn {
     align-self: flex-start;
+  }
+
+  .error {
+    color: var(--color-danger);
   }
 
   .controls {

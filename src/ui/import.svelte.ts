@@ -7,6 +7,7 @@ import { dialog } from './state/dialog.svelte';
 import { router } from './state/router.svelte';
 import { invalidateSamples } from './state/samples';
 import { pipeline } from './pipeline/controller.svelte';
+import { capture } from './state/capture.svelte';
 import { formatTime } from './components/timeline';
 
 export const importQueue = $state({ index: 0, total: 0 });
@@ -51,6 +52,10 @@ export async function importFiles(files: File[]): Promise<void> {
   let lastVideoId: string | null = null;
   /** Videos recorded on the same day in one batch share a session. */
   const batchSessions = new Map<string, Session>();
+  /** Last video imported per recording day in this batch (to find its session after a combine). */
+  const batchVideos = new Map<string, string>();
+  const sessionContaining = async (videoId: string | undefined): Promise<Session | undefined> =>
+    videoId ? (await db.sessions.findBy('videoIds', videoId))[0] : undefined;
   for (const [i, file] of files.entries()) {
     importQueue.index = i;
     let meta: VideoMeta;
@@ -123,6 +128,7 @@ export async function importFiles(files: File[]): Promise<void> {
         if (choice === 'cancel') continue;
         if (choice === 'reuse') {
           app.attachFile(existing.id, file);
+          capture.request(app.holds.filter((h) => h.videoId === existing.id));
           if (await db.analyses.get(existing.id)) {
             lastVideoId = existing.id;
             continue;
@@ -201,10 +207,17 @@ export async function importFiles(files: File[]): Promise<void> {
         meta: { ...meta } as unknown as Record<string, unknown>,
       };
       await db.videos.put(video);
-      const session = newSession ?? joinSession!;
-      session.videoIds = [...session.videoIds, videoId];
-      await db.sessions.put($state.snapshot(session) as Session);
-      if (day(meta)) batchSessions.set(day(meta), session);
+      // Re-read the session: it may have been edited, combined or deleted while the previous file processed.
+      const target = newSession ?? (await db.sessions.get(joinSession!.id)) ?? (await sessionContaining(batchVideos.get(day(meta)))) ?? null;
+      const session: Session = target
+        ? { ...($state.snapshot(target) as Session) }
+        : { id: newId('ses'), date: meta.recordedAt ?? new Date().toISOString(), note: '', videoIds: [], ...(joinSession?.templateId ? { templateId: joinSession.templateId } : {}) };
+      session.videoIds = [...session.videoIds.filter((v) => v !== videoId), videoId];
+      await db.sessions.put(session);
+      if (day(meta)) {
+        batchSessions.set(day(meta), session);
+        batchVideos.set(day(meta), videoId);
+      }
     }
     app.attachFile(videoId, file);
     await app.refresh();

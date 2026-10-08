@@ -179,6 +179,19 @@
   <h2>Settings</h2>
 
   <section class="group">
+    <h3 class="section-title">Clips</h3>
+    <div class="segmented" role="radiogroup" aria-label="Clip quality">
+      {#each [['720p', '720p'], ['1080p', '1080p'], ['original', 'Original']] as const as [q, label] (q)}
+        <button type="button" role="radio" aria-checked={app.clipQuality === q} class:on={app.clipQuality === q} onclick={() => app.setClipQuality(q)}>{label}</button>
+      {/each}
+    </div>
+    <p class="small muted">
+      720p and 1080p are re-encoded to H.264. Original copies the recorded video without re-encoding (keeps HDR, starts and ends on
+      key frames, larger files). Applies to new captures.
+    </p>
+  </section>
+
+  <section class="group">
     <h3 class="section-title">Storage</h3>
     <dl class="kv">
       <dt>Quota (estimate)</dt><dd>{formatBytes(est?.quota)}</dd>
@@ -332,6 +345,28 @@
 
   .small {
     font-size: var(--text-s);
+  }
+
+  .segmented {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    padding: 2px;
+    border-radius: var(--radius-m);
+    background: var(--color-neutral-tint);
+  }
+
+  .segmented button {
+    min-height: 40px;
+    border: 0;
+    border-radius: calc(var(--radius-m) - 2px);
+    background: transparent;
+    font-weight: var(--weight-medium);
+    color: var(--color-text-2);
+  }
+
+  .segmented button.on {
+    background: var(--color-surface);
+    color: var(--color-text);
   }
 
   .leftovers {

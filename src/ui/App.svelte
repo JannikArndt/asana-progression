@@ -3,7 +3,7 @@
   import Home from './screens/Home.svelte';
   import Processing from './screens/Processing.svelte';
   import SessionReview from './screens/SessionReview.svelte';
-  import AsanaHolds from './screens/AsanaHolds.svelte';
+  import AsanaProgression from './screens/AsanaProgression.svelte';
   import { sessionOfVideo } from './state/session-data';
   import Settings from './screens/Settings.svelte';
   import Dialog from './components/Dialog.svelte';
@@ -38,7 +38,7 @@
     <SessionReview id={router.route.id} />
   {/key}
 {:else if router.route.name === 'asana'}
-  <AsanaHolds id={router.route.id} />
+  {#key router.route.id}<AsanaProgression id={router.route.id} />{/key}
 {:else if router.route.name === 'settings'}
   <Settings />
 {/if}

@@ -7,6 +7,7 @@ import {
   SEED_ASANAS,
   type Analysis,
   type Asana,
+  type Asset,
   type Hold,
   type ProcessingJob,
   type SequenceTemplate,
@@ -41,6 +42,8 @@ class AppState {
   templates = $state.raw<SequenceTemplate[]>([]);
   summaries = $state.raw<Record<string, AnalysisSummary>>({});
   jobs = $state.raw<ProcessingJob[]>([]);
+  assets = $state.raw<Asset[]>([]);
+  clipQuality = $state<'720p' | '1080p' | 'original'>('1080p');
   params = $state<DetectionParams>({ ...DEFAULT_PARAMS });
   skipNonReference = $state(true);
   /** Files picked in this browser session, by video id (needed for exact frames). */
@@ -56,6 +59,7 @@ class AppState {
       ]);
       this.params = normalizeParams(params);
       this.skipNonReference = skip ?? true;
+      this.clipQuality = (await this.store.settings.get<'720p' | '1080p' | 'original'>('clipQuality')) ?? '1080p';
       await this.seedCatalog();
       await this.migrate();
       await this.refresh();
@@ -105,7 +109,7 @@ class AppState {
 
   async refresh() {
     const db = this.db;
-    const [videos, analyses, jobs, sessions, holds, asanas, templates] = await Promise.all([
+    const [videos, analyses, jobs, sessions, holds, asanas, templates, assets] = await Promise.all([
       db.videos.all(),
       db.analyses.all(),
       db.jobs.all(),
@@ -113,6 +117,7 @@ class AppState {
       db.holds.all(),
       db.asanas.all(),
       db.templates.all(),
+      db.assets.all(),
     ]);
     videos.sort((a, b) => (b.recordedAt ?? b.importedAt).localeCompare(a.recordedAt ?? a.importedAt));
     sessions.sort((a, b) => b.date.localeCompare(a.date));
@@ -127,6 +132,22 @@ class AppState {
     this.holds = holds;
     this.asanas = asanas;
     this.templates = templates;
+    this.assets = assets;
+  }
+
+  async setClipQuality(q: '720p' | '1080p' | 'original') {
+    this.clipQuality = q;
+    await this.db.settings.set('clipQuality', q);
+  }
+
+  addAssets(list: Asset[]) {
+    const ids = new Set(list.map((a) => a.id));
+    this.assets = [...this.assets.filter((a) => !ids.has(a.id)), ...list];
+  }
+
+  removeAssets(ids: string[]) {
+    const drop = new Set(ids);
+    this.assets = this.assets.filter((a) => !drop.has(a.id));
   }
 
   async saveParams(p: DetectionParams) {

@@ -1,4 +1,5 @@
 import {
+  alignToTemplate,
   holdFromCandidate,
   matchTemplateEntry,
   mergeCandidateFor,
@@ -20,6 +21,7 @@ import { combineSessions, historyFrom, parseItemKey, sameDaySessions, sessionEnt
 import { suggestInWorker } from '../workers/suggest-client';
 import { pipeline } from '../pipeline/controller.svelte';
 import { invalidateSamples } from './samples';
+import { capture, deleteAssets } from './capture.svelte';
 
 /**
  * State and actions of the session review screen. Every action persists immediately
@@ -29,14 +31,16 @@ export class SessionReview {
   session = $state.raw<Session | null>(null);
   videos = $state.raw<Video[]>([]);
   analyses = $state.raw<Record<string, Analysis>>({});
-  holds = $state.raw<Hold[]>([]);
+  /** Holds of this session — read from the app state, the single source of truth (captures update crops there). */
+  holds = $derived<Hold[]>(this.session ? app.holds.filter((h) => h.sessionId === this.session!.id) : []);
   suggestions = $state.raw<Record<string, Suggestion[]>>({});
   loaded = $state(false);
   private suggestSeq = 0;
 
-  entries = $derived<SessionEntry[]>(this.session ? sessionEntries(this.session, this.analyses, this.holds) : []);
-  items = $derived(toReviewItems(this.entries));
   template = $derived(app.templates.find((t) => t.id === this.session?.templateId) ?? null);
+  entries = $derived<SessionEntry[]>(this.session ? sessionEntries(this.session, this.analyses, this.holds) : []);
+  /** Review items with template entries re-aligned to the current template (it may have been switched or edited). */
+  items = $derived(alignToTemplate(toReviewItems(this.entries), this.template));
 
   async load(sessionId: string) {
     const db = app.db;
@@ -54,8 +58,8 @@ export class SessionReview {
     }
     this.videos = videos;
     this.analyses = analyses;
-    this.holds = await db.holds.findBy('sessionId', sessionId);
     this.loaded = true;
+    capture.request(this.holds);
     await this.refreshSuggestions();
   }
 
@@ -98,16 +102,22 @@ export class SessionReview {
     app.setCandidates(videoId, a.candidates);
   }
 
+  /** Saves a hold and (re-)captures its still and clip when they no longer match. */
   private async putHold(h: Hold) {
-    this.holds = [...this.holds.filter((x) => x.id !== h.id), h];
     await app.db.holds.put(h);
     app.upsertHold(h);
+    capture.request([h]);
   }
 
   private async deleteHold(id: string) {
-    this.holds = this.holds.filter((x) => x.id !== id);
     await app.db.holds.delete(id);
     app.removeHold(id);
+    await deleteAssets(app.assets.filter((a) => a.holdId === id));
+  }
+
+  /** Captures assets again for the labeled holds of a video (e.g. after re-attaching its file). */
+  recapture(videoId: string) {
+    capture.request(this.holds.filter((h) => h.videoId === videoId));
   }
 
   private candidates(videoId: string): ReviewCandidate[] {

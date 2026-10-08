@@ -8,6 +8,7 @@
   import { dialog } from '../state/dialog.svelte';
   import { invalidateSamples, sampleReader } from '../state/samples';
   import { pipeline } from '../pipeline/controller.svelte';
+  import { capture, deleteAssets } from '../state/capture.svelte';
   import { assessHandover, copyText, deviceInfo, formatBytes, shareOrDownload } from '../diagnostics';
   import { formatDuration } from './timeline';
 
@@ -110,6 +111,7 @@
         return;
       }
       app.attachFile(video.id, file);
+      capture.request(app.holds.filter((h) => h.videoId === video.id));
       message = 'File attached for this session.';
       void checkSupport();
     } catch (e) {
@@ -150,7 +152,10 @@
     await app.db.analyses.delete(video.id);
     await app.db.jobs.delete(video.id);
     await app.db.videos.delete(video.id);
-    for (const h of await app.db.holds.findBy('videoId', video.id)) await app.db.holds.delete(h.id);
+    for (const h of await app.db.holds.findBy('videoId', video.id)) {
+      await deleteAssets(app.assets.filter((a) => a.holdId === h.id));
+      await app.db.holds.delete(h.id);
+    }
     for (const s of await app.db.sessions.findBy('videoIds', video.id)) {
       const videoIds = s.videoIds.filter((v) => v !== video.id);
       if (videoIds.length) await app.db.sessions.put({ ...s, videoIds });

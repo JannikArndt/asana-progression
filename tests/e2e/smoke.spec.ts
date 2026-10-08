@@ -15,6 +15,8 @@ test('import → review → asana', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('./');
+  // The pose model is not needed here: capture without the MediaPipe cropper.
+  await page.evaluate(() => localStorage.setItem('asana.debug.capture', JSON.stringify({ cropper: 'none' })));
   await expect(page.getByRole('heading', { name: 'Asanas' })).toBeVisible();
 
   await importVideo(page);
@@ -71,6 +73,16 @@ test('import → review → asana', async ({ page }) => {
   await expect(row).toBeVisible();
   await row.click();
   await expect(page.getByRole('heading', { name: 'Utthita Trikonasana' })).toBeVisible();
+  // Progression: the captured still in the feed, the viewer, grid and side filter.
+  await expect(page.locator('.feed .item')).toHaveCount(1);
+  await expect(page.locator('.feed .item img')).toBeVisible({ timeout: 60_000 });
+  await page.locator('.feed .item').click();
+  const viewer = page.getByRole('dialog', { name: 'Utthita Trikonasana holds' });
+  await expect(viewer.locator('img')).toBeVisible();
+  await viewer.getByRole('button', { name: 'Pin' }).click();
+  await expect(viewer.getByRole('button', { name: 'Pinned' })).toBeVisible();
+  await viewer.getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('radio', { name: 'Grid' }).click();
   await expect(page.locator('.tile')).toHaveCount(1);
   await page.getByRole('radio', { name: 'Left' }).click();
   await expect(page.locator('.tile')).toHaveCount(0);
@@ -138,4 +150,20 @@ test('the luma-plane conversion finds the same holds', async ({ page }) => {
   await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
   await page.getByRole('button', { name: /^Debug/ }).click();
   await expect(page.locator('dt:has-text("Frame → gray") + dd')).toContainText('luma');
+});
+
+test('capture works with the MediaPipe cropper (self-hosted wasm and model)', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => m.text().includes('pose model unavailable') && errors.push(m.text()));
+  page.on('worker', (w) => w.on('console', (m) => m.text().includes('pose model unavailable') && errors.push(m.text())));
+  await page.goto('./');
+  await importVideo(page);
+  await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
+  const first = cards(page).nth(0);
+  await first.getByRole('button', { name: 'Confirm Padangusthasana' }).click();
+  await expect(first.locator('[data-capture=done]')).toHaveCount(1, { timeout: 90_000 });
+  const cached = await page.evaluate(async () => (await (await caches.open('mediapipe-pose-v1')).keys()).map((r) => r.url.split('/').pop()));
+  expect(cached).toEqual(expect.arrayContaining(['vision_wasm_module_internal.wasm', 'pose_landmarker_lite.task']));
+  expect(errors).toEqual([]);
 });

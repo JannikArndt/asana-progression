@@ -1,5 +1,5 @@
 export type * from './types';
-export { suggest, matchTemplateEntry, mergeCandidateFor, nextSide, usedEntries, nextEntries } from './suggest';
+export { suggest, matchTemplateEntry, mergeCandidateFor, nextSide, usedEntries, nextEntries, alignToTemplate } from './suggest';
 export {
   fitSpan,
   mergeCandidates,

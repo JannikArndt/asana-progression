@@ -36,8 +36,10 @@ API). `src/architecture.test.ts` enforces the allowed dependencies:
 | `model` | Shared data model (types), `newId`, catalog seed + Primary series template | `detection` types |
 | `storage` | `MetadataStore` (IndexedDB, one repository per entity), OPFS sample files, quota helpers | `model` |
 | `labeling` | Suggestion engine; review edits on candidates (merge, split, add missed, nudge, reconcile); catalog search | `model`, `detection` (best-frame helpers on signals) |
+| `capture` | Still (exact frame → JPEG q 0.9 + 512 px thumb + preview for the cropper) and clip (720p/1080p H.264 re-encode via WebCodecs, or `original` = stream copy snapped to key frames; falls back to `original` when AVC encoding is unavailable) | `source`, `model` |
+| `crop` | `Cropper` interface; MediaPipe Pose Landmarker (lite, CPU, lazy, Cache Storage `mediapipe-pose-v1` for offline) → body box + coarse posture class; `nullCropper` fallback | `model` |
+| `progression` | Views over holds + assets: items per asana (oldest first), display crop, tile aspect, grid density, swipe, flipbook timing | `model` |
 | `ui` | Screens, components, workers; the **only** place modules are wired together | public APIs of all modules |
-| `capture`, `crop`, `progression` | Milestones 3–4 (not created yet) | |
 
 Imports into another module must go through its `index.ts` or `types.ts`.
 
@@ -84,9 +86,34 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   carried over to overlapping new candidates.
 - Screens: Home (tabs Asanas / Sessions), session review (`#/session/<id>`: timeline, cards with
   one-tap confirm, picker with search incl. initials like "uhp", actions: choose frame, split,
-  merge with previous, not a pose, full-resolution frame, add missed hold), asana holds list
-  (`#/asana/<id>`, placeholder until the M4 progression view). `#/video/<id>` redirects to the
-  session.
+  merge with previous, not a pose, full-resolution frame, add missed hold), asana progression
+  (`#/asana/<id>`). `#/video/<id>` redirects to the session.
+- Labeled holds keep `templateEntryIndex`; `alignToTemplate` re-maps it whenever the session's
+  template was switched or edited, so suggestions never follow stale indices.
+
+### Capture and crop (milestone 3)
+
+- `ui/state/capture.svelte.ts` (`CaptureQueue`) captures in `ui/pipeline/capture.worker.ts`, one
+  video at a time, for every labeled hold whose still/thumb/clip is missing or stale
+  (`capture-plan.ts`: best frame or clip window changed, clip quality changed). Needs the video
+  file picked in this page session; otherwise the hold shows "re-attach" (review banner checks the
+  fingerprint).
+- Files live in OPFS under `assets/<assetId>.<ext>` (`OpfsAssetStore`, written in the worker with
+  sync access handles); records in the `assets` store. Replaced assets are deleted.
+- The cropper runs on the 640 px preview; `crop.auto` = body box + padding. Crops are display
+  metadata only (`manual ?? auto ?? full frame`); `CropEditor` writes `crop.manual`.
+- MediaPipe wasm loader/binary are emitted by the `mediapipe-wasm` Vite plugin at
+  `<base>mediapipe/`, the model is `public/models/pose_landmarker_lite.task` (Apache-2.0).
+  Debug switch: `localStorage['asana.debug.capture'] = '{"cropper":"none"}'` (used by e2e).
+- Safari tone-maps HLG in the decoder, so stills are SDR; only `original` clips keep HDR.
+
+### Progression (milestone 4)
+
+`#/asana/<id>` (`screens/AsanaProgression.svelte`): feed (newest first, date, side, note) or grid
+(2–4 columns, pinch or ctrl+wheel; tiles share the median crop aspect), side filter, viewer
+(`HoldViewer`: swipe through all holds oldest → newest, tap plays the looping clip, pin a hold →
+split slider or crossfade, edit crop, jump to session), flipbook (`Flipbook`: stills in date order,
+0.5–12 per second, preloads ahead). Holds without a still fall back to the tiny analysis frame.
 
 ### Storage layout
 
@@ -163,6 +190,7 @@ candidates and the tiny frames at every best frame). Drop files into
 |---|---|
 | `svelte` | UI framework (compiled, small runtime). Required by the spec. |
 | `mediabunny` | MP4/MOV demuxing with lazy reads from a `File` (60–90 min 4K files are 10–40 GB), packet access, WebCodecs decoder configs, and MP4 muxing for clip capture (M3) in one tree-shakable, dependency-free TypeScript library. Chosen over mp4box.js, whose push-style `appendBuffer`/`onSamples` API needs manual buffer feeding and has no MP4 writer of comparable ergonomics. |
+| `@mediapipe/tasks-vision` | Pose landmarks for the automatic crop (Apache-2.0). Loaded lazily in the capture worker only; wasm + model self-hosted and cached for offline use. |
 | dev: `vite`, `@sveltejs/vite-plugin-svelte` | Build. |
 | dev: `typescript` 6.x, `svelte-check` | Type checking (svelte-check does not support TS 7 yet). |
 | dev: `vitest`, `@vitest/coverage-v8` | Unit tests + coverage thresholds (detection, labeling ≥ 98 % lines; storage ≥ 95 %). |
@@ -212,9 +240,9 @@ Fill in from the user's device reports (Settings → "Copy diagnostics report", 
 
 ## Milestones
 
-1. **Spike**: source + detection + live timeline graph + debug panel, deployed. ✅ built;
-   waiting for on-device measurements.
+1. **Spike**: source + detection + live timeline graph + debug panel, deployed. ✅ measured on
+   device (see above).
 2. **Data model + storage + session review / labeling with suggestions.** ✅
-3. Capture (still + clip) + auto-crop with manual override.
-4. Progression view.
+3. **Capture (still + clip) + auto-crop with manual override.** ✅
+4. **Progression view.** ✅
 5. Catalog/template editor, backup, re-import flow, design polish.
