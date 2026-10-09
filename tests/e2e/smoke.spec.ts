@@ -44,6 +44,10 @@ test('import → review → asana', async ({ page }) => {
   const third = cards(page).nth(2);
   await expect(third.getByRole('button', { name: 'Utthita Trikonasana L', exact: true })).toBeVisible();
   await third.getByRole('button', { name: /More actions/ }).click();
+  // The menu previews the frames of the hold.
+  const frames = page.getByRole('list', { name: 'Frames of this hold' }).getByRole('listitem');
+  expect(await frames.count()).toBeGreaterThanOrEqual(4);
+  await expect(frames.first().locator('.tiny')).not.toHaveClass(/missing/);
   await page.getByRole('button', { name: 'Not a pose' }).click();
   await expect(third).toHaveAttribute('data-status', 'dismissed');
   await third.getByRole('button', { name: 'Restore' }).click();

@@ -10,6 +10,7 @@ import {
   MAX_PX_PER_S,
   minPxPerS,
   panBy,
+  previewTimes,
   revealSpan,
   robustMax,
   tickStep,
@@ -116,5 +117,23 @@ describe('hitSpan', () => {
     expect(hitSpan(spans, v, 32)?.id).toBe('b');
     expect(hitSpan(spans, v, 43)?.id).toBe('a'); // within slop
     expect(hitSpan(spans, v, 80)).toBeNull();
+  });
+});
+
+describe('previewTimes', () => {
+  it('spaces frames evenly, centred in their slots', () => {
+    expect(previewTimes(10, 30)).toEqual([12.5, 17.5, 22.5, 27.5]);
+  });
+
+  it('takes one frame per step for long holds, capped', () => {
+    const t = previewTimes(0, 112);
+    expect(t).toHaveLength(19);
+    expect(t[0]).toBeGreaterThan(0);
+    expect(t[t.length - 1]).toBeLessThan(112);
+    expect(previewTimes(0, 3600)).toHaveLength(24);
+  });
+
+  it('returns the start for an empty span', () => {
+    expect(previewTimes(5, 5)).toEqual([5]);
   });
 });

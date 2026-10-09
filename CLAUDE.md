@@ -103,7 +103,9 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
 - Re-running detection reconciles: labeled holds and manual candidates are kept, dismissals are
   carried over to overlapping new candidates.
 - Screens: Home (tabs Asanas / Sessions), session review (`#/session/<id>`: timeline, cards with
-  one-tap confirm, picker with search incl. initials like "uhp", actions: choose frame, split,
+  one-tap confirm, picker with search incl. initials like "uhp", ••• menu with a scrollable strip of
+  tiny frames across the hold (`previewTimes`: one per 6 s, 4–24) to spot a posture change, actions:
+  choose frame, split,
   split into several, merge with previous, not a pose, full-resolution frame, add missed hold),
   asana progression
   (`#/asana/<id>`). `#/video/<id>` redirects to the session.

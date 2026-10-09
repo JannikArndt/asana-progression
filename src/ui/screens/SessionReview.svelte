@@ -7,7 +7,7 @@
   import FrameProbe from '../components/FrameProbe.svelte';
   import CropEditor from '../components/CropEditor.svelte';
   import DebugPanel from '../components/DebugPanel.svelte';
-  import { formatDuration, type Span } from '../components/timeline';
+  import { formatDuration, formatTime, previewTimes, type Span } from '../components/timeline';
   import { expectedHolds, nextEntries, type Label } from '../../labeling';
   import { PRIMARY_SERIES_ID } from '../../model';
   import { holdReps } from '../../progression';
@@ -88,8 +88,15 @@
     const prev = review.previousOf(entry.key);
     const hasFile = app.files.has(entry.videoId);
     const hasStill = !!entry.hold && app.assets.some((a) => a.holdId === entry.hold!.id && a.kind === 'still');
+    const f = frameOf(entry.videoId);
     const choice = await dialog.ask({
       title: `Hold at ${Math.floor(entry.candidate.startS / 60)}:${String(Math.floor(entry.candidate.startS % 60)).padStart(2, '0')}`,
+      frames: {
+        videoId: entry.videoId,
+        width: f.width,
+        height: f.height,
+        items: previewTimes(entry.candidate.startS, entry.candidate.endS).map((t) => ({ index: Math.floor(t * f.hz), label: formatTime(t) })),
+      },
       options: [
         { id: 'label', label: 'Choose label…' },
         ...(hasStill ? [{ id: 'crop', label: 'Edit crop…' }] : []),
