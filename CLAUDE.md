@@ -153,9 +153,10 @@ similar-merge; variants with near-identical silhouettes (e.g. Paschimottanasana 
 merged — the review step (M2) needs split.
 
 Real data: `src/detection/__fixtures__/real/sarvangasana-finishing.json` is the user's 7.6 min
-finishing-sequence clip (the validation video). All 9 holds are found with correct best frames
-(the long Sirsasana A is split in 3 and merged back); the fixture test replays it and checks the
-named ground truth.
+finishing-sequence clip (the validation video). All 9 holds are found; their best frames were checked
+by eye on full-resolution frames (the long Sirsasana A is split in 3 and merged back). The truth
+spans are the detector's own spans (named, not hand-segmented); the fixture test checks that each
+named hold is found and that its best frame stays within 1.5 s of the confirmed `bestS`.
 
 Optimisation: `skipNonReference` drops packets that no other frame references (HEVC sub-layer
 non-reference NAL types 0,2,…,14; H.264 `nal_ref_idc == 0`) before decoding. Default on; toggle

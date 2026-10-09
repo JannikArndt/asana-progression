@@ -36,22 +36,26 @@ export async function listOpfs(): Promise<OpfsEntry[]> {
 }
 
 /** Removes a file (or directory, recursively) by path. Missing entries are ignored. */
-export async function removeOpfsPath(path: string): Promise<void> {
+/** Removes a file or directory. True when it is gone afterwards (also if it never existed). */
+export async function removeOpfsPath(path: string): Promise<boolean> {
   const parts = path.split('/').filter(Boolean);
   const name = parts.pop();
-  if (!name) return;
+  if (!name) return false;
   try {
     let dir: FileSystemDirectoryHandle = await root();
     for (const p of parts) dir = await dir.getDirectoryHandle(p);
     await dir.removeEntry(name, { recursive: true });
-  } catch {
-    // already gone
+    return true;
+  } catch (e) {
+    return (e as { name?: string } | null)?.name === 'NotFoundError';
   }
 }
 
 export interface CleanupPlan {
   keep: OpfsEntry[];
   remove: OpfsEntry[];
+  /** Unreferenced files that could not be read (open elsewhere, e.g. a running storage test). */
+  inUse: OpfsEntry[];
   removeBytes: number;
 }
 
@@ -65,6 +69,7 @@ export function planCleanup(entries: OpfsEntry[], knownVideoIds: Iterable<string
   for (const p of referencedAssetPaths) keepNames.add(p);
   const keep: OpfsEntry[] = [];
   const remove: OpfsEntry[] = [];
-  for (const e of entries) (keepNames.has(e.path) ? keep : remove).push(e);
-  return { keep, remove, removeBytes: remove.reduce((s, e) => s + Math.max(0, e.size), 0) };
+  const inUse: OpfsEntry[] = [];
+  for (const e of entries) (keepNames.has(e.path) ? keep : e.size < 0 ? inUse : remove).push(e);
+  return { keep, remove, inUse, removeBytes: remove.reduce((s, e) => s + Math.max(0, e.size), 0) };
 }

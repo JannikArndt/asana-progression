@@ -23,7 +23,11 @@ export interface AnalysisExport {
   /** Sample index → base64 of the pooled gray frame. */
   frames: Record<string, string>;
   /** Optional ground truth added by hand: true hold spans in seconds. */
-  truth?: Array<{ startS: number; endS: number; name?: string }>;
+  /**
+   * Hand-checked holds. `bestS` (optional) is a frame confirmed by eye as a good representative;
+   * the candidate found for the hold must pick a best frame within `bestTolS` (default 1.5 s).
+   */
+  truth?: Array<{ startS: number; endS: number; name?: string; bestS?: number; bestTolS?: number }>;
   meta?: Record<string, unknown>;
 }
 

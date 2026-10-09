@@ -17,7 +17,7 @@ import {
 } from '../../model';
 import { openVideo, type VideoSource } from '../../source';
 import { SvelteMap } from 'svelte/reactivity';
-import { dayOf, groupByDay, orphanVideos, SHORT_CLIP_S } from './session-data';
+import { dayOf, groupByDay, orderVideoIds, orphanVideos, SHORT_CLIP_S } from './session-data';
 
 export interface AnalysisSummary {
   videoId: string;
@@ -92,7 +92,7 @@ class AppState {
     for (const [day, list] of groupByDay(orphanVideos(sessions, videos))) {
       const existing = sessions.find((s) => dayOf(s.date) === day);
       if (existing) {
-        existing.videoIds = [...existing.videoIds, ...list.map((v) => v.id)];
+        existing.videoIds = orderVideoIds([...existing.videoIds, ...list.map((v) => v.id)], videos);
         await db.sessions.put(existing);
         continue;
       }

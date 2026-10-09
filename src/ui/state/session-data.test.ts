@@ -3,6 +3,7 @@ import {
   asanaStats,
   combineSessions,
   compareVideos,
+  orderVideoIds,
   dayOf,
   groupByDay,
   historyFrom,
@@ -124,5 +125,15 @@ describe('same-day sessions', () => {
     expect(r.session).toMatchObject({ id: 't', videoIds: ['b', 'a', 'c', 'zz'], note: 'warm · tired', templateId: 'primary-series' });
     expect(r.holds).toEqual([{ ...holds[0], sessionId: 't' }]);
     expect(r.deleteIds).toEqual(['o1', 'o2']);
+  });
+});
+
+describe('orderVideoIds', () => {
+  it('sorts by recording time, then numeric file name, keeping unknown ids last', () => {
+    const v = (id: string, fileName: string, recordedAt = '2025-08-28T18:04:43+02:00') =>
+      ({ id, fileName, recordedAt, fingerprint: id, fileSize: 1, durationS: 1, codec: null, width: 1, height: 1, fps: null, importedAt: '' }) as Video;
+    const videos = [v('a', '10 Savasana.mp4'), v('b', '4 Ubhaya.mp4'), v('c', '7 Sarvangasana.mp4')];
+    expect(orderVideoIds(['a', 'x', 'c', 'b'], videos)).toEqual(['b', 'c', 'a', 'x']);
+    expect(orderVideoIds(['b', 'b'], videos)).toEqual(['b']);
   });
 });

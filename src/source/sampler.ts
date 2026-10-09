@@ -51,6 +51,9 @@ export async function resolveDecoderConfig(
   return { config: chosen ?? config, supported: chosen !== null, variants };
 }
 
+/** How often held frames are converted while the decoder flushes. */
+const FLUSH_DRAIN_MS = 10;
+
 function waitForDequeue(decoder: VideoDecoder): Promise<void> {
   return new Promise((resolve) => {
     let done = false;
@@ -196,7 +199,13 @@ export async function* sampleTrack(track: InputVideoTrack, opts: SampleOptions):
         stats.packetsSkipped++;
         continue;
       }
-      while (decoder.decodeQueueSize >= MAX_DECODE_QUEUE) await waitForDequeue(decoder);
+      // Convert (and so release) held frames while waiting: decoders with a fixed output pool
+      // stall when the app keeps too many frames open.
+      while (decoder.decodeQueueSize >= MAX_DECODE_QUEUE) {
+        await convertPending();
+        if (failure) throw failure;
+        await waitForDequeue(decoder);
+      }
       decoder.decode(packet.toEncodedVideoChunk());
       if (decoder.decodeQueueSize > stats.maxDecodeQueue) stats.maxDecodeQueue = decoder.decodeQueueSize;
       await convertPending();
@@ -207,7 +216,13 @@ export async function* sampleTrack(track: InputVideoTrack, opts: SampleOptions):
       report();
     }
     if (!opts.signal?.aborted) {
-      await decoder.flush();
+      let flushed = false;
+      const flushing = decoder.flush().finally(() => (flushed = true));
+      while (!flushed) {
+        await Promise.race([flushing, new Promise((r) => setTimeout(r, FLUSH_DRAIN_MS))]);
+        await convertPending();
+      }
+      await flushing;
       if (failure) throw failure;
       await convertPending();
       while (ready.length) {

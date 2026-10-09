@@ -1,7 +1,7 @@
 import { fingerprint, openVideo, targetSize, type VideoMeta } from '../source';
 import { estimateStorage, requestPersistence, wouldExceedQuota } from '../storage';
 import { newId, PRIMARY_SERIES_ID, type Session, type Video } from '../model';
-import { dayOf, sessionOfVideo, SHORT_CLIP_S } from './state/session-data';
+import { dayOf, orderVideoIds, sessionOfVideo, SHORT_CLIP_S } from './state/session-data';
 import { app } from './state/app.svelte';
 import { dialog } from './state/dialog.svelte';
 import { router } from './state/router.svelte';
@@ -89,6 +89,8 @@ export async function importFiles(files: File[]): Promise<void> {
     let resume = false;
     let params = $state.snapshot(app.params);
     let skip = app.skipNonReference;
+    /** "Import as a new session" for a known file: never offer to join a same-day session. */
+    let asNewSession = false;
 
     const job = (await db.jobs.findBy('fingerprint', fp))[0];
     if (job) {
@@ -126,6 +128,7 @@ export async function importFiles(files: File[]): Promise<void> {
           ],
         });
         if (choice === 'cancel') continue;
+        if (choice === 'new') asNewSession = true;
         if (choice === 'reuse') {
           app.attachFile(existing.id, file);
           capture.request(app.holds.filter((h) => h.videoId === existing.id));
@@ -162,8 +165,13 @@ export async function importFiles(files: File[]): Promise<void> {
     let joinSession: Session | null = null;
     if (!videoId) {
       const recDay = dayOf(meta.recordedAt);
-      joinSession = (recDay && batchSessions.get(recDay)) || null;
-      const sameDay = !joinSession && recDay ? app.sessions.find((s) => dayOf(s.date) === recDay) : undefined;
+      joinSession = (!asNewSession && recDay && batchSessions.get(recDay)) || null;
+      // Sessions that already hold this recording are never offered (no duplicate in one session).
+      const sameFile = new Set(app.videos.filter((v) => v.fingerprint === fp).map((v) => v.id));
+      const sameDay =
+        !joinSession && !asNewSession && recDay
+          ? app.sessions.find((s) => dayOf(s.date) === recDay && !s.videoIds.some((id) => sameFile.has(id)))
+          : undefined;
       if (sameDay) {
         const choice = await dialog.ask({
           title: 'Same day as an existing session',
@@ -212,7 +220,7 @@ export async function importFiles(files: File[]): Promise<void> {
       const session: Session = target
         ? { ...($state.snapshot(target) as Session) }
         : { id: newId('ses'), date: meta.recordedAt ?? new Date().toISOString(), note: '', videoIds: [], ...(joinSession?.templateId ? { templateId: joinSession.templateId } : {}) };
-      session.videoIds = [...session.videoIds.filter((v) => v !== videoId), videoId];
+      session.videoIds = orderVideoIds([...session.videoIds.filter((v) => v !== videoId), videoId], [...app.videos, video]);
       await db.sessions.put(session);
       if (day(meta)) {
         batchSessions.set(day(meta), session);

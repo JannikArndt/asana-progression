@@ -21,6 +21,35 @@ describe('downsampleLuma', () => {
     const out = downsampleLuma(src, 0, w, w, h, 4, 2);
     expect(Array.from(out)).toEqual([50, 50, 200, 200, 50, 50, 200, 200]);
   });
+
+  const meanOf = (a: Uint8Array) => a.reduce((s, v) => s + v, 0) / a.length;
+
+  it('does not alias periodic stripes onto one phase', () => {
+    // 4K plane, a bright line every 6th row (and every 6th column): true mean ≈ 42.5.
+    const w = 3840;
+    const h = 2160;
+    for (const vertical of [false, true]) {
+      const src = new Uint8Array(w * h);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if ((vertical ? x : y) % 6 === 0) src[y * w + x] = 255;
+      const out = downsampleLuma(src, 0, w, w, h, 160, 90);
+      expect(Math.abs(meanOf(out) - 42.5)).toBeLessThan(6);
+      expect(Math.max(...out)).toBeLessThan(110);
+    }
+  });
+
+  it('averages noise close to the block mean', () => {
+    const w = 960;
+    const h = 540;
+    const src = new Uint8Array(w * h);
+    let seed = 1;
+    for (let i = 0; i < src.length; i++) {
+      seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+      src[i] = 64 + ((seed >>> 16) % 128);
+    }
+    const out = downsampleLuma(src, 0, w, w, h, 160, 90);
+    expect(Math.abs(meanOf(out) - 127.5)).toBeLessThan(3);
+    for (const v of out) expect(Math.abs(v - 127.5)).toBeLessThan(25);
+  });
 });
 
 describe('rotateGray', () => {

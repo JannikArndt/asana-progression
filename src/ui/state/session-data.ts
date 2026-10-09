@@ -129,6 +129,13 @@ export function compareVideos(a: Video, b: Video): number {
   return (a.recordedAt ?? '').localeCompare(b.recordedAt ?? '') || a.fileName.localeCompare(b.fileName, undefined, { numeric: true });
 }
 
+/** Session video ids in recording order (clips "4 …" before "10 …"); unknown ids keep their place at the end. */
+export function orderVideoIds(ids: string[], videos: Video[]): string[] {
+  const byId = new Map(videos.map((v) => [v.id, v]));
+  const known = ids.filter((id) => byId.has(id)).sort((a, b) => compareVideos(byId.get(a)!, byId.get(b)!));
+  return [...new Set([...known, ...ids.filter((id) => !byId.has(id))])];
+}
+
 /** Groups videos by recording day (videos without a date use their import day). */
 export function groupByDay(videos: Video[]): Map<string, Video[]> {
   const out = new Map<string, Video[]>();

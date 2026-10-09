@@ -143,13 +143,14 @@ test('processing resumes after the page was reloaded mid-way', async ({ page }) 
   await expect(page.locator('dd', { hasText: /^1×$/ })).toBeVisible();
 });
 
-test('the luma-plane conversion finds the same holds', async ({ page }) => {
+test('a pinned luma-plane conversion is used and finds the three holds', async ({ page }) => {
   await page.goto('./');
   await page.evaluate(() => localStorage.setItem('asana.debug.pipeline', JSON.stringify({ grayMethod: 'luma' })));
   await importVideo(page, 'None');
   await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
   await page.getByRole('button', { name: /^Debug/ }).click();
-  await expect(page.locator('dt:has-text("Frame → gray") + dd')).toContainText('luma');
+  // Pinned runs skip the benchmark, so the row ends with the method (and pixel format).
+  await expect(page.locator('dt:has-text("Frame → gray") + dd')).toHaveText(/· luma( \([^)]*\))?$/);
 });
 
 test('capture works with the MediaPipe cropper (self-hosted wasm and model)', async ({ page }) => {

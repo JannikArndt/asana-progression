@@ -132,7 +132,7 @@ describe('OPFS wrappers without OPFS', () => {
     await expect(deleteFile('x')).resolves.toBeUndefined();
     await expect(opfsUsage()).rejects.toThrow(/OPFS/);
     await expect(listOpfs()).rejects.toThrow(/OPFS/);
-    await expect(removeOpfsPath('x/y')).resolves.toBeUndefined();
+    await expect(removeOpfsPath('x/y')).resolves.toBe(false);
   });
 });
 
@@ -178,7 +178,8 @@ describe('OPFS wrappers with a fake OPFS', () => {
         return handle(name);
       },
       async removeEntry(name: string) {
-        if (!files.delete(name)) throw new Error('NotFound');
+        if (name === 'locked.bin') throw Object.assign(new Error('locked'), { name: 'NoModificationAllowedError' });
+        if (!files.delete(name)) throw Object.assign(new Error('NotFound'), { name: 'NotFoundError' });
       },
       async *entries() {
         for (const name of files.keys()) yield [name, handle(name)] as const;
@@ -228,10 +229,20 @@ describe('OPFS wrappers with a fake OPFS', () => {
     expect(plan.keep.map((e) => e.path)).toEqual(['samples-v1.bin']);
     expect(plan.remove.map((e) => e.path)).toEqual(['quota-probe.bin', 'samples-gone.bin']);
     expect(plan.removeBytes).toBe(12);
-    for (const e of plan.remove) await removeOpfsPath(e.path);
-    await removeOpfsPath('does-not-exist');
-    await removeOpfsPath('');
+    for (const e of plan.remove) expect(await removeOpfsPath(e.path)).toBe(true);
+    expect(await removeOpfsPath('does-not-exist')).toBe(true);
+    expect(await removeOpfsPath('')).toBe(false);
+    files.set('locked.bin', new Uint8Array(1));
+    expect(await removeOpfsPath('locked.bin')).toBe(false);
+    files.delete('locked.bin');
     expect([...files.keys()]).toEqual(['samples-v1.bin']);
+  });
+
+  it('keeps unreadable (in use) files out of the removal plan', () => {
+    const plan = planCleanup([{ path: 'quota-probe.bin', size: -1 }, { path: 'old.bin', size: 3 }], [], [], sampleFileName);
+    expect(plan.inUse.map((e) => e.path)).toEqual(['quota-probe.bin']);
+    expect(plan.remove.map((e) => e.path)).toEqual(['old.bin']);
+    expect(plan.removeBytes).toBe(3);
   });
 
   it('detects short writes', async () => {
