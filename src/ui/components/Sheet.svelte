@@ -6,12 +6,39 @@
     onclose: () => void;
     children: Snippet;
     footer?: Snippet;
+    /** Keep the full height while the content changes (search sheets), so the sheet doesn't jump. */
+    fill?: boolean;
   }
-  let { title, onclose, children, footer }: Props = $props();
+  let { title, onclose, children, footer, fill = false }: Props = $props();
+
+  // iOS Safari: with the keyboard up, the layout viewport (what `position: fixed` uses) extends
+  // behind the keyboard, and the page scrolls when the content shrinks. Pin the scrim to the
+  // visual viewport instead, so the sheet's bottom edge stays on top of the keyboard.
+  let viewport = $state<{ top: number; height: number } | null>(null);
+  $effect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      viewport = { top: vv.offsetTop, height: vv.height };
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  });
 </script>
 
-<div class="scrim" role="presentation" onclick={(e) => e.target === e.currentTarget && onclose()}>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label={title}>
+<div
+  class="scrim"
+  role="presentation"
+  style:top={viewport ? `${viewport.top}px` : null}
+  style:height={viewport ? `${viewport.height}px` : null}
+  onclick={(e) => e.target === e.currentTarget && onclose()}
+>
+  <div class="sheet" class:fill role="dialog" aria-modal="true" aria-label={title}>
     <header>
       <h3>{title}</h3>
       <button class="btn quiet" type="button" onclick={onclose}>Close</button>
@@ -25,6 +52,8 @@
   .scrim {
     position: fixed;
     inset: 0;
+    bottom: auto;
+    height: 100%;
     z-index: 45;
     display: flex;
     align-items: flex-end;
@@ -36,12 +65,20 @@
   .sheet {
     width: 100%;
     max-width: 560px;
-    max-height: calc(100dvh - var(--safe-top) - var(--space-6));
+    max-height: calc(100% - var(--safe-top) - var(--space-6));
     display: flex;
     flex-direction: column;
     background: var(--color-bg);
     border-radius: var(--radius-l) var(--radius-l) 0 0;
     animation: rise var(--duration) var(--ease);
+  }
+
+  .sheet.fill {
+    height: calc(100% - var(--safe-top) - var(--space-6));
+  }
+
+  .sheet.fill .body {
+    flex: 1;
   }
 
   header {

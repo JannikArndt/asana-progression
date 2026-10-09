@@ -23,7 +23,8 @@ export interface ReviewItem {
 }
 
 export interface Suggestion extends Label {
-  reason: 'template' | 'lookahead' | 'history';
+  /** `rep`: another hold of the previous entry beyond its usual count. */
+  reason: 'template' | 'lookahead' | 'rep' | 'history';
 }
 
 /** A past hold, for suggestions without a template. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alignToTemplate, matchTemplateEntry, mergeCandidateFor, nextEntries, nextSide, suggest, usedEntries } from './suggest';
+import { alignToTemplate, entryUse, expectedHolds, matchTemplateEntry, nextEntries, nextSide, repsOf, suggest, usedEntries } from './suggest';
 import { DOWNWARD_DOG_ID, primarySeriesTemplate, SEED_ASANAS } from '../model/seed';
 import type { Asana, SequenceTemplate } from '../model/types';
 import type { HistoryEntry, ReviewItem } from './types';
@@ -8,6 +8,8 @@ const catalog = [...SEED_ASANAS];
 const full = primarySeriesTemplate();
 // Index-based tests below use the series without the leading sun salutations.
 const primary: SequenceTemplate = { ...full, entries: full.entries.filter((e) => e.asanaId !== DOWNWARD_DOG_ID) };
+/** A template with one repeatable entry. */
+const withReps: SequenceTemplate = { id: 'r', name: 'R', entries: [{ asanaId: 'navasana', reps: 3 }, { asanaId: 'bhujapidasana' }, { asanaId: 'kurmasana' }] };
 const idx = (asanaId: string, side?: 'R' | 'L', from = 0) =>
   primary.entries.findIndex((e, i) => i >= from && e.asanaId === asanaId && (side ? e.side === side : true));
 
@@ -22,7 +24,36 @@ describe('template suggestions', () => {
   it('starts the Primary series with the sun salutations', () => {
     const s = suggest([open('a'), open('b')], catalog, full, []);
     expect(s.a![0]).toMatchObject({ asanaId: DOWNWARD_DOG_ID, templateEntryIndex: 0, reason: 'template' });
-    expect(s.b![0]).toMatchObject({ asanaId: DOWNWARD_DOG_ID, templateEntryIndex: 1 });
+    // the second card is another rep of the same entry; the next asana is right behind it
+    expect(s.b![0]).toMatchObject({ asanaId: DOWNWARD_DOG_ID, templateEntryIndex: 0 });
+    expect(s.b![1]).toMatchObject({ asanaId: 'padangusthasana' });
+  });
+
+  it('offers reps of an entry up to its usual count, then more as an option', () => {
+    const items = [labeled('a', 'navasana', null, 0), labeled('b', 'navasana', null, 0), open('c'), open('d'), open('e')];
+    const s = suggest(items, catalog, withReps, []);
+    expect(s.c!.map((x) => [x.asanaId, x.templateEntryIndex, x.reason])).toEqual([
+      ['navasana', 0, 'template'],
+      ['bhujapidasana', 1, 'template'],
+      ['kurmasana', 2, 'template'],
+    ]);
+    // c is projected as the third rep → d moves on, but a fourth rep stays on offer
+    expect(s.d!.map((x) => [x.asanaId, x.reason])).toEqual([
+      ['bhujapidasana', 'template'],
+      ['navasana', 'rep'],
+      ['kurmasana', 'template'],
+    ]);
+    // single-rep entries are not repeated
+    expect(s.e!.map((x) => x.asanaId)).toEqual(['kurmasana']);
+    expect(entryUse(items)).toEqual(new Map([[0, 2]]));
+    expect(repsOf(withReps, 0)).toBe(3);
+    expect(repsOf(withReps, 9)).toBe(1);
+  });
+
+  it('only offers another rep when nothing else is left', () => {
+    const t: SequenceTemplate = { id: 'x', name: 'X', entries: [{ asanaId: 'navasana', reps: 2 }] };
+    const s = suggest([labeled('a', 'navasana', null, 0), labeled('b', 'navasana', null, 0), open('c')], catalog, t, []);
+    expect(s.c).toEqual([{ asanaId: 'navasana', side: null, templateEntryIndex: 0, reason: 'rep' }]);
   });
 
   it('starts at the first entry and projects consecutive entries onto open cards', () => {
@@ -40,13 +71,16 @@ describe('template suggestions', () => {
     expect(s.a).toBeUndefined();
   });
 
-  it('allows skipping and uses each entry at most once per session', () => {
+  it('allows skipping and uses each entry for its reps only', () => {
     const p = idx('paschimottanasana-a');
     const closing = idx('paschimottanasana-a', undefined, p + 1);
-    const items = [labeled('x', 'paschimottanasana-a', null, p), labeled('y', 'urdhva-dhanurasana', null, closing - 1), open('z')];
+    const ud = closing - 1;
+    const items = [labeled('x', 'paschimottanasana-a', null, p), labeled('y', 'urdhva-dhanurasana', null, ud), open('z')];
     const s = suggest(items, catalog, primary, []);
-    expect(s.z![0]).toMatchObject({ asanaId: 'paschimottanasana-a', templateEntryIndex: closing });
-    expect(usedEntries(items)).toEqual(new Set([p, closing - 1]));
+    // Urdhva Dhanurasana usually 3 times, then the closing Paschimottanasana (not the first one again)
+    expect(s.z![0]).toMatchObject({ asanaId: 'urdhva-dhanurasana', templateEntryIndex: ud });
+    expect(s.z![1]).toMatchObject({ asanaId: 'paschimottanasana-a', templateEntryIndex: closing });
+    expect(usedEntries(items)).toEqual(new Set([p, ud]));
   });
 
   it('prefers entries before the next confirmed entry (labels out of order)', () => {
@@ -142,28 +176,24 @@ describe('nextSide', () => {
 describe('matchTemplateEntry', () => {
   it('finds the next unused matching entry after the item position', () => {
     const p = idx('paschimottanasana-a');
+    const closing = idx('paschimottanasana-a', undefined, p + 1);
     const items = [labeled('a', 'paschimottanasana-a', null, p), open('b')];
-    expect(matchTemplateEntry(items, 'b', { asanaId: 'paschimottanasana-a', side: null }, primary)).toBe(idx('paschimottanasana-a', undefined, p + 1));
+    // same label as the previous hold → another rep of its entry
+    expect(matchTemplateEntry(items, 'b', { asanaId: 'paschimottanasana-a', side: null }, primary)).toBe(p);
+    const later = [labeled('a', 'paschimottanasana-a', null, p), labeled('u', 'urdhva-dhanurasana', null, closing - 1), open('b')];
+    expect(matchTemplateEntry(later, 'b', { asanaId: 'paschimottanasana-a', side: null }, primary)).toBe(closing);
     expect(matchTemplateEntry(items, 'b', { asanaId: 'marichyasana-a', side: 'L' }, primary)).toBe(idx('marichyasana-a', 'L'));
   });
   it('falls back to earlier unused entries and handles no template / no match', () => {
     const later = idx('savasana');
     const items = [labeled('a', 'savasana', null, later), open('b')];
     expect(matchTemplateEntry(items, 'b', { asanaId: 'dandasana', side: null }, primary)).toBe(idx('dandasana'));
-    expect(matchTemplateEntry(items, 'b', { asanaId: 'savasana', side: null }, primary)).toBeUndefined();
+    expect(matchTemplateEntry(items, 'b', { asanaId: 'savasana', side: null }, primary)).toBe(later);
+    const other = [labeled('a', 'savasana', null, later), labeled('c', 'dandasana', null, idx('dandasana')), open('b')];
+    expect(matchTemplateEntry(other, 'b', { asanaId: 'savasana', side: null }, primary)).toBeUndefined();
     expect(matchTemplateEntry(items, 'b', { asanaId: 'dandasana', side: null }, null)).toBeUndefined();
     // relabeling an item may reuse its own entry
     expect(matchTemplateEntry(items, 'a', { asanaId: 'savasana', side: null }, primary)).toBe(later);
-  });
-});
-
-describe('mergeCandidateFor', () => {
-  it('offers the previous non-dismissed item with the same label', () => {
-    const items: ReviewItem[] = [labeled('a', 'navasana', null), { key: 'd', status: 'dismissed' }, open('b')];
-    expect(mergeCandidateFor(items, 'b', { asanaId: 'navasana', side: null })).toBe('a');
-    expect(mergeCandidateFor(items, 'b', { asanaId: 'navasana', side: 'R' })).toBeNull();
-    expect(mergeCandidateFor([open('x'), open('b')], 'b', { asanaId: 'navasana', side: null })).toBeNull();
-    expect(mergeCandidateFor([open('b')], 'b', { asanaId: 'navasana', side: null })).toBeNull();
   });
 });
 
@@ -211,13 +241,17 @@ describe('alignToTemplate', () => {
 
   it('re-maps indices that point at another entry (template edited or switched)', () => {
     const out = alignToTemplate([labeled('x', 'b', 'L', 0), labeled('y', 'a', null, 1), labeled('z', 'a', null, 3)], t);
-    expect(out.map((i) => i.label?.templateEntryIndex)).toEqual([2, 3, 0]);
+    // z repeats y's label → another rep of entry 3
+    expect(out.map((i) => i.label?.templateEntryIndex)).toEqual([2, 3, 3]);
   });
 
-  it('drops indices without a matching entry and never uses an entry twice', () => {
+  it('treats consecutive identical labels as reps and drops indices without a match', () => {
     const out = alignToTemplate([labeled('x', 'a', null, 0), labeled('y', 'a', null, 0), labeled('z', 'a', null, 0), labeled('w', 'c', null, 2)], t);
-    expect(out.map((i) => i.label?.templateEntryIndex)).toEqual([0, 3, undefined, undefined]);
+    expect(out.map((i) => i.label?.templateEntryIndex)).toEqual([0, 0, 0, undefined]);
     expect(out[3]!.label).toEqual({ asanaId: 'c', side: null });
+    // a non-consecutive repeat takes the next free matching entry, then none
+    const gap = alignToTemplate([labeled('x', 'a', null, 0), labeled('y', 'b', 'R', 1), labeled('z', 'a', null, 0), labeled('v', 'b', 'R', 1), labeled('u', 'a', null, 0)], t);
+    expect(gap.map((i) => i.label?.templateEntryIndex)).toEqual([0, 1, 3, undefined, undefined]);
   });
 
   it('assigns entries to labels that had none, and clears all without a template', () => {
@@ -226,5 +260,35 @@ describe('alignToTemplate', () => {
     expect(alignToTemplate(items, null)[0]!.label).toEqual({ asanaId: 'b', side: 'R' });
     const none = [labeled('x', 'q', null)];
     expect(alignToTemplate(none, null)[0]).toBe(none[0]);
+  });
+});
+
+describe('expectedHolds', () => {
+  it('counts the template slots between the labeled neighbours, minus other open cards', () => {
+    const pl = idx('parsvottanasana', 'L');
+    const utk = idx('utkatasana');
+    // UHP A/B/C R, A/B/C L and Ardha Baddha Padmottanasana R/L lie between them
+    const items = [labeled('a', 'parsvottanasana', 'L', pl), open('b'), labeled('c', 'utkatasana', null, utk)];
+    expect(expectedHolds(items, 'b', primary)).toBe(utk - pl - 1);
+    expect(expectedHolds(items, 'b', primary)).toBe(8);
+    const two = [labeled('a', 'parsvottanasana', 'L', pl), open('b'), open('x'), { key: 'd', status: 'dismissed' as const }, labeled('c', 'utkatasana', null, utk)];
+    expect(expectedHolds(two, 'b', primary)).toBe(7);
+  });
+
+  it('includes the remaining reps of the previous entry', () => {
+    const items = [labeled('a', 'navasana', null, 0), open('b'), labeled('c', 'kurmasana', null, 2)];
+    expect(expectedHolds(items, 'b', withReps)).toBe(2 + 1);
+    const same = [labeled('a', 'navasana', null, 0), open('b'), labeled('c', 'navasana', null, 0)];
+    expect(expectedHolds(same, 'b', withReps)).toBe(1);
+  });
+
+  it('is undefined without a template or a labeled neighbour on both sides', () => {
+    const items = [labeled('a', 'navasana', null, 0), open('b')];
+    expect(expectedHolds(items, 'b', withReps)).toBeUndefined();
+    expect(expectedHolds([open('b'), labeled('a', 'navasana', null, 0)], 'b', withReps)).toBeUndefined();
+    expect(expectedHolds(items, 'b', null)).toBeUndefined();
+    expect(expectedHolds(items, 'zz', withReps)).toBeUndefined();
+    expect(expectedHolds([labeled('a', 'q', null), open('b'), labeled('c', 'navasana', null, 0)], 'b', withReps)).toBeUndefined();
+    expect(expectedHolds([labeled('a', 'kurmasana', null, 2), open('b'), labeled('c', 'navasana', null, 0)], 'b', withReps)).toBeUndefined();
   });
 });

@@ -7,6 +7,7 @@
   import { formatDuration, formatTime } from './timeline';
   import type { Suggestion } from '../../labeling';
   import type { SessionEntry } from '../state/session-data';
+  import type { RepInfo } from '../../progression';
 
   interface Props {
     entry: SessionEntry;
@@ -17,13 +18,17 @@
     selected: boolean;
     thumb?: Asset | undefined;
     captureStatus?: CaptureStatus | undefined;
+    rep?: RepInfo | undefined;
+    /** Holds the template expects in place of this card (≥ 2 offers a split). */
+    expected?: number | undefined;
+    onsplit?: (k: number) => void;
     onselect: () => void;
     onconfirm: () => void;
     onpick: () => void;
     onmore: () => void;
     onrestore: () => void;
   }
-  let { entry, number, suggestion, nameOf, frame, selected, thumb, captureStatus, onselect, onconfirm, onpick, onmore, onrestore }: Props = $props();
+  let { entry, number, suggestion, nameOf, frame, selected, thumb, captureStatus, rep, expected, onsplit, onselect, onconfirm, onpick, onmore, onrestore }: Props = $props();
   const statusText: Record<CaptureStatus, string> = {
     queued: 'Waiting to save still…',
     capturing: 'Saving still and clip…',
@@ -72,6 +77,7 @@
       <button class="label done" type="button" onclick={onpick}>
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
         <span>{label}</span>
+        {#if rep && rep.of > 1}<span class="rep tabular" aria-label="rep {rep.rep} of {rep.of}">{rep.rep}/{rep.of}</span>{/if}
       </button>
       {#if captureStatus && statusText[captureStatus]}
         <span class="capture {captureStatus}" data-capture={captureStatus}>{statusText[captureStatus]}</span>
@@ -87,6 +93,9 @@
           </button>
         {/if}
       </div>
+      {#if expected && onsplit}
+        <button class="hint" type="button" onclick={() => onsplit(expected)}>Template expects {expected} holds here · Split</button>
+      {/if}
     {/if}
   </div>
 </article>
@@ -103,6 +112,26 @@
 
   .review.selected {
     border-color: var(--color-accent);
+  }
+
+  .hint {
+    align-self: flex-start;
+    min-height: var(--touch);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-accent-strong);
+    font-size: var(--text-s);
+    text-align: left;
+  }
+
+  .rep {
+    margin-left: var(--space-1);
+    padding: 0 var(--space-1);
+    border-radius: var(--radius-s);
+    background: var(--color-accent-tint);
+    font-size: var(--text-s);
+    color: var(--color-text-2);
   }
 
   .review.dismissed {

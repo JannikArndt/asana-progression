@@ -38,6 +38,18 @@
     await save({ ...template, entries });
   }
 
+  /** Usual number of holds in a row for an entry (suggestions still allow fewer or more). */
+  async function setReps(i: number, reps: number) {
+    if (!template) return;
+    const n = Math.max(1, Math.min(20, reps));
+    const entries = template.entries.map((e, j) => {
+      if (j !== i) return e;
+      const { reps: _, ...rest } = e;
+      return n > 1 ? { ...rest, reps: n } : rest;
+    });
+    await save({ ...template, entries });
+  }
+
   async function removeAt(i: number) {
     if (!template) return;
     selected = null;
@@ -89,7 +101,7 @@
       <span class="visually-hidden">Template name</span>
       <input type="text" value={template.name} onchange={(e) => rename(e.currentTarget.value)} />
     </label>
-    <p class="muted small">{template.entries.length} entries · tap an entry to insert after it.</p>
+    <p class="muted small">{template.entries.length} entries · tap an entry to insert after it, move it or set its usual reps (×n; more or fewer are fine).</p>
 
     <ol class="entries">
       {#each template.entries as e, i (i)}
@@ -97,9 +109,12 @@
           <button class="entry" type="button" onclick={() => (selected = selected === i ? null : i)} aria-pressed={selected === i}>
             <span class="num tabular">{i + 1}</span>
             <span class="label">{nameOf.get(e.asanaId) ?? e.asanaId}{e.side ? ` ${e.side}` : ''}</span>
+            {#if (e.reps ?? 1) > 1}<span class="reps tabular">×{e.reps}</span>{/if}
           </button>
           {#if selected === i}
             <span class="tools">
+              <button class="icon" type="button" onclick={() => setReps(i, (e.reps ?? 1) - 1)} disabled={(e.reps ?? 1) <= 1} aria-label="Fewer reps">−</button>
+              <button class="icon" type="button" onclick={() => setReps(i, (e.reps ?? 1) + 1)} aria-label="More reps">+</button>
               <button class="icon" type="button" onclick={() => move(i, -1)} disabled={i === 0} aria-label="Move up">↑</button>
               <button class="icon" type="button" onclick={() => move(i, 1)} disabled={i === template.entries.length - 1} aria-label="Move down">↓</button>
               <button class="icon" type="button" onclick={() => removeAt(i)} aria-label="Remove entry">✕</button>
@@ -122,7 +137,7 @@
 </main>
 
 {#if adding && template}
-  <Sheet title="Add asanas" onclose={() => (adding = false)}>
+  <Sheet title="Add asanas" onclose={() => (adding = false)} fill>
     <div class="picker">
       <input type="search" placeholder="Search asanas" bind:value={query} autocomplete="off" />
       <div class="segmented" role="radiogroup" aria-label="Sides for sided asanas">
@@ -235,6 +250,12 @@
 
   .tools {
     display: flex;
+  }
+
+  .reps {
+    margin-left: auto;
+    color: var(--color-text-2);
+    font-size: var(--text-s);
   }
 
   .icon {

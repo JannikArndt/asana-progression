@@ -31,7 +31,7 @@
   }
 </script>
 
-<Sheet title="Label" {onclose}>
+<Sheet title="Label" {onclose} fill>
   <input class="search" type="search" placeholder="Search asanas" bind:value={query} autocomplete="off" autocapitalize="off" spellcheck="false" />
 
   {#if !query}

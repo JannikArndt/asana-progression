@@ -4,7 +4,7 @@
   import HoldViewer from '../components/HoldViewer.svelte';
   import Flipbook from '../components/Flipbook.svelte';
   import CropEditor from '../components/CropEditor.svelte';
-  import { displayCrop, itemAspect, nextColumns, progressionItems, typicalAspect, type ProgressionItem, type SideFilter } from '../../progression';
+  import { displayCrop, hasReps, itemAspect, nextColumns, progressionItems, repLabel, typicalAspect, type ProgressionItem, type RepFilter, type SideFilter } from '../../progression';
   import { app } from '../state/app.svelte';
   import { router } from '../state/router.svelte';
   import { capture } from '../state/capture.svelte';
@@ -38,6 +38,8 @@
   });
 
   let side = $state<SideFilter>('both');
+  /** All reps, or only the first / last of each run (e.g. 1st vs 5th Navasana across days). */
+  let reps = $state<RepFilter>('all');
   let viewerIndex = $state<number | null>(null);
   let flipbook = $state(false);
   let editing = $state<ProgressionItem | null>(null);
@@ -62,7 +64,8 @@
 
   const asana = $derived(app.asanas.find((a) => a.id === id));
   /** Oldest first (viewer and flipbook order). */
-  const items = $derived(progressionItems(id, app.holds, app.sessions, app.assets, side));
+  const items = $derived(progressionItems(id, app.holds, app.sessions, app.assets, side, reps));
+  const repeated = $derived(hasReps(id, app.holds, app.sessions));
   /** Newest first (feed and grid). */
   const newest = $derived([...items].reverse());
   const withStills = $derived(items.filter((i) => i.still));
@@ -161,6 +164,13 @@
           {/each}
         </div>
       {/if}
+      {#if repeated}
+        <div class="segmented" role="radiogroup" aria-label="Reps">
+          {#each [['all', 'All reps'], ['first', 'First'], ['last', 'Last']] as const as [value, text] (value)}
+            <button type="button" role="radio" aria-checked={reps === value} class:on={reps === value} onclick={() => (reps = value)}>{text}</button>
+          {/each}
+        </div>
+      {/if}
       <div class="segmented view" role="radiogroup" aria-label="Layout">
         <button type="button" role="radio" aria-checked={mode === 'feed'} class:on={mode === 'feed'} onclick={() => (mode = 'feed')}>Feed</button>
         <button type="button" role="radio" aria-checked={mode === 'grid'} class:on={mode === 'grid'} onclick={() => (mode = 'grid')}>Grid</button>
@@ -187,7 +197,7 @@
                 {/snippet}
               </LazyAsset>
               <span class="caption">
-                <span class="date tabular">{formatDay(item.date, true)}{item.hold.side ? ` · ${item.hold.side}` : ''}</span>
+                <span class="date tabular">{formatDay(item.date, true)}{item.hold.side ? ` · ${item.hold.side}` : ''}{repLabel(item) ? ` · rep ${repLabel(item)}` : ''}</span>
                 {#if item.note}<span class="note">{item.note}</span>{/if}
               </span>
             </button>
@@ -220,7 +230,7 @@
                   </div>
                 {/snippet}
               </LazyAsset>
-              <span class="tile-caption tabular">{formatDay(item.date)}{item.hold.side ? ` · ${item.hold.side}` : ''}</span>
+              <span class="tile-caption tabular">{formatDay(item.date)}{item.hold.side ? ` · ${item.hold.side}` : ''}{repLabel(item) ? ` · ${repLabel(item)}` : ''}</span>
             </button>
           </div>
         {/each}
@@ -291,7 +301,8 @@
 
   .bar {
     display: flex;
-    gap: var(--space-3);
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
   }
 
   .segmented {

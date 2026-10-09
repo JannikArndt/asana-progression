@@ -1,4 +1,4 @@
-import type { Asana, PostureClass, SequenceTemplate, Side } from './types';
+import type { Asana, PostureClass, SequenceTemplate, Side, TemplateEntry } from './types';
 
 /**
  * Asana catalog seed (editable data). Lettered variants are separate asanas. Display names in
@@ -114,28 +114,54 @@ export const SEED_ASANAS: readonly Asana[] = GROUPS.flatMap(({ group, rows }) =>
 
 /** Downward dog: held for 5 breaths once per sun salutation. */
 export const DOWNWARD_DOG_ID = 'adho-mukha-svanasana';
-/** Sun salutations at the start of the Primary series: 5 × A, then 3 × B. */
-export const SUN_SALUTATIONS = 5 + 3;
+/** Usual repetitions in the Primary series (suggestions allow fewer or more). */
+export const PRIMARY_REPS: Readonly<Record<string, number>> = {
+  // Sun salutations: 5 × A, then 3 × B.
+  [DOWNWARD_DOG_ID]: 8,
+  navasana: 5,
+  'urdhva-dhanurasana': 3,
+};
 
 /** Seed asanas added after the first catalog version, by version. Deleted asanas are not re-added. */
 export const SEED_ADDED: Readonly<Record<number, readonly string[]>> = { 2: [DOWNWARD_DOG_ID] };
 
-/** Catalog upgrade for an existing Primary series template: prepends the sun salutations once. */
+/** Catalog upgrade (v2) for an existing Primary series template: prepends the sun salutations once. */
 export function withSunSalutations(t: SequenceTemplate): SequenceTemplate {
   if (t.entries.some((e) => e.asanaId === DOWNWARD_DOG_ID)) return t;
-  return { ...t, entries: [...Array.from({ length: SUN_SALUTATIONS }, () => ({ asanaId: DOWNWARD_DOG_ID })), ...t.entries] };
+  return { ...t, entries: [{ asanaId: DOWNWARD_DOG_ID, reps: PRIMARY_REPS[DOWNWARD_DOG_ID] }, ...t.entries] };
+}
+
+/**
+ * Catalog upgrade (v3): consecutive identical entries become one entry with `reps` (the 8 down dogs
+ * of v2); in the Primary series, Navasana and Urdhva Dhanurasana get their usual reps unless set.
+ */
+export function withReps(t: SequenceTemplate): SequenceTemplate {
+  const entries: TemplateEntry[] = [];
+  for (const e of t.entries) {
+    const last = entries[entries.length - 1];
+    if (last && last.asanaId === e.asanaId && (last.side ?? null) === (e.side ?? null)) {
+      last.reps = (last.reps ?? 1) + (e.reps ?? 1);
+      continue;
+    }
+    entries.push({ ...e });
+  }
+  if (t.id === PRIMARY_SERIES_ID) {
+    for (const e of entries) if (e.reps === undefined && PRIMARY_REPS[e.asanaId]) e.reps = PRIMARY_REPS[e.asanaId];
+  }
+  return { ...t, entries };
 }
 
 export const PRIMARY_SERIES_ID = 'primary-series';
 
 /**
  * Default "Primary series" template: catalog order, sided asanas right then left. Exceptions to
- * plain catalog order: Adho Mukha Svanasana once per sun salutation, Utthita Hasta Padangusthasana
+ * plain catalog order: Utthita Hasta Padangusthasana
  * runs A/B/C right, then A/B/C left, and Paschimottanasana (A) appears again after Urdhva
- * Dhanurasana as the closing forward bend.
+ * Dhanurasana as the closing forward bend. Repeated holds are one entry with `reps`
+ * (`PRIMARY_REPS`: sun-salutation down dogs, Navasana, Urdhva Dhanurasana).
  */
 export function primarySeriesTemplate(asanas: readonly Asana[] = SEED_ASANAS): SequenceTemplate {
-  const entries: Array<{ asanaId: string; side?: Side }> = [];
+  const entries: TemplateEntry[] = [];
   const byId = new Map(asanas.map((a) => [a.id, a]));
   const add = (id: string) => {
     const a = byId.get(id);
@@ -151,11 +177,9 @@ export function primarySeriesTemplate(asanas: readonly Asana[] = SEED_ASANAS): S
       }
       continue;
     }
-    if (a.id === DOWNWARD_DOG_ID) {
-      for (let i = 0; i < SUN_SALUTATIONS; i++) entries.push({ asanaId: a.id });
-      continue;
-    }
     add(a.id);
+    const reps = PRIMARY_REPS[a.id];
+    if (reps) entries[entries.length - 1]!.reps = reps;
     if (a.id === 'urdhva-dhanurasana') add('paschimottanasana-a');
   }
   return { id: PRIMARY_SERIES_ID, name: 'Primary series', entries };

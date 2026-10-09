@@ -11,21 +11,43 @@ function entryLabel(t: SequenceTemplate, i: number, catalog: Map<string, Asana>)
   return { asanaId: e.asanaId, side: e.side ?? (a?.sided ? 'R' : null), templateEntryIndex: i };
 }
 
-/** Template entry indices used by labeled items (each entry at most once per session). */
+/** Template entry indices used by labeled items. */
 export function usedEntries(items: ReviewItem[]): Set<number> {
-  const s = new Set<number>();
+  return new Set(entryUse(items).keys());
+}
+
+/** How many labeled items use each template entry (an entry with `reps` takes several holds). */
+export function entryUse(items: ReviewItem[]): Map<number, number> {
+  const use = new Map<number, number>();
   for (const it of items) {
     const i = it.label?.templateEntryIndex;
-    if (it.status === 'labeled' && i !== undefined) s.add(i);
+    if (it.status === 'labeled' && i !== undefined) use.set(i, (use.get(i) ?? 0) + 1);
   }
-  return s;
+  return use;
+}
+
+/** Usual number of holds for a template entry (at least 1). */
+export function repsOf(t: SequenceTemplate, i: number): number {
+  return Math.max(1, Math.round(t.entries[i]?.reps ?? 1));
+}
+
+/** True once an entry has its usual number of holds. */
+function isFull(t: SequenceTemplate, use: Map<number, number>, i: number): boolean {
+  return (use.get(i) ?? 0) >= repsOf(t, i);
+}
+
+function sameLabel(t: SequenceTemplate, i: number, label: { asanaId: string; side: Label['side'] }): boolean {
+  const e = t.entries[i];
+  return !!e && e.asanaId === label.asanaId && (e.side ?? null) === (label.side ?? null);
 }
 
 /**
  * Template suggestions for every open item:
- *  - follow the template order; each entry at most once per session; skipping is allowed
- *  - start after the last confirmed entry before the item (open items before it are projected to
- *    take the next entries, so a run of open cards gets consecutive suggestions)
+ *  - follow the template order; an entry takes up to its `reps` holds (default 1); skipping is
+ *    allowed, and a repeatable entry (reps > 1) is still offered for another rep beyond its count
+ *  - start at the last confirmed entry before the item while it expects more reps, else after it
+ *    (open items before it are projected to take the next entries, so a run of open cards gets
+ *    consecutive suggestions)
  *  - prefer entries before the next confirmed entry after the item
  *  - if the item's posture class contradicts the next entry, look ahead up to `lookahead` entries
  */
@@ -37,7 +59,8 @@ function templateSuggestions(
   lookahead: number,
 ): Map<string, Suggestion[]> {
   const out = new Map<string, Suggestion[]>();
-  const taken = usedEntries(items);
+  const use = entryUse(items);
+  const full = (e: number) => isFull(template, use, e);
   const n = template.entries.length;
   // Next confirmed entry index after each position.
   const upper: number[] = new Array(items.length).fill(n);
@@ -56,11 +79,14 @@ function templateSuggestions(
     if (it.status === 'dismissed') return;
     const inRange: number[] = [];
     const after: number[] = [];
+    if (cursor >= 0 && !full(cursor)) inRange.push(cursor);
     for (let e = cursor + 1; e < n; e++) {
-      if (!taken.has(e)) (e < upper[i]! ? inRange : after).push(e);
+      if (!full(e)) (e < upper[i]! ? inRange : after).push(e);
     }
     const ordered = [...inRange, ...after];
-    if (ordered.length === 0) return;
+    // Another rep beyond the usual count stays possible for repeatable entries.
+    const extra = cursor >= 0 && full(cursor) && repsOf(template, cursor) > 1 ? cursor : undefined;
+    if (ordered.length === 0 && extra === undefined) return;
     let picks = ordered.slice(0, limit);
     let reasons: Suggestion['reason'][] = picks.map(() => 'template');
     const cls = it.postureClass;
@@ -75,12 +101,17 @@ function templateSuggestions(
       picks = [...good, ...rest].slice(0, limit);
       reasons = picks.map((e) => (good.includes(e) ? 'lookahead' : 'template'));
     }
+    if (extra !== undefined) {
+      const at = Math.min(1, picks.length);
+      picks = [...picks.slice(0, at), extra, ...picks.slice(at)].slice(0, limit);
+      reasons = [...reasons.slice(0, at), 'rep' as const, ...reasons.slice(at)].slice(0, limit);
+    }
     out.set(
       it.key,
       picks.map((e, k) => ({ ...entryLabel(template, e, catalog), reason: reasons[k]! })),
     );
     // Project: this open item takes its top suggestion.
-    taken.add(picks[0]!);
+    use.set(picks[0]!, (use.get(picks[0]!) ?? 0) + 1);
     cursor = picks[0]!;
   });
   return out;
@@ -173,8 +204,9 @@ export function suggest(
 }
 
 /**
- * Template entry for a label chosen by hand (search): the first unused entry with the same asana
- * and side after the item's position, else any unused matching entry. Undefined if none.
+ * Template entry for a label chosen by hand (search): the entry of the previous labeled item if it
+ * has the same asana and side (another rep), else the first matching entry after it that still
+ * expects holds, else any such entry. Undefined if none.
  */
 export function matchTemplateEntry(
   items: ReviewItem[],
@@ -183,34 +215,28 @@ export function matchTemplateEntry(
   template: SequenceTemplate | null,
 ): number | undefined {
   if (!template) return undefined;
-  const taken = usedEntries(items.filter((it) => it.key !== key));
-  let cursor = -1;
-  for (const it of items) {
-    if (it.key === key) break;
-    if (it.status === 'labeled' && it.label?.templateEntryIndex !== undefined) cursor = it.label.templateEntryIndex;
-  }
-  const matches = (i: number) => {
-    const e = template.entries[i]!;
-    return e.asanaId === label.asanaId && (e.side ?? null) === (label.side ?? null) && !taken.has(i);
-  };
+  const use = entryUse(items.filter((it) => it.key !== key));
+  const cursor = cursorBefore(items, key);
+  const prev = [...items.slice(0, Math.max(0, items.findIndex((it) => it.key === key)))].reverse().find((it) => it.status === 'labeled');
+  const repeat = prev?.label?.asanaId === label.asanaId && (prev.label.side ?? null) === (label.side ?? null);
+  if (repeat && cursor >= 0 && sameLabel(template, cursor, label)) return cursor;
+  const matches = (i: number) => sameLabel(template, i, label) && !isFull(template, use, i);
   for (let i = cursor + 1; i < template.entries.length; i++) if (matches(i)) return i;
   for (let i = 0; i <= cursor && i < template.entries.length; i++) if (matches(i)) return i;
   return undefined;
 }
 
-/** Key of the previous (non-dismissed) item if it carries the same asana and side. */
-export function mergeCandidateFor(items: ReviewItem[], key: string, label: { asanaId: string; side: Label['side'] }): string | null {
-  const idx = items.findIndex((it) => it.key === key);
-  for (let i = idx - 1; i >= 0; i--) {
-    const it = items[i]!;
-    if (it.status === 'dismissed') continue;
-    if (it.status === 'labeled' && it.label?.asanaId === label.asanaId && (it.label.side ?? null) === (label.side ?? null)) return it.key;
-    return null;
+/** Template entry of the last labeled item before `key` (-1 if none). */
+function cursorBefore(items: ReviewItem[], key: string): number {
+  let cursor = -1;
+  for (const it of items) {
+    if (it.key === key) break;
+    if (it.status === 'labeled' && it.label?.templateEntryIndex !== undefined) cursor = it.label.templateEntryIndex;
   }
-  return null;
+  return cursor;
 }
 
-/** The next `count` unused template entries after the last labeled entry before `key`. */
+/** The next `count` template entries that still expect holds, from the last labeled entry before `key`. */
 export function nextEntries(
   items: ReviewItem[],
   key: string,
@@ -220,49 +246,86 @@ export function nextEntries(
 ): Label[] {
   if (!template) return [];
   const byId = new Map(catalog.map((a) => [a.id, a]));
-  const taken = usedEntries(items.filter((it) => it.key !== key));
-  let cursor = -1;
-  for (const it of items) {
-    if (it.key === key) break;
-    if (it.status === 'labeled' && it.label?.templateEntryIndex !== undefined) cursor = it.label.templateEntryIndex;
-  }
+  const use = entryUse(items.filter((it) => it.key !== key));
+  const cursor = cursorBefore(items, key);
   const out: Label[] = [];
-  for (let i = cursor + 1; i < template.entries.length && out.length < count; i++) {
-    if (!taken.has(i)) out.push(entryLabel(template, i, byId));
+  const start = cursor >= 0 && !isFull(template, use, cursor) ? cursor : cursor + 1;
+  for (let i = start; i < template.entries.length && out.length < count; i++) {
+    if (!isFull(template, use, i)) out.push(entryLabel(template, i, byId));
   }
   return out;
 }
 
 /**
  * Re-maps the template entry of every labeled item onto `template`: an index is kept while it
- * still points at an unused entry with the same asana and side; otherwise (template switched or
- * edited) the first unused matching entry after the previous labeled one is used, else none.
+ * still points at a matching entry (same asana and side) that expects more holds, or is the
+ * previous item's entry (another rep); otherwise (template switched or edited) the first such
+ * entry after the previous labeled one is used, else none.
  */
 export function alignToTemplate(items: ReviewItem[], template: SequenceTemplate | null): ReviewItem[] {
   const n = template?.entries.length ?? 0;
-  const taken = new Set<number>();
+  const use = new Map<number, number>();
   let cursor = -1;
+  let prev: Label | null = null;
   return items.map((it) => {
     if (it.status !== 'labeled' || !it.label) return it;
     const { templateEntryIndex: idx, ...label } = it.label;
-    const matches = (i: number) => {
-      const e = template!.entries[i]!;
-      return !taken.has(i) && e.asanaId === label.asanaId && (e.side ?? null) === (label.side ?? null);
+    const repeat = !!prev && prev.asanaId === label.asanaId && (prev.side ?? null) === (label.side ?? null);
+    prev = label;
+    const matches = (i: number) => sameLabel(template!, i, label) && ((repeat && i === cursor) || !isFull(template!, use, i));
+    const take = (i: number) => {
+      use.set(i, (use.get(i) ?? 0) + 1);
+      cursor = i;
     };
     let found: number | undefined;
     if (template && idx !== undefined && idx < n && matches(idx)) found = idx;
     for (let i = cursor + 1; found === undefined && i < n; i++) if (matches(i)) found = i;
     for (let i = 0; found === undefined && i <= cursor && i < n; i++) if (matches(i)) found = i;
     if (found === idx) {
-      if (found !== undefined) {
-        taken.add(found);
-        cursor = found;
-      }
+      if (found !== undefined) take(found);
       return it;
     }
     if (found === undefined) return { ...it, label };
-    taken.add(found);
-    cursor = found;
+    take(found);
     return { ...it, label: { ...label, templateEntryIndex: found } };
   });
+}
+
+/**
+ * How many holds the template expects in place of `key` and the other open items between the
+ * labeled items around it: the remaining reps of the previous labeled entry plus all reps of the
+ * entries before the next labeled entry, minus the other open items in between. Undefined without
+ * a template or a labeled item on both sides (then nothing bounds the count).
+ */
+export function expectedHolds(items: ReviewItem[], key: string, template: SequenceTemplate | null): number | undefined {
+  if (!template) return undefined;
+  const at = items.findIndex((it) => it.key === key);
+  if (at < 0) return undefined;
+  let lo = -1;
+  let hi = -1;
+  for (let i = at - 1; i >= 0; i--) {
+    const it = items[i]!;
+    if (it.status === 'labeled') {
+      if (it.label?.templateEntryIndex === undefined) return undefined;
+      lo = i;
+      break;
+    }
+  }
+  for (let i = at + 1; i < items.length; i++) {
+    const it = items[i]!;
+    if (it.status === 'labeled') {
+      if (it.label?.templateEntryIndex === undefined) return undefined;
+      hi = i;
+      break;
+    }
+  }
+  if (lo < 0 || hi < 0) return undefined;
+  const p = items[lo]!.label!.templateEntryIndex!;
+  const q = items[hi]!.label!.templateEntryIndex!;
+  if (q < p) return undefined;
+  const use = entryUse(items.filter((it) => it.key !== key));
+  let slots = Math.max(0, repsOf(template, p) - (use.get(p) ?? 0));
+  for (let e = p + 1; e < q; e++) slots += repsOf(template, e);
+  const others = items.slice(lo + 1, hi).filter((it) => it.key !== key && it.status === 'open').length;
+  return slots - others;
 }

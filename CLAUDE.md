@@ -63,13 +63,29 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
 ### Labeling (milestone 2)
 
 - Catalog-first: holds reference asanas; a `SequenceTemplate` only drives suggestions. Seeded on
-  first run (`catalogVersion` setting, now 2): 63 asanas (21 sided, each with a `group` and,
-  except Adho Mukha Svanasana, a coarse `posture` class) and "Primary series" (92 entries: 8 ×
-  Adho Mukha Svanasana for the sun salutations, 5 A + 3 B; sided asanas R then L; Utthita Hasta
+  first run (`catalogVersion` setting, now 3): 63 asanas (21 sided, each with a `group` and,
+  except Adho Mukha Svanasana, a coarse `posture` class) and "Primary series" (85 entries; reps:
+  Adho Mukha Svanasana ×8 for the sun salutations, 5 A + 3 B, Navasana ×5, Urdhva Dhanurasana ×3;
+  sided asanas R then L; Utthita Hasta
   Padangusthasana A/B/C R then A/B/C L; Paschimottanasana A again after Urdhva Dhanurasana;
   Virabhadrasana B is R then L like everything else — edit in M5 if the practice differs).
-  Upgrades only add what a version introduced (`SEED_ADDED`, never re-adding deleted asanas) and
-  prepend the sun salutations to an existing Primary series once; a deleted template stays deleted.
+  Upgrades only add what a version introduced (`SEED_ADDED`, never re-adding deleted asanas),
+  prepend the sun salutations to an existing Primary series once (v2) and turn consecutive
+  identical entries into `reps` (v3); a deleted template stays deleted.
+- **Reps**: consecutive holds of the same asana and side in a session are reps 1…n of one run
+  (`progression.holdReps`, derived, never stored), e.g. the 1st and the 5th Navasana differ a lot.
+  A template entry's `reps` is the usual count (editable in the template editor), not a limit:
+  suggestions keep offering the entry until it has its reps, then still offer "another rep"
+  (`reason: 'rep'`) behind the next entry; a label equal to the previous hold's becomes another
+  rep of the same entry (no merge prompt; "Merge with previous" stays in the card menu).
+  Progression filters All reps / First / Last (first vs first across days) and shows "rep 2/5".
+- **Split into k**: `labeling.splitInto` cuts a candidate into k holds at the k most prominent
+  valleys of C(t) inside it (topographic prominence, cut at the biggest change between valleys;
+  halves the longest part if there are fewer). With k known no still threshold is needed — on the
+  outdoor fixture, 18:11–20:03 with k = 6 yields the six UHP valleys although the global threshold
+  marks the whole span as still. `expectedHolds` derives k from the template (slots between the
+  labeled neighbours, incl. reps, minus other open cards); the card shows "Template expects k
+  holds here · Split", the menu has "Split into several…".
 - Sessions: created at import (one per video; files of one batch recorded on the same day share
   a session). The template is chosen per session at import (default Primary series, "None"
   preselected for clips < 5 min) and can be switched on the review screen. Milestone-1 videos
@@ -78,18 +94,18 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   labels live in `Hold` records. Every action writes immediately — there is never unsaved
   labeling state.
 - Suggestions (`labeling/suggest.ts`, run in `ui/workers/suggest.worker.ts`): template order,
-  each entry once per session, R before L (template order), skipping allowed. Start after the
+  each entry for its `reps` (see Reps), R before L (template order), skipping allowed. Start after the
   last confirmed entry; consecutive open cards are projected onto consecutive entries; entries
   before the next confirmed entry are preferred. If a card's optional posture class contradicts
   the next entry, look ahead up to 5 entries. Top 3. Without a template (or once it is
   exhausted): frecency (exp(−age/45 d)) plus a boost for what usually follows the previous
-  asana in past sessions. A label equal to the previous hold's label and side offers a merge
-  (the stiller frame wins).
+  asana in past sessions.
 - Re-running detection reconciles: labeled holds and manual candidates are kept, dismissals are
   carried over to overlapping new candidates.
 - Screens: Home (tabs Asanas / Sessions), session review (`#/session/<id>`: timeline, cards with
   one-tap confirm, picker with search incl. initials like "uhp", actions: choose frame, split,
-  merge with previous, not a pose, full-resolution frame, add missed hold), asana progression
+  split into several, merge with previous, not a pose, full-resolution frame, add missed hold),
+  asana progression
   (`#/asana/<id>`). `#/video/<id>` redirects to the session.
 - Labeled holds keep `templateEntryIndex`; `alignToTemplate` re-maps it whenever the session's
   template was switched or edited, so suggestions never follow stale indices.
@@ -113,7 +129,8 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
 ### Progression (milestone 4)
 
 `#/asana/<id>` (`screens/AsanaProgression.svelte`): feed (newest first, date, side, note) or grid
-(2–4 columns, pinch or ctrl+wheel; tiles share the median crop aspect), side filter, viewer
+(2–4 columns, pinch or ctrl+wheel; tiles share the median crop aspect), side filter, rep filter
+(All reps / First / Last, when the asana has runs of reps), viewer
 (`HoldViewer`: swipe through all holds oldest → newest, tap plays the looping clip, pin a hold →
 split slider or crossfade, edit crop, jump to session), flipbook (`Flipbook`: stills in date order,
 0.5–12 per second, preloads ahead). Holds without a still fall back to the tiny analysis frame.
@@ -230,6 +247,9 @@ Tokens in `src/ui/styles/tokens.css` (colours, spacing, radii, type scale, motio
 use them everywhere, including canvas drawing (TimelineGraph reads them via
 `getComputedStyle`). Calm and light: off-white `--color-bg`, near-black text, one muted sage
 accent, system font, hairlines, no heavy shadows, touch targets ≥ 44 px.
+
+Sheets (`components/Sheet.svelte`) are pinned to `visualViewport` (iOS keyboard: the layout
+viewport extends behind it); search sheets pass `fill` to keep their height while results shrink.
 
 Timeline graph (`src/ui/components/TimelineGraph.svelte`, maths in `timeline.ts`): canvas,
 min/max envelope per pixel when zoomed out, pinch zoom, inertial horizontal pan

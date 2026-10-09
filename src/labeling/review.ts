@@ -77,6 +77,82 @@ export function splitCandidate(c: ReviewCandidate, atS: number, sig: SignalView)
 }
 
 /**
+ * Splits a candidate into `k` holds (k e.g. from the template: 6 × Utthita Hasta Padangusthasana
+ * between two labeled holds). Knowing k replaces the still threshold: every hold is a valley of
+ * C(t), so take the k most prominent valleys in the span (prominence = how far C rises on the
+ * lower side before reaching a deeper point) and cut at the biggest posture change between
+ * consecutive ones. Without k valleys, the longest parts are halved. The first part keeps the id,
+ * status and hold; the others are new open candidates.
+ */
+export function splitInto(c: ReviewCandidate, k: number, sig: SignalView): ReviewCandidate[] {
+  const hz = sig.sampleHz;
+  const a = Math.max(0, Math.ceil(c.startS * hz));
+  const b = Math.max(a, Math.min(sig.C.length, Math.floor(c.endS * hz)));
+  const parts = Math.max(1, Math.min(Math.floor(k), b - a));
+  if (parts < 2) return [c];
+  const value = (i: number) => {
+    const v = sig.C[i];
+    return v !== undefined && Number.isFinite(v) ? v : NaN;
+  };
+  const argmax = (from: number, to: number) => {
+    let best = from;
+    for (let i = from; i < to; i++) if (!(value(i) <= value(best))) best = Number.isNaN(value(i)) ? best : i;
+    return best;
+  };
+  const valleys = valleyProminence(value, a, b)
+    .sort((x, y) => y.prominence - x.prominence || x.at - y.at)
+    .slice(0, parts)
+    .map((v) => v.at)
+    .sort((x, y) => x - y);
+  const cuts = valleys.slice(1).map((v, i) => argmax(valleys[i]! + 1, v));
+  // Fewer valleys than holds: halve the longest part.
+  while (cuts.length < parts - 1) {
+    const bounds = [a, ...cuts.sort((x, y) => x - y), b];
+    let li = 0;
+    for (let i = 1; i < bounds.length - 1; i++) if (bounds[i + 1]! - bounds[i]! > bounds[li + 1]! - bounds[li]!) li = i;
+    const mid = Math.round((bounds[li]! + bounds[li + 1]!) / 2);
+    if (mid <= bounds[li]! || mid >= bounds[li + 1]!) break;
+    cuts.push(mid);
+  }
+  cuts.sort((x, y) => x - y);
+  const edges = [c.startS, ...cuts.map((i) => i / hz), c.endS];
+  const { holdId, ...rest } = c;
+  return edges.slice(0, -1).map((startS, i) => {
+    const endS = edges[i + 1]!;
+    const fit = fitSpan(startS, endS, sig);
+    const alternatesS = [...c.alternatesS, c.bestS].filter((t) => t >= startS && t < endS && t !== fit.bestS).sort((x, y) => x - y);
+    return i === 0
+      ? { ...c, startS, endS, ...fit, alternatesS }
+      : { ...rest, id: editedId('split'), startS, endS, ...fit, alternatesS, status: 'open' as const, origin: 'manual' as const };
+  });
+}
+
+/**
+ * Local minima of `value` in [a, b) with their prominence: from the minimum, the highest value
+ * passed on each side before reaching a lower point (or the span's end); the lower of the two
+ * sides minus the minimum. A plateau counts once (its first sample). NaN samples are skipped.
+ */
+export function valleyProminence(value: (i: number) => number, a: number, b: number): Array<{ at: number; prominence: number }> {
+  const idx: number[] = [];
+  for (let i = a; i < b; i++) if (!Number.isNaN(value(i))) idx.push(i);
+  const v = idx.map(value);
+  const out: Array<{ at: number; prominence: number }> = [];
+  for (let j = 0; j < v.length; j++) {
+    const x = v[j]!;
+    if (j > 0 && v[j - 1]! <= x) continue;
+    let r = j;
+    while (r + 1 < v.length && v[r + 1] === x) r++;
+    if (r + 1 < v.length && v[r + 1]! < x) continue;
+    let left = x;
+    for (let l = j - 1; l >= 0 && v[l]! >= x; l--) left = Math.max(left, v[l]!);
+    let right = x;
+    for (let q = r + 1; q < v.length && v[q]! >= x; q++) right = Math.max(right, v[q]!);
+    out.push({ at: idx[j]!, prominence: Math.min(left, right) - x });
+  }
+  return out;
+}
+
+/**
  * A candidate for a hold the detector missed, around `atS`: expands over the surrounding samples
  * whose posture change is at or below the 75th percentile (at least ±2 s, at most ±60 s).
  */

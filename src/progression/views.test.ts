@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayCrop, flipbookInterval, hasBothSides, itemAspect, nextColumns, progressionItems, swipeIndex, typicalAspect } from './views';
+import { displayCrop, flipbookInterval, hasBothSides, hasReps, holdReps, itemAspect, nextColumns, progressionItems, repLabel, swipeIndex, typicalAspect } from './views';
 import type { Asset, Hold, Session } from '../model/types';
 
 const hold = (id: string, sessionId: string, asanaId: string, side: Hold['side'], startS = 0): Hold => ({
@@ -12,6 +12,42 @@ const sessions: Session[] = [
   { id: 's1', date: '2025-08-28T18:00:00+02:00', note: 'first', videoIds: [] },
   { id: 's2', date: '2026-02-01T07:00:00+01:00', note: '', videoIds: [] },
 ];
+
+describe('reps', () => {
+  // s1: video v2 comes before v1 in the session
+  const ses: Session[] = [{ id: 's1', date: '2025-01-01', note: '', videoIds: ['v2', 'v1'] }, { id: 's2', date: '2025-02-01', note: '', videoIds: ['v'] }];
+  const h = (id: string, sid: string, vid: string, asanaId: string, startS: number, side: Hold['side'] = null): Hold => ({ ...hold(id, sid, asanaId, side, startS), videoId: vid });
+  const holds = [
+    h('n3', 's1', 'v1', 'navasana', 10),
+    h('n1', 's1', 'v2', 'navasana', 100),
+    h('n2', 's1', 'v2', 'navasana', 200),
+    h('k', 's1', 'v1', 'kurmasana', 50),
+    h('n4', 's1', 'v1', 'navasana', 90),
+    h('t1', 's1', 'v1', 'trikonasana', 120, 'R'),
+    h('t2', 's1', 'v1', 'trikonasana', 150, 'L'),
+    h('m', 's2', 'v', 'navasana', 5),
+  ];
+
+  it('numbers consecutive holds of the same asana and side per session', () => {
+    const r = holdReps(holds, ses);
+    expect(['n1', 'n2', 'n3', 'k', 'n4', 't1', 't2', 'm'].map((id) => `${r.get(id)!.rep}/${r.get(id)!.of}`)).toEqual(['1/3', '2/3', '3/3', '1/1', '1/1', '1/1', '1/1', '1/1']);
+  });
+
+  it('filters first and last reps', () => {
+    expect(progressionItems('navasana', holds, ses, [], 'both', 'first').map((i) => i.hold.id)).toEqual(['n1', 'n4', 'm']);
+    expect(progressionItems('navasana', holds, ses, [], 'both', 'last').map((i) => i.hold.id)).toEqual(['n3', 'n4', 'm']);
+    // session order: videos as listed in the session, then time
+    expect(progressionItems('navasana', holds, ses, []).map((i) => [i.hold.id, repLabel(i)])).toEqual([
+      ['n1', '1/3'],
+      ['n2', '2/3'],
+      ['n3', '3/3'],
+      ['n4', ''],
+      ['m', ''],
+    ]);
+    expect(hasReps('navasana', holds, ses)).toBe(true);
+    expect(hasReps('kurmasana', holds, ses)).toBe(false);
+  });
+});
 
 describe('progressionItems', () => {
   const holds = [

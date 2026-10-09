@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { editedId, fitSpan, holdFromCandidate, mergeCandidates, missedCandidate, nudgeBest, reconcile, sortCandidates, splitCandidate } from './review';
+import { editedId, fitSpan, holdFromCandidate, mergeCandidates, missedCandidate, nudgeBest, reconcile, sortCandidates, splitCandidate, splitInto, valleyProminence } from './review';
 import { searchAsanas } from './search';
 import { SEED_ASANAS } from '../model/seed';
 import type { Hold, ReviewCandidate } from '../model/types';
@@ -135,5 +135,53 @@ describe('searchAsanas', () => {
     expect(searchAsanas(cat, 'konasana').map((a) => a.id)).toContain('supta-konasana');
     expect(searchAsanas(cat, '').length).toBe(cat.length);
     expect(searchAsanas(cat, 'zzz')).toEqual([]);
+  });
+});
+
+describe('splitInto', () => {
+  /** C with valleys (centre s, depth) on a level of 3, 4 Hz. */
+  function valleys(seconds: number, list: Array<[number, number]>): SignalView {
+    const n = seconds * 4;
+    const C = new Float32Array(n).fill(3);
+    for (const [t, depth] of list) for (let i = 0; i < n; i++) C[i] = Math.min(C[i]!, 3 - depth * Math.max(0, 1 - Math.abs(i / 4 - t) / 6));
+    const m = Float32Array.from(C, (c) => c / 3);
+    return { sampleHz: 4, m, C, durationS: seconds, bestFrameMiddle: 0.8, clipWindowS: 4 };
+  }
+  const cand = (startS: number, endS: number): ReviewCandidate => ({ id: 'c', startS, endS, bestS: startS + 1, alternatesS: [], clipStartS: startS, clipEndS: startS + 4, status: 'labeled', holdId: 'h' });
+
+  it('cuts between the k most prominent valleys of C', () => {
+    // six holds, plus a shallow wobble at 5 s that is not one
+    const sig = valleys(130, [[5, 0.4], [15, 2], [33, 2.5], [50, 1.5], [70, 2], [90, 2.2], [112, 1.8]]);
+    const parts = splitInto(cand(0, 130), 6, sig);
+    expect(parts.length).toBe(6);
+    expect(parts.map((p) => Math.round(p.bestS))).toEqual([15, 33, 50, 70, 90, 112]);
+    for (let i = 1; i < parts.length; i++) expect(parts[i]!.startS).toBe(parts[i - 1]!.endS);
+    expect(parts[0]).toMatchObject({ id: 'c', status: 'labeled', holdId: 'h', startS: 0 });
+    expect(parts[1]).toMatchObject({ status: 'open', origin: 'manual' });
+    expect(parts[1]!.holdId).toBeUndefined();
+    expect(parts[5]!.endS).toBe(130);
+    // the old best frame is kept as an alternate of the part it falls into
+    expect(parts[0]!.alternatesS).toContain(1);
+  });
+
+  it('halves the longest part when there are fewer valleys than holds, and keeps k < 2 as is', () => {
+    const sig = valleys(60, [[20, 2]]);
+    const parts = splitInto(cand(0, 60), 3, sig);
+    expect(parts.length).toBe(3);
+    expect(parts.every((p) => p.endS > p.startS)).toBe(true);
+    const c = cand(0, 60);
+    expect(splitInto(c, 1, sig)).toEqual([c]);
+    const flat: SignalView = { ...sig, C: new Float32Array(240).fill(NaN) };
+    expect(splitInto(c, 4, flat).length).toBe(4);
+  });
+
+  it('valleyProminence measures each minimum against the lower side', () => {
+    const v = [3, 1, 2, 0, 3, 2, 2, 4];
+    const out = valleyProminence((i) => v[i]!, 0, v.length);
+    expect(out).toEqual([
+      { at: 1, prominence: 1 },
+      { at: 3, prominence: 3 },
+      { at: 5, prominence: 1 },
+    ]);
   });
 });

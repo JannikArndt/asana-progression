@@ -5,6 +5,7 @@ import {
   primarySeriesTemplate,
   SEED_ADDED,
   withSunSalutations,
+  withReps,
   PRIMARY_SERIES_ID,
   SEED_ASANAS,
   sortCatalog,
@@ -31,7 +32,7 @@ export interface AnalysisSummary {
   createdAt: string;
 }
 
-const CATALOG_VERSION = 2;
+const CATALOG_VERSION = 3;
 
 /** App-wide state: the metadata store, lists for the home screen, session-only file handles. */
 class AppState {
@@ -96,7 +97,7 @@ class AppState {
     const primary = await db.templates.get(PRIMARY_SERIES_ID);
     // A template the user deleted stays deleted.
     if (!primary && version === 0) await db.templates.put(primarySeriesTemplate());
-    else if (primary && version < 2) await db.templates.put(withSunSalutations(primary));
+    else if (primary && version < 3) await db.templates.put(withReps(version < 2 ? withSunSalutations(primary) : primary));
     await db.settings.set('catalogVersion', CATALOG_VERSION);
   }
 

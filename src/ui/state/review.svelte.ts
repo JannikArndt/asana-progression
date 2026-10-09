@@ -2,13 +2,13 @@ import {
   alignToTemplate,
   holdFromCandidate,
   matchTemplateEntry,
-  mergeCandidateFor,
   mergeCandidates,
   missedCandidate,
   nudgeBest,
   reconcile,
   sortCandidates,
   splitCandidate,
+  splitInto,
   type Label,
   type SignalView,
   type Suggestion,
@@ -149,7 +149,10 @@ export class SessionReview {
 
   // ----- actions -----
 
-  /** Labels a candidate (top suggestion if no label is given) and offers to merge with an identical previous hold. */
+  /**
+   * Labels a candidate (top suggestion if no label is given). The same label as the previous hold
+   * makes it another rep; "Merge with previous" stays available for a hold split by mistake.
+   */
   async confirm(key: string, label?: Label) {
     const e = this.entry(key);
     const session = this.session;
@@ -172,22 +175,9 @@ export class SessionReview {
       ...(templateEntryIndex !== undefined ? { templateEntryIndex } : {}),
       crop: e.hold?.crop ?? {},
     };
-    const prevKey = mergeCandidateFor(this.items, key, { asanaId: hold.asanaId, side: hold.side });
     await this.putHold(hold);
     await this.replaceCandidate(e.videoId, e.candidate.id, [{ ...e.candidate, status: 'labeled', holdId: hold.id }]);
     await this.refreshSuggestions();
-    if (prevKey && parseItemKey(prevKey).videoId === e.videoId) {
-      const name = app.asanas.find((a) => a.id === hold.asanaId)?.name ?? hold.asanaId;
-      const choice = await dialog.ask({
-        title: 'Same as the previous hold',
-        message: `The previous hold is also ${name}${hold.side ? ` ${hold.side}` : ''}. Merge them? The stiller frame is kept.`,
-        options: [
-          { id: 'merge', label: 'Merge', kind: 'primary' },
-          { id: 'keep', label: 'Keep separate', kind: 'quiet' },
-        ],
-      });
-      if (choice === 'merge') await this.mergeWithPrevious(key);
-    }
   }
 
   async dismiss(key: string) {
@@ -242,6 +232,17 @@ export class SessionReview {
     const [left, right] = splitCandidate(e.candidate, atS, this.signals(e.videoId));
     if (e.hold) await this.putHold(holdFromCandidate(e.hold, left));
     await this.replaceCandidate(e.videoId, e.candidate.id, [left, right]);
+    await this.refreshSuggestions();
+  }
+
+  /** Splits a hold into `k` holds at the strongest posture changes (k e.g. from the template). */
+  async splitInto(key: string, k: number) {
+    const e = this.entry(key);
+    if (!e) return;
+    const parts = splitInto(e.candidate, k, this.signals(e.videoId));
+    if (parts.length < 2) return;
+    if (e.hold) await this.putHold(holdFromCandidate(e.hold, parts[0]!));
+    await this.replaceCandidate(e.videoId, e.candidate.id, parts);
     await this.refreshSuggestions();
   }
 

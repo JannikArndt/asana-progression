@@ -1,9 +1,10 @@
 export type * from './types';
-export { suggest, matchTemplateEntry, mergeCandidateFor, nextSide, usedEntries, nextEntries, alignToTemplate } from './suggest';
+export { suggest, matchTemplateEntry, nextSide, usedEntries, entryUse, repsOf, nextEntries, alignToTemplate, expectedHolds } from './suggest';
 export {
   fitSpan,
   mergeCandidates,
   splitCandidate,
+  splitInto,
   missedCandidate,
   nudgeBest,
   reconcile,
