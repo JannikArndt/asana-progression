@@ -67,6 +67,8 @@ export interface Session {
   note: string;
   videoIds: string[];
   templateId?: string;
+  /** The user chose not to combine this session with its same-day sessions. */
+  keepSeparate?: boolean;
 }
 
 export interface ProcessingStats {

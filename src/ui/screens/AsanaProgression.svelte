@@ -8,7 +8,8 @@
   import { app } from '../state/app.svelte';
   import { router } from '../state/router.svelte';
   import { capture } from '../state/capture.svelte';
-  import { setManualCrop } from '../state/hold-actions';
+  import { reattachVideo, setManualCrop } from '../state/hold-actions';
+  import type { Video } from '../../model';
   import { formatDay } from '../format';
 
   interface Props {
@@ -79,6 +80,23 @@
     capture.request(app.holds.filter((h) => h.asanaId === id));
   });
 
+  /** Videos whose file is needed to capture stills of this asana's holds. */
+  const waiting = $derived.by(() => {
+    const ids = capture.waitingForFile(app.holds.filter((h) => h.asanaId === id));
+    return app.videos.filter((v) => ids.has(v.id));
+  });
+  const waitingHolds = $derived(items.filter((i) => capture.status[i.hold.id] === 'needs-file').length);
+  let attachError = $state<string | null>(null);
+
+  async function reattach(e: Event, video: Video) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (file) attachError = await reattachVideo(video, file);
+  }
+
+  const QUALITY: Record<string, string> = { '720p': '720p', '1080p': '1080p', original: 'Original' };
+
   function open(item: ProgressionItem) {
     viewerIndex = items.indexOf(item);
   }
@@ -86,7 +104,7 @@
   function statusText(item: ProgressionItem): string {
     const s = capture.status[item.hold.id];
     if (s === 'queued' || s === 'capturing') return 'Capturing…';
-    if (s === 'needs-file') return 'Open the session and re-attach the video to capture the still.';
+    if (s === 'needs-file') return 'Needs the video (see above)';
     if (s === 'error') return 'Capture failed.';
     return '';
   }
@@ -177,6 +195,23 @@
       </div>
     </div>
 
+    {#if waiting.length}
+      <div class="card notice">
+        <p class="small">
+          {waitingHolds}
+          {waitingHolds === 1 ? 'hold has' : 'holds have'} no full-resolution still yet. Select the video{waiting.length === 1 ? '' : 's'} to capture
+          {waitingHolds === 1 ? 'it' : 'them'}:
+        </p>
+        {#each waiting as video (video.id)}
+          <label class="btn">
+            {video.fileName} · {formatDay(video.recordedAt ?? video.importedAt)}
+            <input class="visually-hidden" type="file" accept="video/*" onchange={(e) => reattach(e, video)} />
+          </label>
+        {/each}
+        {#if attachError}<p class="small error" role="alert">{attachError}</p>{/if}
+      </div>
+    {/if}
+
     {#if !items.length}
       <p class="muted">No holds labeled yet. Label holds in a session to see them here.</p>
     {:else if mode === 'feed'}
@@ -197,7 +232,10 @@
                 {/snippet}
               </LazyAsset>
               <span class="caption">
-                <span class="date tabular">{formatDay(item.date, true)}{item.hold.side ? ` · ${item.hold.side}` : ''}{repLabel(item) ? ` · rep ${repLabel(item)}` : ''}</span>
+                <span class="line">
+                  <span class="date tabular">{formatDay(item.date, true)}{item.hold.side ? ` · ${item.hold.side}` : ''}{repLabel(item) ? ` · rep ${repLabel(item)}` : ''}</span>
+                  {#if item.clip}<span class="badge" title="Clip quality">{item.clip.quality ? (QUALITY[item.clip.quality] ?? item.clip.quality) : 'Clip'}</span>{/if}
+                </span>
                 {#if item.note}<span class="note">{item.note}</span>{/if}
               </span>
             </button>
@@ -305,8 +343,9 @@
     gap: var(--space-2) var(--space-3);
   }
 
+  /* Never shrink below the labels: the bar wraps to a second row instead. */
   .segmented {
-    flex: 1;
+    flex: 1 0 auto;
     display: grid;
     grid-auto-columns: 1fr;
     grid-auto-flow: column;
@@ -323,6 +362,7 @@
   .segmented button {
     min-height: 40px;
     padding: 0 var(--space-3);
+    white-space: nowrap;
     border: 0;
     border-radius: calc(var(--radius-m) - 2px);
     background: transparent;
@@ -364,6 +404,46 @@
 
   .date {
     font-weight: var(--weight-medium);
+  }
+
+  .line {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
+  .badge {
+    flex: none;
+    padding: 1px var(--space-2);
+    border-radius: var(--radius-pill);
+    background: var(--color-neutral-tint);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--color-text-2);
+  }
+
+  .notice {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .notice p {
+    margin: 0;
+  }
+
+  .notice .btn {
+    align-self: flex-start;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .error {
+    color: var(--color-danger);
   }
 
   .note {

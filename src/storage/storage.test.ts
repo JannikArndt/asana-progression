@@ -26,6 +26,24 @@ function video(id: string, fingerprint: string): Video {
 }
 
 describe('MetadataStore', () => {
+  it('applies a batch atomically across stores', async () => {
+    const store = await openMetadataStore(new IDBFactory(), 'test-batch');
+    await store.videos.put(video('v1', 'fp1'));
+    await store.batch([
+      { store: 'videos', put: video('v2', 'fp2') },
+      { store: 'videos', delete: 'v1' },
+      { store: 'settings', put: { key: 'k', value: 1 } },
+    ]);
+    expect((await store.videos.all()).map((v) => v.id)).toEqual(['v2']);
+    expect(await store.settings.get('k')).toBe(1);
+    expect(await store.settings.entries()).toEqual([{ key: 'k', value: 1 }]);
+    await store.batch([]);
+    // A record without its key fails the whole batch: the first write is rolled back.
+    await expect(store.batch([{ store: 'videos', put: video('v3', 'fp3') }, { store: 'videos', put: { nope: 1 } }])).rejects.toThrow();
+    expect(await store.videos.get('v3')).toBeUndefined();
+    store.close();
+  });
+
   it('stores, finds and deletes records per entity', async () => {
     const store = await openMetadataStore(new IDBFactory(), 'test-a');
     await store.videos.put(video('v1', 'fp1'));

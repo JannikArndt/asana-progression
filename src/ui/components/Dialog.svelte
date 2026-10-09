@@ -8,7 +8,7 @@
   <div class="scrim" role="presentation">
     <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
       <h2 id="dialog-title">{d.title}</h2>
-      {#if d.message}<p class="muted">{d.message}</p>{/if}
+      {#if d.message}<p class="muted message">{d.message}</p>{/if}
       {#if d.frames}
         {@const f = d.frames}
         {@const tileW = Math.round(Math.min(96, Math.max(44, (56 * f.width) / f.height)))}
@@ -58,6 +58,11 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     animation: rise var(--duration) var(--ease);
+  }
+
+  .message {
+    margin: 0;
+    white-space: pre-line;
   }
 
   .frames {

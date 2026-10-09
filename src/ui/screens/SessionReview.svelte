@@ -8,8 +8,9 @@
   import CropEditor from '../components/CropEditor.svelte';
   import DebugPanel from '../components/DebugPanel.svelte';
   import { formatDuration, formatTime, previewTimes, type Span } from '../components/timeline';
+  import { formatDay } from '../format';
   import { expectedHolds, nextEntries, type Label } from '../../labeling';
-  import { PRIMARY_SERIES_ID } from '../../model';
+  import { PRIMARY_SERIES_ID, type Video } from '../../model';
   import { holdReps } from '../../progression';
   import { app } from '../state/app.svelte';
   import { pipeline } from '../pipeline/controller.svelte';
@@ -19,8 +20,7 @@
   import { SessionReview } from '../state/review.svelte';
   import type { SessionEntry } from '../state/session-data';
   import { capture } from '../state/capture.svelte';
-  import { setManualCrop } from '../state/hold-actions';
-  import { fingerprint, openVideo } from '../../source';
+  import { reattachVideo, setManualCrop } from '../state/hold-actions';
 
   interface Props {
     id: string;
@@ -75,13 +75,6 @@
     selectedKey = key;
     await tick();
     document.getElementById(`card-${key}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }
-
-  function dateTitle(iso: string | undefined): string {
-    if (!iso) return '';
-    const d = new Date(iso.slice(0, 10) + 'T12:00:00Z');
-    if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
-    return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
   }
 
   async function more(entry: SessionEntry) {
@@ -185,25 +178,12 @@
   const waiting = $derived(capture.waitingForFile(review.holds));
   let attachError = $state<string | null>(null);
 
-  async function reattach(e: Event, videoId: string, fp: string) {
+  async function reattach(e: Event, video: Video) {
     const input = e.currentTarget as HTMLInputElement;
     const file = input.files?.[0];
     input.value = '';
     if (!file) return;
-    attachError = null;
-    try {
-      const src = await openVideo(file);
-      const ok = (await fingerprint(file, src.meta.durationS)) === fp;
-      src.close();
-      if (!ok) {
-        attachError = 'That is a different video.';
-        return;
-      }
-      app.attachFile(videoId, file);
-      review.recapture(videoId);
-    } catch (err) {
-      attachError = `Cannot read the file: ${err instanceof Error ? err.message : String(err)}`;
-    }
+    attachError = await reattachVideo(video, file);
   }
 
   const scrubEntry = $derived(scrub?.key ? review.entry(scrub.key) : undefined);
@@ -221,7 +201,7 @@
   {:else if review.session}
     {@const session = review.session}
     <div class="title">
-      <h2>{dateTitle(session.date)}</h2>
+      <h2>{formatDay(session.date, true)}</h2>
       <p class="muted small tabular">
         {formatDuration(duration)} · {counts.labeled} labeled{counts.open ? ` · ${counts.open} open` : ''}
       </p>
@@ -260,7 +240,7 @@
             <p class="small">Select <strong>{video.fileName}</strong> again to save full-resolution stills and clips of the labeled holds.</p>
             <label class="btn">
               Select video
-              <input class="visually-hidden" type="file" accept="video/*" onchange={(e) => reattach(e, video.id, video.fingerprint)} />
+              <input class="visually-hidden" type="file" accept="video/*" onchange={(e) => reattach(e, video)} />
             </label>
             {#if attachError}<p class="small error">{attachError}</p>{/if}
           </div>

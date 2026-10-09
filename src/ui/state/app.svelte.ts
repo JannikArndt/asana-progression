@@ -34,6 +34,25 @@ export interface AnalysisSummary {
 
 const CATALOG_VERSION = 3;
 
+const LEGACY_SEPARATE_KEY = 'asana.sessions.separate';
+
+function legacySeparateSessions(): Set<string> {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(LEGACY_SEPARATE_KEY) ?? '[]');
+    return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function clearLegacySeparateSessions() {
+  try {
+    localStorage.removeItem(LEGACY_SEPARATE_KEY);
+  } catch {
+    /* private mode */
+  }
+}
+
 /** App-wide state: the metadata store, lists for the home screen, session-only file handles. */
 class AppState {
   store: MetadataStore | null = null;
@@ -101,10 +120,20 @@ class AppState {
     await db.settings.set('catalogVersion', CATALOG_VERSION);
   }
 
-  /** Videos without a session (milestone-1 data): one session per recording day. */
+  /**
+   * Videos without a session (milestone-1 data): one session per recording day. "Keep separate"
+   * choices move from localStorage into the sessions (so backups carry them).
+   */
   private async migrate() {
     const db = this.db;
     const [sessions, videos] = await Promise.all([db.sessions.all(), db.videos.all()]);
+    const separate = legacySeparateSessions();
+    for (const s of sessions) {
+      if (!separate.has(s.id) || s.keepSeparate) continue;
+      s.keepSeparate = true;
+      await db.sessions.put(s);
+    }
+    if (separate.size) clearLegacySeparateSessions();
     for (const [day, list] of groupByDay(orphanVideos(sessions, videos))) {
       const existing = sessions.find((s) => dayOf(s.date) === day);
       if (existing) {

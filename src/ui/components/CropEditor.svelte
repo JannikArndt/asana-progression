@@ -123,7 +123,7 @@
   }
 </script>
 
-<div class="editor" role="dialog" aria-modal="true" aria-label={title}>
+<div class="editor overlay" role="dialog" aria-modal="true" aria-label={title}>
   <header>
     <button class="btn quiet" type="button" onclick={onclose}>Cancel</button>
     <span class="title">{title}</span>
@@ -168,27 +168,9 @@
 </div>
 
 <style>
+  /* Above the hold viewer it can be opened from. */
   .editor {
-    position: fixed;
-    inset: 0;
     z-index: 60;
-    display: flex;
-    flex-direction: column;
-    background: var(--color-overlay);
-    color: var(--color-on-accent);
-    padding-top: var(--safe-top);
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 var(--space-2);
-    min-height: var(--touch);
-  }
-
-  header .btn {
-    color: var(--color-on-accent);
   }
 
   .strong {
@@ -221,13 +203,6 @@
     border: 1px solid rgba(255, 255, 255, 0.9);
     box-shadow: 0 0 0 9999px rgba(20, 19, 17, 0.55);
     pointer-events: none;
-  }
-
-  footer {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4) calc(var(--space-4) + var(--safe-bottom));
   }
 
   .aspects {

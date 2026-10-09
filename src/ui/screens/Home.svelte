@@ -5,6 +5,7 @@
   import { importFiles } from '../import.svelte';
   import { pipeline } from '../pipeline/controller.svelte';
   import { formatDuration, formatTime } from '../components/timeline';
+  import { formatDay } from '../format';
   import { asanaStats, summarizeSession } from '../state/session-data';
 
   interface Props {
@@ -25,17 +26,6 @@
     } finally {
       busy = false;
     }
-  }
-
-  function shortDate(iso: string | null | undefined): string {
-    if (!iso) return '';
-    const d = new Date(iso.slice(0, 10) + 'T12:00:00Z');
-    return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
-  }
-
-  function longDate(iso: string): string {
-    const d = new Date(iso.slice(0, 10) + 'T12:00:00Z');
-    return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
   }
 
   const interrupted = $derived(app.jobs.filter((j) => !(pipeline.running && pipeline.videoId === j.videoId)));
@@ -109,7 +99,7 @@
         {@const sum = summarizeSession(s, app.videos, app.summaries)}
         <button class="row" type="button" onclick={() => router.go({ name: 'session', id: s.id })}>
           <div class="row-main">
-            <span class="name">{longDate(s.date)}</span>
+            <span class="name">{formatDay(s.date, true)}</span>
             <span class="muted small tabular">
               {formatDuration(sum.durationS)} · {sum.labeled} labeled{sum.open ? ` · ${sum.open} open` : ''}{s.note ? ` · ${s.note}` : ''}
             </span>
@@ -139,7 +129,7 @@
             </div>
             <div class="row-main">
               <span class="name">{a.name}</span>
-              <span class="muted small tabular">{st ? `${st.count} ${st.count === 1 ? 'hold' : 'holds'} · ${shortDate(st.latestDate)}` : 'No holds yet'}</span>
+              <span class="muted small tabular">{st ? `${st.count} ${st.count === 1 ? 'hold' : 'holds'} · ${formatDay(st.latestDate)}` : 'No holds yet'}</span>
             </div>
           </button>
         {/each}
