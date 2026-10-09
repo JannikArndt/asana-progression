@@ -6,9 +6,18 @@ export interface DialogOption {
   kind?: 'primary' | 'danger' | 'quiet';
 }
 
+/** Tiny analysis frames shown above the options (e.g. what a hold contains). */
+export interface DialogFrames {
+  videoId: string;
+  width: number;
+  height: number;
+  items: Array<{ index: number; label: string }>;
+}
+
 export interface DialogRequest {
   title: string;
   message?: string;
+  frames?: DialogFrames;
   options: DialogOption[];
 }
 

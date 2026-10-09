@@ -159,3 +159,14 @@ export function hitSpan(spans: Span[], v: View, x: number, slopPx = 6): Span | n
   }
   return best;
 }
+
+/**
+ * Evenly spaced preview times inside [startS, endS): one per `stepS` (centred in its slot), at
+ * least `min` and at most `max`. Enough to spot a posture change inside a long candidate.
+ */
+export function previewTimes(startS: number, endS: number, stepS = 6, min = 4, max = 24): number[] {
+  const d = endS - startS;
+  if (!(d > 0)) return [startS];
+  const n = Math.min(max, Math.max(min, Math.ceil(d / stepS)));
+  return Array.from({ length: n }, (_, i) => startS + ((i + 0.5) * d) / n);
+}
