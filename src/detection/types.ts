@@ -32,16 +32,27 @@ export interface DetectionParams {
   clipWindowS: number;
   /**
    * Adjacent candidates are merged when the mean absolute difference of their best frames is
-   * below `similarMergeFactor × max(stillThreshold, m(bestA), m(bestB))`.
+   * below `similarMergeFactor × max(stillThreshold, m(bestA), m(bestB))`, capped at
+   * `similarMergeRelative × median distance of adjacent candidates` (see below).
    */
   similarMergeFactor: number;
+  /**
+   * Cap for the merge distance relative to the median best-frame distance of adjacent pre-merge
+   * candidates with a clear posture change between them (C peak ≥ `similarMergeRefPeak` ×
+   * threshold), i.e. how different two poses look in this video. Applied with at least
+   * `similarMergeMinPairs` such pairs.
+   */
+  similarMergeRelative: number;
+  similarMergeRefPeak: number;
+  similarMergeMinPairs: number;
   /** Only candidates separated by at most this gap (seconds) are considered for merging. */
   similarMergeMaxGapS: number;
   /**
    * If p99(C) ≤ singleStillMaxSpread × p50(C), the video has no clear posture changes and is
-   * treated as one single hold (single-asana clip).
+   * treated as one single hold (single-asana clip). Only for videos up to `singleStillMaxS`.
    */
   singleStillMaxSpread: number;
+  singleStillMaxS: number;
 }
 
 /** A pooled grayscale frame (row-major, one byte per pixel). */

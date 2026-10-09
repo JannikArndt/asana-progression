@@ -73,13 +73,18 @@
     try {
       const reader = await sampleReader(video.id, analysis.frameWidth * analysis.frameHeight);
       if (!reader) throw new Error('Stored samples are missing');
+      // Labeled holds go along as candidate ground truth for a real-signal fixture.
+      const names = new Map(app.asanas.map((a) => [a.id, a.name]));
+      const labels = (await app.db.holds.findBy('videoId', video.id))
+        .sort((a, b) => a.startS - b.startS)
+        .map((h) => ({ startS: h.startS, endS: h.endS, bestS: h.bestS, name: `${names.get(h.asanaId) ?? h.asanaId}${h.side ? ` ${h.side}` : ''}` }));
       const x = await buildAnalysisExport(
         { sampleHz: analysis.sampleHz, m: analysis.m, C: analysis.C },
         { threshold: analysis.threshold, singleStill: analysis.singleStill, candidates: analysis.candidates, preMerge: analysis.preMerge },
         analysis.params,
         { width: analysis.frameWidth, height: analysis.frameHeight },
         { frame: (i) => reader.read(i) },
-        { video: { ...video, meta: undefined }, source: meta ?? null, stats },
+        { video: { ...video, meta: undefined }, source: meta ?? null, stats, labels },
       );
       const name = `${video.fileName.replace(/\.[^.]+$/, '')}-analysis.json`;
       await shareOrDownload(name, new Blob([JSON.stringify(x)], { type: 'application/json' }));
