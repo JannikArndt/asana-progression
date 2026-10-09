@@ -133,6 +133,43 @@ button {
   color: var(--color-danger);
 }
 
+/* Full-screen dark overlays (hold viewer, flipbook, crop editor) share one frame. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-overlay);
+  color: var(--color-on-accent);
+  padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
+}
+
+.overlay > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: var(--touch);
+  padding: 0 var(--space-2);
+}
+
+.overlay > header .btn {
+  color: inherit;
+  min-width: var(--touch);
+}
+
+.overlay .btn:active {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.overlay > footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) calc(var(--space-4) + var(--safe-bottom));
+}
+
 /* Surfaces */
 .card {
   background: var(--color-surface);

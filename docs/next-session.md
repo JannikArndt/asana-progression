@@ -1,7 +1,7 @@
 # Plan for the next session
 
-State on main: milestones 1–4 done, M5 partly done (catalog/template editor, re-import with
-re-capture). Everything below is open. Read CLAUDE.md first; it is the source of truth for
+State on main: milestones 1–5 done (M5: catalog/template editor, re-import with re-capture,
+backup export/import, design polish). Open: the failed-video report and device verification. Read CLAUDE.md first; it is the source of truth for
 architecture, commands and measured iOS limits.
 
 ## 1. Failed video (user will upload a debug file)
@@ -15,26 +15,7 @@ architecture, commands and measured iOS limits.
 - If it is a detection miss, not a crash: add the export to `src/detection/__fixtures__/real/` with
   a `truth` array (incl. confirmed `bestS`) and tune via `DetectionParams`, never special-case.
 
-## 2. Backup export/import (M5, highest value)
-
-iOS can evict website data, and `persist()` was refused in a Safari tab, so this protects years of
-labels.
-
-- `storage/zip.ts`: STORE-only ZIP writer/reader, no dependencies. CRC32 is computed by
-  streaming. The output Blob is built from the original file Blobs, so nothing is copied into memory.
-  ZIP64 only when a size or offset ≥ 4 GiB (original-quality clips can exceed that in total).
-  Reader parses the EOCD (+ ZIP64 locator) and local headers and rejects compressed entries.
-- `storage/backup.ts`: `backup.json` = all repositories except `jobs`, plus settings. This needs
-  `KeyValueStore.entries()`. Typed arrays (Analysis.m/C) are encoded as `{$typed, b64}`. Asset
-  files go under their `storageKey`. Import merges by id: records first, then files.
-- Run import in a worker: OPFS writes need sync access handles on iOS, and main-thread
-  `createWritable` may be missing. Export can run on the main thread and download via an
-  `<a download>` object URL.
-- Samples (`samples-*.bin`, ~52 MB/h) stay out by default (regenerable by re-import); they could be
-  an option.
-- Settings → "Backup": export (progress, size), import (summary of added/updated records, missing
-  files). Tests: round trip with fake-indexeddb + in-memory AssetStore, forced ZIP64, corrupt input;
-  `unzip -t` / `python3 -m zipfile -t` on a scratch output.
+## 2. ~~Backup export/import~~ — done (see CLAUDE.md "Backup")
 
 ## 3. Device verification (ask the user to test, then record in CLAUDE.md "Measured iOS limits")
 
@@ -47,21 +28,17 @@ labels.
   slider, crop editor pinch.
 - Memory with long clips in the viewer; flipbook with many stills.
 - ~~Home Screen web app: does `persist()` get granted there?~~ Yes (2026-10-09).
+- Backup on iOS: "Save" (`<a download>` of a Blob made of OPFS files) and "Share…" → Save to
+  Files; import a multi-GB backup from Files (memory, time). Untested on device.
 
-## 4. Design polish (M5)
-
-- Pass over all screens at 390 × 844: spacing, empty states, loading states (capture status in
-  the feed), dark overlay consistency (viewer, flipbook, crop editor share styles → extract).
-- Remove the duplicated date formatters (Home, SessionReview) in favour of `ui/format.ts`.
-- Progression: show the clip quality badge, a "re-attach video" shortcut for holds without
-  stills.
+## 4. ~~Design polish~~ — done: shared `.overlay` frame (viewer, flipbook, crop editor), one
+date formatter (`ui/format.ts`), clip quality badge and re-attach shortcut on the asana page, filter
+bar no longer wraps labels. Next pass needs the user's eye on the device.
 
 ## 5. Smaller follow-ups
 
-- Combine sessions: writes are separate IDB transactions (ordered so a repeat completes them).
-  A multi-store transaction in `MetadataStore` would make it atomic.
-- "Keep separate" for same-day sessions is stored in localStorage; move it to a session field
-  if backups should carry it.
+- ~~Combine sessions atomic~~: `MetadataStore.batch` (one transaction).
+- ~~"Keep separate" in localStorage~~: now `Session.keepSeparate`.
 - ~~Re-measure `downsampleLuma` on the iPhone~~: luma still wins clearly (2 vs 31 ms at 4K).
 - Detection on long practices: ask the user to label the outdoor primary-series video fully and
   re-export (exports now carry `meta.labels`) to replace the by-eye truth in

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 const video = fileURLToPath(new URL('../fixtures/synthetic-practice-vp9.mp4', import.meta.url));
 
@@ -199,4 +200,57 @@ test('catalog and template editor', async ({ page }) => {
   await expect(page.locator('.entries li')).toHaveCount(2);
   await page.getByRole('button', { name: '‹ Catalog' }).click();
   await expect(page.getByRole('button', { name: /Arm balances\s*2 entries/ })).toBeVisible();
+});
+
+test('backup export → delete all data → import restores labels, stills and frames', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('./');
+  await page.evaluate(() => localStorage.setItem('asana.debug.capture', JSON.stringify({ cropper: 'none' })));
+  await importVideo(page);
+  await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
+  const first = cards(page).nth(0);
+  await first.getByRole('button', { name: 'Confirm Adho Mukha Svanasana' }).click();
+  await expect(first.locator('[data-capture=done]')).toHaveCount(1, { timeout: 60_000 });
+
+  await page.goto('./#/settings');
+  const section = page.getByRole('region', { name: 'Backup' });
+  await section.getByLabel(/Include analysis frames/).check();
+  await section.getByRole('button', { name: 'Create backup' }).click();
+  await expect(section.getByText(/Backup ready: asana-progression-\d{4}-\d\d-\d\d\.zip/)).toBeVisible();
+  const [download] = await Promise.all([page.waitForEvent('download'), section.getByRole('button', { name: 'Save', exact: true }).click()]);
+  const zip = test.info().outputPath('backup.zip');
+  await download.saveAs(zip);
+  await expect(section.getByText(/^Last backup/).locator('xpath=following-sibling::dd[1]')).not.toHaveText(/none/);
+
+  // Wipe everything, then restore.
+  await page.getByRole('button', { name: 'Delete all data' }).click();
+  await Promise.all([page.waitForEvent('load'), page.getByRole('button', { name: 'Delete everything' }).click()]);
+  await expect(page.getByRole('region', { name: 'Backup' })).toBeVisible();
+  // Passed as a buffer: a path in test-results contains "→", which setInputFiles silently drops.
+  const backupFile = { name: 'backup.zip', mimeType: 'application/zip', buffer: readFileSync(zip) };
+  await page.getByRole('region', { name: 'Backup' }).locator('input[type=file]').setInputFiles(backupFile);
+  await expect(page.getByRole('heading', { name: 'Import backup?' })).toBeVisible();
+  await expect(page.getByText(/Adds 1 session, 1 labeled hold, 3 images and clips, 1 video, 1 analysis/)).toBeVisible();
+  await page.getByRole('button', { name: 'Import', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Backup imported' })).toBeVisible();
+  await Promise.all([page.waitForEvent('load'), page.getByRole('button', { name: 'Reload app' }).click()]);
+
+  await page.goto('./');
+  await page.getByRole('tab', { name: 'Sessions' }).click();
+  await expect(page.getByText(/1 labeled · 2 open/)).toBeVisible();
+  await page.getByText(/1 labeled · 2 open/).click();
+  await expect(cards(page)).toHaveCount(3);
+  await expect(cards(page).nth(0)).toHaveAttribute('data-status', 'labeled');
+  // Tiny frames came back with the analysis frames.
+  await expect(cards(page).nth(1).locator('.tiny').first()).not.toHaveClass(/missing/);
+  await page.goto('./#/asana/adho-mukha-svanasana');
+  await expect(page.locator('.feed .item img')).toBeVisible();
+
+  // Importing the same backup again changes nothing.
+  await page.goto('./#/settings');
+  await page.getByRole('region', { name: 'Backup' }).locator('input[type=file]').setInputFiles(backupFile);
+  await expect(page.getByRole('heading', { name: 'Already up to date' })).toBeVisible();
+  await page.getByRole('button', { name: 'OK' }).click();
+  expect(errors).toEqual([]);
 });

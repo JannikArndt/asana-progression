@@ -23,25 +23,6 @@ import { pipeline } from '../pipeline/controller.svelte';
 import { invalidateSamples } from './samples';
 import { capture, deleteAssets } from './capture.svelte';
 
-const SEPARATE_KEY = 'asana.sessions.separate';
-
-/** Sessions the user chose to keep separate from their same-day sessions. */
-function separateSessions(): Set<string> {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(SEPARATE_KEY) ?? '[]') as string[]);
-  } catch {
-    return new Set();
-  }
-}
-
-function keepSeparate(ids: string[]) {
-  try {
-    localStorage.setItem(SEPARATE_KEY, JSON.stringify([...new Set([...separateSessions(), ...ids])]));
-  } catch {
-    /* private mode */
-  }
-}
-
 /**
  * State and actions of the session review screen. Every action persists immediately
  * (IndexedDB), so there is never unsaved labeling state.
@@ -132,11 +113,6 @@ export class SessionReview {
     await app.db.holds.delete(id);
     app.removeHold(id);
     await deleteAssets(app.assets.filter((a) => a.holdId === id));
-  }
-
-  /** Captures assets again for the labeled holds of a video (e.g. after re-attaching its file). */
-  recapture(videoId: string) {
-    capture.request(this.holds.filter((h) => h.videoId === videoId));
   }
 
   private candidates(videoId: string): ReviewCandidate[] {
@@ -297,8 +273,10 @@ export class SessionReview {
       ],
     });
     if (choice === 'separate') {
-      keepSeparate([session.id, ...others.map((o) => o.id)]);
-      this.separateVersion++;
+      const marked = [session, ...others].filter((o) => !o.keepSeparate).map((o) => ({ ...o, keepSeparate: true }));
+      await app.db.batch(marked.map((put) => ({ store: 'sessions', put })));
+      for (const s of marked) app.upsertSession(s);
+      this.session = marked.find((s) => s.id === session.id) ?? this.session;
       return;
     }
     if (choice !== 'combine') return;
@@ -306,11 +284,12 @@ export class SessionReview {
     try {
       const db = app.db;
       const r = combineSessions(session, others, app.videos, app.holds);
-      // Order makes an interrupted run safe to repeat: the target gets every video first, then the
-      // holds move, and only then are the other sessions deleted.
-      await db.sessions.put(r.session);
-      for (const h of r.holds) await db.holds.put(h);
-      for (const id of r.deleteIds) await db.sessions.delete(id);
+      // One transaction: the target session, the moved holds and the deletions land together.
+      await db.batch([
+        { store: 'sessions', put: r.session },
+        ...r.holds.map((put) => ({ store: 'holds' as const, put })),
+        ...r.deleteIds.map((id) => ({ store: 'sessions' as const, delete: id })),
+      ]);
       await app.refresh();
       await this.load(session.id);
     } finally {
@@ -318,13 +297,9 @@ export class SessionReview {
     }
   }
 
-  separateVersion = $state(0);
-
   /** Same-day sessions the user has not chosen to keep separate. */
   get combinable(): Session[] {
-    void this.separateVersion;
-    const kept = separateSessions();
-    return this.sameDay.filter((o) => !(kept.has(o.id) && this.session && kept.has(this.session.id)));
+    return this.sameDay.filter((o) => !(o.keepSeparate && this.session?.keepSeparate));
   }
 
   async setNote(note: string) {

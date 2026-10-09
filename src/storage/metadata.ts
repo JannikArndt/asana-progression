@@ -1,5 +1,5 @@
 import { openDatabase, request, transactionDone } from './idb';
-import type { KeyValueStore, MetadataStore, Repository } from './types';
+import type { BatchOp, KeyValueStore, MetadataStore, Repository } from './types';
 
 export const DB_NAME = 'asana-progression';
 export const DB_VERSION = 1;
@@ -81,6 +81,10 @@ class IdbKeyValue implements KeyValueStore {
   delete(key: string): Promise<void> {
     return this.repo.delete(key);
   }
+
+  entries(): Promise<Array<{ key: string; value: unknown }>> {
+    return this.repo.all();
+  }
 }
 
 export async function openMetadataStore(factory: IDBFactory = indexedDB, name = DB_NAME): Promise<MetadataStore> {
@@ -102,6 +106,23 @@ export async function openMetadataStore(factory: IDBFactory = indexedDB, name = 
     assets: repo('assets'),
     jobs: repo('jobs'),
     settings: new IdbKeyValue(db),
+    batch: async (ops: BatchOp[]) => {
+      if (!ops.length) return;
+      const tx = db.transaction([...new Set(ops.map((o) => o.store))], 'readwrite');
+      const done = transactionDone(tx);
+      try {
+        for (const op of ops) {
+          const store = tx.objectStore(op.store);
+          if ('put' in op) store.put(op.put);
+          else store.delete(op.delete);
+        }
+      } catch (e) {
+        tx.abort();
+        await done.catch(() => {});
+        throw e;
+      }
+      await done;
+    },
     close: () => db.close(),
   };
 }

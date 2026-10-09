@@ -97,7 +97,7 @@
   });
 </script>
 
-<div class="flipbook" role="dialog" aria-modal="true" aria-label="{title} flipbook">
+<div class="flipbook overlay" role="dialog" aria-modal="true" aria-label="{title} flipbook">
   <header>
     <button class="btn quiet" type="button" onclick={onclose} aria-label="Close">✕</button>
     <span class="title">{title}</span>
@@ -124,28 +124,10 @@
 </div>
 
 <style>
-  .flipbook {
-    position: fixed;
-    inset: 0;
-    z-index: 50;
-    display: flex;
-    flex-direction: column;
-    background: var(--color-overlay);
-    color: var(--color-on-accent);
-    padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
-  }
-
-  header {
+  .flipbook > header {
     display: grid;
     grid-template-columns: var(--touch) 1fr auto;
-    align-items: center;
-    gap: var(--space-2);
-    padding: 0 var(--space-3) 0 var(--space-2);
-    min-height: var(--touch);
-  }
-
-  header .btn {
-    color: inherit;
+    padding-right: var(--space-3);
   }
 
   .title {
@@ -178,11 +160,8 @@
     background: transparent;
   }
 
-  footer {
-    display: flex;
-    flex-direction: column;
+  .flipbook > footer {
     gap: var(--space-2);
-    padding: var(--space-3) var(--space-4) calc(var(--space-4) + var(--safe-bottom));
   }
 
   .date {

@@ -137,6 +137,21 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
 split slider or crossfade, edit crop, jump to session), flipbook (`Flipbook`: stills in date order,
 0.5–12 per second, preloads ahead). Holds without a still fall back to the tiny analysis frame.
 
+### Backup (milestone 5)
+
+Settings → Backup. `storage/zip.ts` is a dependency-free STORE-only ZIP writer/reader (streaming
+CRC-32, ZIP64 only when needed; the export Blob references the stored files, nothing is copied).
+`storage/backup.ts`: `backup.json` = all repositories except `jobs` plus the non-device settings
+(`isDeviceSetting`: persist flags, `catalogVersion`, `diag.*`, `backup.*`); typed arrays are
+`{$typed, b64}`; asset files under their storage keys; analysis frames (`samples-*.bin`) only when
+"Include analysis frames" is checked. Import (`ui/pipeline/backup.worker.ts`, OPFS needs sync
+handles on iOS) plans first (added / replaced / unchanged per store, shown for confirmation),
+merges by key (the backup's version wins; a different local asset for the same hold + kind is
+kept), writes files first with CRC check, then all records in one `MetadataStore.batch`
+transaction, then reloads the app. Export downloads via `<a download>` after a fresh tap, or the
+share sheet ("Save to Files"). "Keep separate" for same-day sessions is `Session.keepSeparate`
+(migrated from localStorage) so backups carry it.
+
 ### Storage layout
 
 - IndexedDB `asana-progression` v1: `asanas`, `templates`, `sessions` (idx date, videoIds*),
@@ -285,4 +300,6 @@ Fill in from the user's device reports (Settings → "Copy diagnostics report", 
 4. **Progression view.** ✅
 5. Catalog/template editor ✅ (`#/catalog`, `#/template/<id>`; asanas: add/edit/delete when
    unused; templates: new, rename, insert/move/remove entries, duplicate, delete). Re-import
-   reuses labels and re-captures ✅. Still open: backup export/import (zip), design polish.
+   reuses labels and re-captures ✅. Backup export/import ✅. Design polish ✅ (shared overlay
+   frame, one date formatter, clip quality badge, re-attach from the asana page). Still open:
+   on-device verification (see `docs/next-session.md`).

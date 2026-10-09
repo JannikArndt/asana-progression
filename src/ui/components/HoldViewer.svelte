@@ -100,7 +100,7 @@
   }
 </script>
 
-<div class="viewer" role="dialog" aria-modal="true" aria-label="{title} holds">
+<div class="viewer overlay" role="dialog" aria-modal="true" aria-label="{title} holds">
   <header>
     <button class="btn quiet" type="button" onclick={onclose} aria-label="Close">✕</button>
     <span class="count tabular">{index + 1} / {items.length}</span>
@@ -181,30 +181,6 @@
 </div>
 
 <style>
-  .viewer {
-    position: fixed;
-    inset: 0;
-    z-index: 50;
-    display: flex;
-    flex-direction: column;
-    background: var(--color-overlay);
-    color: var(--color-on-accent);
-    padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 var(--space-2);
-    min-height: var(--touch);
-  }
-
-  header .btn {
-    color: inherit;
-    min-width: var(--touch);
-  }
-
   header .btn.on {
     color: var(--color-accent-tint);
     font-weight: var(--weight-semibold);
@@ -281,13 +257,6 @@
     right: 0;
     bottom: var(--space-2);
     padding: 0;
-  }
-
-  footer {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4) calc(var(--space-4) + var(--safe-bottom));
   }
 
   .caption {

@@ -17,6 +17,9 @@
   import { pipeline } from '../pipeline/controller.svelte';
   import { updates } from '../update.svelte';
   import { copyText, deviceInfo, formatBytes, type DeviceInfo } from '../diagnostics';
+  import { formatDay } from '../format';
+  import { backup } from '../state/backup.svelte';
+  import { capture } from '../state/capture.svelte';
 
   let est = $state<StorageEstimateInfo | null>(null);
   let opfs = $state<number | null>(null);
@@ -29,6 +32,15 @@
   let probe = $state<(QuotaProbeResult & { at: string; capBytes: number; before: StorageEstimateInfo | null; after?: StorageEstimateInfo | null }) | null>(null);
   let hevc = $state<Record<string, boolean | string>>({});
   let message = $state<string | null>(null);
+  let includeSamples = $state(false);
+
+  const percent = (p: { done: number; total: number } | null) => (p && p.total ? Math.floor((100 * p.done) / p.total) : 0);
+
+  function pickBackup(e: Event & { currentTarget: HTMLInputElement }) {
+    const file = e.currentTarget.files?.[0];
+    e.currentTarget.value = '';
+    if (file) void backup.import(file, pipeline.running || capture.busy);
+  }
 
   async function refresh() {
     est = await estimateStorage();
@@ -100,13 +112,16 @@
   }
 
   $effect(() => {
-    if (app.ready) void refresh();
+    if (app.ready) {
+      void refresh();
+      void backup.load();
+      void app.db.settings.get<typeof probe>('diag.quotaProbe').then((p) => (probe = p ?? null));
+    }
   });
 
   onMount(() => {
     device = deviceInfo();
     void checkCodecs();
-    void app.db.settings.get<typeof probe>('diag.quotaProbe').then((p) => (probe = p ?? null));
   });
 
   async function persist() {
@@ -192,6 +207,47 @@
     <h3 class="section-title">Catalog</h3>
     <button class="btn" type="button" onclick={() => router.go({ name: 'catalog' })}>Asanas and templates ›</button>
     <p class="small muted">Add or edit asanas, and edit the sequence templates used for suggestions.</p>
+  </section>
+
+  <section class="group" aria-labelledby="backup-title">
+    <h3 class="section-title" id="backup-title">Backup</h3>
+    <p class="small muted">
+      Safari can remove website data, so keep a backup in Files or iCloud Drive. It holds sessions, labels, asanas, templates,
+      stills and clips in one .zip file. Videos are not included.
+    </p>
+    <dl class="kv">
+      <dt>Last backup</dt>
+      <dd>{backup.last ? `${formatDay(backup.last.at)} · ${formatBytes(backup.last.bytes)}` : 'none from this device'}</dd>
+    </dl>
+    <label class="check">
+      <input type="checkbox" bind:checked={includeSamples} />
+      <span>Include analysis frames{backup.samplesBytes !== null ? ` (${formatBytes(backup.samplesBytes)})` : ''}</span>
+    </label>
+    <p class="small muted">The tiny frames on review cards and for re-running detection. Without them, re-import the video to get them back.</p>
+    <div class="actions">
+      <button class="btn primary" type="button" onclick={() => backup.export(includeSamples)} disabled={!!backup.exporting || !!backup.importing}>
+        {backup.exporting ? `Preparing… ${percent(backup.exporting)} %` : 'Create backup'}
+      </button>
+      <label class="btn file" class:disabled={!!backup.importing || !!backup.exporting}>
+        {backup.importing ? (backup.importing.phase === 'reading' ? 'Reading…' : `Importing… ${percent(backup.importing)} %`) : 'Import backup…'}
+        <input type="file" accept=".zip,application/zip" onchange={pickBackup} disabled={!!backup.importing || !!backup.exporting} />
+      </label>
+    </div>
+    {#if backup.ready}
+      {@const r = backup.ready}
+      <div class="ready" role="status">
+        <p class="small">
+          Backup ready: {r.file.name}, {formatBytes(r.file.size)}{r.manifest.missingFiles.length
+            ? ` (${r.manifest.missingFiles.length} files were missing on this device and are not included)`
+            : ''}.
+        </p>
+        <div class="actions">
+          <button class="btn primary" type="button" onclick={() => backup.save()}>Save</button>
+          {#if backup.canShare}<button class="btn" type="button" onclick={() => backup.share()}>Share…</button>{/if}
+        </div>
+      </div>
+    {/if}
+    {#if backup.error}<p class="small error" role="alert">{backup.error}</p>{/if}
   </section>
 
   <section class="group">
@@ -384,6 +440,55 @@
   .segmented button.on {
     background: var(--color-surface);
     color: var(--color-text);
+  }
+
+  .check {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: var(--touch);
+    font-size: var(--text-s);
+  }
+
+  .check input {
+    width: 22px;
+    height: 22px;
+    accent-color: var(--color-accent);
+  }
+
+  .file {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .file input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .file.disabled {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
+  .ready {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border-radius: var(--radius-m);
+    background: var(--color-accent-tint);
+  }
+
+  .ready p,
+  .error {
+    margin: 0;
+  }
+
+  .error {
+    color: var(--color-danger);
   }
 
   .leftovers {

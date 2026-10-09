@@ -17,7 +17,14 @@ export interface KeyValueStore {
   get<T>(key: string): Promise<T | undefined>;
   set<T>(key: string, value: T): Promise<void>;
   delete(key: string): Promise<void>;
+  /** All key/value pairs. */
+  entries(): Promise<Array<{ key: string; value: unknown }>>;
 }
+
+export type RecordStoreName = 'asanas' | 'templates' | 'sessions' | 'videos' | 'analyses' | 'holds' | 'assets' | 'jobs';
+
+/** One write of an atomic batch (settings are written as `{ key, value }`). */
+export type BatchOp = { store: RecordStoreName | 'settings'; put: unknown } | { store: RecordStoreName | 'settings'; delete: string };
 
 export interface MetadataStore {
   asanas: Repository<Asana>;
@@ -29,6 +36,8 @@ export interface MetadataStore {
   assets: Repository<Asset>;
   jobs: Repository<ProcessingJob>;
   settings: KeyValueStore;
+  /** Applies all writes in one transaction: either every write is stored or none. */
+  batch(ops: BatchOp[]): Promise<void>;
   close(): void;
 }
 
