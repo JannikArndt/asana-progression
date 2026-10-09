@@ -28,10 +28,20 @@ export interface Asana {
 }
 
 /** Suggestion data only. */
+/**
+ * One step of a sequence. `reps` = how many holds in a row are usual (default 1, e.g. 5 × Navasana);
+ * suggestions also allow fewer or more.
+ */
+export interface TemplateEntry {
+  asanaId: string;
+  side?: Side;
+  reps?: number;
+}
+
 export interface SequenceTemplate {
   id: string;
   name: string;
-  entries: Array<{ asanaId: string; side?: Side }>;
+  entries: TemplateEntry[];
 }
 
 export interface Video {

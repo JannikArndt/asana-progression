@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { asanaId, DOWNWARD_DOG_ID, PRIMARY_SERIES_ID, primarySeriesTemplate, SEED_ADDED, SEED_ASANAS, SUN_SALUTATIONS, withSunSalutations } from './seed';
+import { asanaId, DOWNWARD_DOG_ID, PRIMARY_SERIES_ID, primarySeriesTemplate, SEED_ADDED, SEED_ASANAS, withReps, withSunSalutations } from './seed';
 
 describe('catalog seed', () => {
   it('has unique ids and the expected sided asanas', () => {
@@ -27,10 +27,10 @@ describe('primary series template', () => {
 
   it('lists sided asanas right then left', () => {
     expect(t.id).toBe(PRIMARY_SERIES_ID);
-    expect(label(8)).toBe('padangusthasana');
-    expect(label(10)).toBe('utthita-trikonasana R');
-    expect(label(11)).toBe('utthita-trikonasana L');
-    expect(t.entries.length).toBe(SUN_SALUTATIONS + 62 + 21 + 1);
+    expect(label(1)).toBe('padangusthasana');
+    expect(label(3)).toBe('utthita-trikonasana R');
+    expect(label(4)).toBe('utthita-trikonasana L');
+    expect(t.entries.length).toBe(63 + 21 + 1);
   });
 
   it('runs Utthita Hasta Padangusthasana A/B/C right, then A/B/C left', () => {
@@ -52,17 +52,24 @@ describe('primary series template', () => {
     expect(label(t.entries.length - 1)).toBe('savasana');
   });
 
-  it('starts with a downward dog per sun salutation (5 A, 3 B)', () => {
-    expect(t.entries.slice(0, SUN_SALUTATIONS).every((e) => e.asanaId === DOWNWARD_DOG_ID && !e.side)).toBe(true);
-    expect(SUN_SALUTATIONS).toBe(8);
+  it('repeats sun salutations, Navasana and Urdhva Dhanurasana as reps', () => {
+    expect(t.entries[0]).toEqual({ asanaId: DOWNWARD_DOG_ID, reps: 8 });
+    expect(t.entries.find((e) => e.asanaId === 'navasana')?.reps).toBe(5);
+    const ud = t.entries.findIndex((e) => e.asanaId === 'urdhva-dhanurasana');
+    expect(t.entries[ud]!.reps).toBe(3);
+    expect(t.entries[ud + 1]).toEqual({ asanaId: 'paschimottanasana-a' });
   });
 
-  it('upgrades an existing template once', () => {
-    const old = { ...t, entries: t.entries.slice(SUN_SALUTATIONS, SUN_SALUTATIONS + 3) };
-    const up = withSunSalutations(old);
-    expect(up.entries.length).toBe(SUN_SALUTATIONS + 3);
-    expect(up.entries[SUN_SALUTATIONS]).toEqual(old.entries[0]);
-    expect(withSunSalutations(up)).toBe(up);
+  it('upgrades existing templates: sun salutations once (v2), repeated entries to reps (v3)', () => {
+    const v1 = { ...t, entries: t.entries.slice(1).map(({ reps: _, ...e }) => e) };
+    const v2 = { ...v1, entries: [...Array.from({ length: 8 }, () => ({ asanaId: DOWNWARD_DOG_ID })), ...v1.entries] };
+    expect(withSunSalutations(v1).entries[0]).toEqual({ asanaId: DOWNWARD_DOG_ID, reps: 8 });
+    expect(withSunSalutations(v2)).toBe(v2);
+    expect(withReps(v2)).toEqual(t);
+    expect(withReps(withSunSalutations(v1))).toEqual(t);
+    // other templates: only consecutive duplicates collapse; sides stay apart
+    const own = { id: 'own', name: 'Own', entries: [{ asanaId: 'navasana' }, { asanaId: 'b', side: 'R' as const }, { asanaId: 'b', side: 'L' as const }, { asanaId: 'b', side: 'L' as const, reps: 2 }] };
+    expect(withReps(own).entries).toEqual([{ asanaId: 'navasana' }, { asanaId: 'b', side: 'R' }, { asanaId: 'b', side: 'L', reps: 3 }]);
     expect(SEED_ADDED[2]).toEqual([DOWNWARD_DOG_ID]);
     expect(SEED_ASANAS.some((a) => a.id === DOWNWARD_DOG_ID && a.group === 'Surya Namaskara')).toBe(true);
   });

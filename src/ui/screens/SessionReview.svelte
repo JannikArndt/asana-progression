@@ -8,8 +8,9 @@
   import CropEditor from '../components/CropEditor.svelte';
   import DebugPanel from '../components/DebugPanel.svelte';
   import { formatDuration, type Span } from '../components/timeline';
-  import { nextEntries, type Label } from '../../labeling';
+  import { expectedHolds, nextEntries, type Label } from '../../labeling';
   import { PRIMARY_SERIES_ID } from '../../model';
+  import { holdReps } from '../../progression';
   import { app } from '../state/app.svelte';
   import { pipeline } from '../pipeline/controller.svelte';
   import { importQueue } from '../import.svelte';
@@ -42,6 +43,8 @@
   });
 
   const names = $derived(new Map(app.asanas.map((a) => [a.id, a.name])));
+  /** Rep numbers of labeled holds (consecutive holds with the same label). */
+  const reps = $derived(review.session ? holdReps(review.holds, [review.session]) : new Map());
   const nameOf = (asanaId: string) => names.get(asanaId) ?? asanaId;
   const counts = $derived({
     labeled: review.entries.filter((e) => e.candidate.status === 'labeled').length,
@@ -92,6 +95,7 @@
         ...(hasStill ? [{ id: 'crop', label: 'Edit crop…' }] : []),
         { id: 'nudge', label: 'Choose frame…' },
         { id: 'split', label: 'Split…' },
+        { id: 'splitk', label: 'Split into several…' },
         ...(prev ? [{ id: 'merge', label: 'Merge with previous' }] : []),
         ...(entry.candidate.status !== 'dismissed' ? [{ id: 'dismiss', label: 'Not a pose', kind: 'danger' as const }] : []),
         ...(hasFile ? [{ id: 'probe', label: 'Full-resolution frame' }] : []),
@@ -111,6 +115,9 @@
       case 'split':
         scrub = { mode: 'split', videoId: entry.videoId, key: entry.key };
         break;
+      case 'splitk':
+        await askSplitInto(entry);
+        break;
       case 'merge':
         await review.mergeWithPrevious(entry.key);
         break;
@@ -121,6 +128,33 @@
         probe = { videoId: entry.videoId, t: entry.candidate.bestS };
         break;
     }
+  }
+
+  /** Holds the template expects in place of an open card (when it is more than one). */
+  function expectedAt(entry: SessionEntry): number | undefined {
+    if (entry.candidate.status !== 'open') return undefined;
+    const k = expectedHolds(review.items, entry.key, review.template);
+    return k !== undefined && k >= 2 ? k : undefined;
+  }
+
+  async function askSplitInto(entry: SessionEntry) {
+    const expected = expectedHolds(review.items, entry.key, review.template);
+    const merged = entry.candidate.alternatesS.length + 1;
+    const max = Math.min(12, Math.max(6, expected ?? 0, merged));
+    const choice = await dialog.ask({
+      title: 'Split into how many holds?',
+      message: 'Cuts go to the clearest posture changes. You can merge or split again afterwards.',
+      options: [
+        ...Array.from({ length: max - 1 }, (_, i) => i + 2).map((k) => ({
+          id: String(k),
+          label: `${k} holds`,
+          ...(k === expected ? { kind: 'primary' as const, detail: 'Expected by the template' } : k === merged ? { detail: 'Merged by detection' } : {}),
+        })),
+        { id: 'cancel', label: 'Cancel', kind: 'quiet' },
+      ],
+    });
+    const k = Number(choice);
+    if (Number.isInteger(k) && k >= 2) await review.splitInto(entry.key, k);
   }
 
   async function pick(label: Label) {
@@ -254,6 +288,9 @@
                 selected={selectedKey === entry.key}
                 thumb={entry.hold ? app.assets.find((a) => a.holdId === entry.hold!.id && a.kind === 'thumb') : undefined}
                 captureStatus={entry.hold ? capture.status[entry.hold.id] : undefined}
+                rep={entry.hold ? reps.get(entry.hold.id) : undefined}
+                expected={expectedAt(entry)}
+                onsplit={(k) => review.splitInto(entry.key, k)}
                 onselect={() => (selectedKey = entry.key)}
                 onconfirm={() => review.confirm(entry.key)}
                 onpick={() => (pickerKey = entry.key)}

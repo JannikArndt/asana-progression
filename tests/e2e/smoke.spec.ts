@@ -65,9 +65,15 @@ test('import → review → asana', async ({ page }) => {
   await page.reload();
   await expect(page.locator('article.review[data-status=labeled]')).toHaveCount(2);
 
+  // Split the open hold into two at its clearest posture change.
+  await cards(page).nth(2).getByRole('button', { name: /More actions/ }).click();
+  await page.getByRole('button', { name: 'Split into several…' }).click();
+  await page.getByRole('button', { name: '2 holds' }).click();
+  await expect(cards(page)).toHaveCount(4);
+
   // Sessions list and the asana page.
   await page.getByRole('button', { name: '‹ Sessions' }).click();
-  await expect(page.getByText(/2 labeled · 1 open/)).toBeVisible();
+  await expect(page.getByText(/2 labeled · 2 open/)).toBeVisible();
   await page.getByRole('tab', { name: 'Asanas' }).click();
   const row = page.getByRole('button', { name: /Utthita Trikonasana\s+1 hold/ });
   await expect(row).toBeVisible();

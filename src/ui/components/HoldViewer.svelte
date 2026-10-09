@@ -158,7 +158,7 @@
   <footer>
     {#if current}
       <div class="caption">
-        <span class="date tabular">{formatDay(current.date, true)}{current.hold.side ? ` · ${current.hold.side === 'R' ? 'Right' : 'Left'}` : ''}</span>
+        <span class="date tabular">{formatDay(current.date, true)}{current.hold.side ? ` · ${current.hold.side === 'R' ? 'Right' : 'Left'}` : ''}{current.reps > 1 ? ` · rep ${current.rep} of ${current.reps}` : ''}</span>
         {#if current.note}<span class="note">{current.note}</span>{/if}
       </div>
       {#if comparing && pinned}
