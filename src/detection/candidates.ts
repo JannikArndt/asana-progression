@@ -95,7 +95,9 @@ export async function findCandidates(
 
   const p50 = percentileSorted(sorted, 50);
   const p99 = percentileSorted(sorted, 99);
-  const singleStill = sorted.length === 0 || p99 <= p.singleStillMaxSpread * p50 + 1e-9;
+  // Only short clips can be a single hold; long practices with much movement have a small spread too.
+  const short = n / p.sampleHz <= p.singleStillMaxS + 1e-9;
+  const singleStill = short && (sorted.length === 0 || p99 <= p.singleStillMaxSpread * p50 + 1e-9);
 
   let runs: Run[];
   if (singleStill) {
@@ -109,6 +111,13 @@ export async function findCandidates(
   const preMerge = runs.map((r) => toCandidate(r, p));
 
   // Similar-best-frame merge of adjacent candidates.
+  const cache = new Map<number, Uint8Array>();
+  const frame = async (i: number) => {
+    let f = cache.get(i);
+    if (!f) cache.set(i, (f = await frames.frame(i)));
+    return f;
+  };
+  const cap = await neighbourCap(runs, C, threshold, frame, p);
   const merged: Run[] = [];
   const maxGap = p.similarMergeMaxGapS * p.sampleHz;
   for (const r of runs) {
@@ -116,9 +125,9 @@ export async function findCandidates(
     // Scale: the larger of the still threshold (4 s means) and the frame-to-frame noise floor
     // at the two best frames (single frames are noisier than 4 s means).
     const scale = last ? Math.max(threshold, m[last.best] ?? 0, m[r.best] ?? 0) : 0;
-    const maxDiff = p.similarMergeFactor * (Number.isFinite(scale) ? scale : 0);
+    const maxDiff = Math.min(cap, p.similarMergeFactor * (Number.isFinite(scale) ? scale : 0));
     if (last && r.start - last.end <= maxGap && maxDiff > 0) {
-      const d = meanAbsDiff(await frames.frame(last.best), await frames.frame(r.best));
+      const d = meanAbsDiff(await frame(last.best), await frame(r.best));
       if (d < maxDiff) {
         const keepLast = !(m[r.best]! < m[last.best]!);
         const winner = keepLast ? last.best : r.best;
@@ -135,4 +144,32 @@ export async function findCandidates(
   }
 
   return { threshold, singleStill, candidates: merged.map((r) => toCandidate(r, p)), preMerge };
+}
+
+/**
+ * Upper bound for the similar-merge distance: `similarMergeRelative` × the median best-frame
+ * distance of adjacent pre-merge runs separated by a clear posture change (C peaks at
+ * ≥ `similarMergeRefPeak` × threshold between them; fragments of one hold only cross the threshold
+ * slightly). The median says how different two poses look in this video: small when the body fills
+ * little of the frame, while the still threshold is inflated by a practice that is mostly movement.
+ * Infinity (no cap) with fewer than `similarMergeMinPairs` such pairs.
+ */
+async function neighbourCap(
+  runs: Run[],
+  C: Float32Array,
+  threshold: number,
+  frame: (i: number) => Promise<Uint8Array>,
+  p: DetectionParams,
+): Promise<number> {
+  const d: number[] = [];
+  for (let i = 1; i < runs.length; i++) {
+    const a = runs[i - 1]!;
+    const b = runs[i]!;
+    let peak = -Infinity;
+    for (let k = a.end; k < b.start; k++) if (C[k]! > peak) peak = C[k]!;
+    if (peak >= p.similarMergeRefPeak * threshold) d.push(meanAbsDiff(await frame(a.best), await frame(b.best)));
+  }
+  if (d.length < p.similarMergeMinPairs) return Infinity;
+  d.sort((x, y) => x - y);
+  return p.similarMergeRelative * percentileSorted(d, 50);
 }

@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { alignToTemplate, matchTemplateEntry, mergeCandidateFor, nextEntries, nextSide, suggest, usedEntries } from './suggest';
-import { primarySeriesTemplate, SEED_ASANAS } from '../model/seed';
+import { DOWNWARD_DOG_ID, primarySeriesTemplate, SEED_ASANAS } from '../model/seed';
 import type { Asana, SequenceTemplate } from '../model/types';
 import type { HistoryEntry, ReviewItem } from './types';
 
 const catalog = [...SEED_ASANAS];
-const primary = primarySeriesTemplate();
+const full = primarySeriesTemplate();
+// Index-based tests below use the series without the leading sun salutations.
+const primary: SequenceTemplate = { ...full, entries: full.entries.filter((e) => e.asanaId !== DOWNWARD_DOG_ID) };
 const idx = (asanaId: string, side?: 'R' | 'L', from = 0) =>
   primary.entries.findIndex((e, i) => i >= from && e.asanaId === asanaId && (side ? e.side === side : true));
 
@@ -17,6 +19,12 @@ const labeled = (key: string, asanaId: string, side: 'R' | 'L' | null, templateE
 });
 
 describe('template suggestions', () => {
+  it('starts the Primary series with the sun salutations', () => {
+    const s = suggest([open('a'), open('b')], catalog, full, []);
+    expect(s.a![0]).toMatchObject({ asanaId: DOWNWARD_DOG_ID, templateEntryIndex: 0, reason: 'template' });
+    expect(s.b![0]).toMatchObject({ asanaId: DOWNWARD_DOG_ID, templateEntryIndex: 1 });
+  });
+
   it('starts at the first entry and projects consecutive entries onto open cards', () => {
     const s = suggest([open('a'), open('b'), open('c')], catalog, primary, []);
     expect(s.a!.map((x) => x.asanaId)).toEqual(['padangusthasana', 'padahastasana', 'utthita-trikonasana']);

@@ -63,10 +63,13 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
 ### Labeling (milestone 2)
 
 - Catalog-first: holds reference asanas; a `SequenceTemplate` only drives suggestions. Seeded on
-  first run (`catalogVersion` setting): 62 asanas (21 sided, each with a `group` and a coarse
-  `posture` class) and "Primary series" (84 entries, sided asanas R then L; Utthita Hasta
+  first run (`catalogVersion` setting, now 2): 63 asanas (21 sided, each with a `group` and,
+  except Adho Mukha Svanasana, a coarse `posture` class) and "Primary series" (92 entries: 8 ×
+  Adho Mukha Svanasana for the sun salutations, 5 A + 3 B; sided asanas R then L; Utthita Hasta
   Padangusthasana A/B/C R then A/B/C L; Paschimottanasana A again after Urdhva Dhanurasana;
   Virabhadrasana B is R then L like everything else — edit in M5 if the practice differs).
+  Upgrades only add what a version introduced (`SEED_ADDED`, never re-adding deleted asanas) and
+  prepend the sun salutations to an existing Primary series once; a deleted template stays deleted.
 - Sessions: created at import (one per video; files of one batch recorded on the same day share
   a session). The template is chosen per session at import (default Primary series, "None"
   preselected for clips < 5 min) and can be switched on the review screen. Milestone-1 videos
@@ -136,15 +139,21 @@ split slider or crossfade, edit crop, jump to session), flipbook (`Flipbook`: st
    of 2K+1 frames (K = 16). Edges use truncated windows of at least `edgeWindowMinS` = 1 s; C is
    NaN in the first/last second (NaN never counts as still).
 4. still = C ≤ p55(C) (≤ instead of < so exact ties, e.g. noise-free synthetic video, work);
-   join gaps < 1 s; keep runs ≥ 6 s. Single-still special case: if p99(C) ≤ 4 × p50(C) the video
-   has no clear posture change → one candidate covering the whole video. (p99 rather than p95:
-   videos with very long holds have < 5 % transition samples.)
+   join gaps < 1 s; keep runs ≥ 6 s. Single-still special case: if the video is ≤ 300 s and
+   p99(C) ≤ 4 × p50(C) it has no clear posture change → one candidate covering the whole video.
+   (p99 rather than p95: videos with very long holds have < 5 % transition samples. The length
+   limit: a 67 min practice that is mostly movement had p99/p50 = 3.0 and became one candidate.)
 5. Best frame = argmin m in the middle 80 % of the run (no breath-4 bias).
 6. Clip window = 4 s window inside the hold with the lowest summed m.
 7. Merge adjacent candidates whose best-frame tiny images are similar: mean |a − b| <
    `similarMergeFactor` (2) × max(threshold, m(bestA), m(bestB)), gap ≤ `similarMergeMaxGapS`
    (60 s). The m terms are the single-frame noise floor (C is a 4 s mean and much less noisy).
    The stiller best frame wins; merged-away best frames become `alternatesS`.
+   Cap: the merge distance is at most `similarMergeRelative` (0.45) × the median best-frame
+   distance of adjacent candidates with a clear change between them (C peak ≥ 1.5 × threshold;
+   needs ≥ 5 such pairs). That median says how different two poses look in this video. Without the
+   cap, an outdoor practice (small body, threshold inflated by movement: 3.1 vs. m ≈ 0.2) merged
+   Trikonasana R/L, all sun-salutation down dogs, UHP and Virabhadrasana A/B.
 8. Every threshold is in `DetectionParams` and editable in the debug panel (Video → Debug).
 
 Known limits (keep in mind when tuning): a global percentile can miss a whole hold whose sway
@@ -152,7 +161,11 @@ keeps C above p55 when there are only a few holds; noise-only holds fragment and
 similar-merge; variants with near-identical silhouettes (e.g. Paschimottanasana A then B) can be
 merged — the review step (M2) needs split.
 
-Real data: `src/detection/__fixtures__/real/sarvangasana-finishing.json` is the user's 7.6 min
+Real data: `src/detection/__fixtures__/real/ashtanga-primary-outdoor.json` is a 67.6 min outdoor
+primary series (1080×1120 HEVC HLG); its truth = 28 distinct poses identified by eye on the tiny
+frames (sun-salutation down dogs, standing sequence, UHP, Virabhadrasana, Sirsasana A/B) that must
+stay separate candidates; params/candidates were recomputed with the defaults (the export used
+the single-still workaround). `sarvangasana-finishing.json` is the user's 7.6 min
 finishing-sequence clip (the validation video). All 9 holds are found; their best frames were checked
 by eye on full-resolution frames (the long Sirsasana A is split in 3 and merged back). The truth
 spans are the detector's own spans (named, not hand-segmented); the fixture test checks that each
@@ -167,7 +180,9 @@ in Debug. Measured skip ratio is shown on the processing screen.
 Debug → "Export analysis JSON" writes `AnalysisExport` (signals, params, candidates, pre-merge
 candidates and the tiny frames at every best frame). Drop files into
 `src/detection/__fixtures__/real/`; `fixture.test.ts` replays them and, if a hand-written
-`truth: [{startS, endS, name}]` array is added, checks that every true hold ≥ minHoldS is found.
+`truth: [{startS, endS, name, bestS?}]` array is added, checks with the **current defaults** that
+every true hold ≥ minHoldS is found as its own candidate. Exports carry the labeled holds in
+`meta.labels` (name incl. side, start/end/best) as a starting point for `truth`.
 
 ## Source specifics
 
@@ -232,10 +247,10 @@ Fill in from the user's device reports (Settings → "Copy diagnostics report", 
 | File handover from Photos | Photos picker may compress/transcode unless the picker's Options → Format is set to "Current" (iOS 17: "Options", iOS 18: control icon) — https://support.echo360.com/hc/en-us/articles/38604331326093-Troubleshooting-iOS-Uploads ; picking the same video via Files uploads it unchanged — https://developer.apple.com/forums/thread/731042 | Cropped exports arrived as HEVC Main 10 HLG `video/mp4` with Apple metadata (make/model/software, `com.apple.quicktime.creationdate`); `mvhd` creation_time = export time. Photos vs Files comparison still pending. |
 | File handover from Files | Original file | pending |
 | WebCodecs video decode | Available since Safari 16.4 — https://webkit.org/blog/13966/webkit-features-in-safari-16-4/ | HEVC Main 10 4K supported (`hvc1` and `hev1`), also H.264 and VP9. Decoded frames are `NV12`. |
-| Decode speed | — | 4.1–4.5× real time for 3040×1960 @ 59.94 HEVC Main 10 with non-reference skipping (≈ 50 % of packets skipped). Frame → gray via canvas took ≈ 39 ms per sample = 65 % of wall time → added the luma-plane path (`source/convert.ts`), chosen per video by a first-frame benchmark. |
+| Decode speed | — | 4.1–4.5× real time for 3040×1960 @ 59.94 HEVC Main 10 with non-reference skipping (≈ 50 % of packets skipped). Frame → gray via canvas took ≈ 39 ms per sample = 65 % of wall time → added the luma-plane path (`source/convert.ts`), chosen per video by a first-frame benchmark. With the luma path (2026-10-09, 12×12 jittered taps): **8.8×** for that video; 36–38× for 1080×1120 @ 30/60 fps HEVC Main 10. Benchmark luma vs canvas per frame: 2 vs 31 ms (4K), 4–5 vs 10–58 ms (1080p); ≈ 2.5–4.7 ms per sample incl. copy. |
 | Memory peak | Safari exposes no JS memory API; use Web Inspector → Timelines → Memory | not measured |
-| OPFS quota | Safari 17+: browser apps up to 60 % of disk per origin, Home Screen web apps the same — https://webkit.org/blog/14403/updates-to-storage-policy/ | `estimate().quota` 41.2 GB. Writing: first 1 GB in ≈ 1 s, 5 GB in 81 s (≈ 62 MB/s). Safari's `usage` estimate did **not** drop after the test files were deleted (OPFS listing was back to 9.8 MB) — Settings shows the real file list and removes leftovers. |
-| Persistent storage | Granted by heuristics, e.g. Home Screen web app — same source | `persist()` → false in a Safari tab (Home Screen app not tested yet). |
+| OPFS quota | Safari 17+: browser apps up to 60 % of disk per origin, Home Screen web apps the same — https://webkit.org/blog/14403/updates-to-storage-policy/ | `estimate().quota` 41.2 GB. Writing: first 1 GB in ≈ 1 s, 5 GB in 81 s (≈ 62 MB/s); Home Screen app: 2 GB in 23.6 s (≈ 85 MB/s). Safari's `usage` estimate did **not** drop after the test files were deleted (OPFS listing was back to 9.8 MB) — Settings shows the real file list and removes leftovers. |
+| Persistent storage | Granted by heuristics, e.g. Home Screen web app — same source | `persist()` → false in a Safari tab; **granted** in the Home Screen web app (standalone, 2026-10-09). |
 | HLG → canvas | — | Safari tone-maps HLG to SDR inside the decoder: frames arrive as 8-bit `NV12`, BT.709 / sRGB transfer, full range. sRGB and Display-P3 canvases are identical (luma 3–236) and look SDR, not HDR. Stills are therefore SDR JPEGs; the "original" clip quality (stream copy) keeps HDR for playback. |
 | Screen Wake Lock | Since Safari 16.4 — https://webkit.org/blog/13966/webkit-features-in-safari-16-4/ | available |
 

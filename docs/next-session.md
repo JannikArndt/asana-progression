@@ -46,7 +46,7 @@ labels.
 - Gestures: grid pinch (2–4 columns) with `touch-action: pan-y`, viewer swipe, split/crossfade
   slider, crop editor pinch.
 - Memory with long clips in the viewer; flipbook with many stills.
-- Home Screen web app: does `persist()` get granted there?
+- ~~Home Screen web app: does `persist()` get granted there?~~ Yes (2026-10-09).
 
 ## 4. Design polish (M5)
 
@@ -62,9 +62,10 @@ labels.
   A multi-store transaction in `MetadataStore` would make it atomic.
 - "Keep separate" for same-day sessions is stored in localStorage; move it to a session field
   if backups should carry it.
-- `downsampleLuma` now uses up to 12×12 jittered taps per block (≈ 3–6 ms per 4K frame in V8).
-  Re-measure on the iPhone. If the luma path loses the per-video benchmark to canvas, try
-  step = block/8.
+- ~~Re-measure `downsampleLuma` on the iPhone~~: luma still wins clearly (2 vs 31 ms at 4K).
+- Detection on long practices: ask the user to label the outdoor primary-series video fully and
+  re-export (exports now carry `meta.labels`) to replace the by-eye truth in
+  `ashtanga-primary-outdoor.json`. Padangusthasana + Padahastasana come out as one 49 s run there.
 
 ## Process
 

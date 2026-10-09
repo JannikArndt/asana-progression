@@ -7,10 +7,15 @@ import type { Asana, PostureClass, SequenceTemplate, Side } from './types';
 interface SeedRow {
   name: string;
   sided?: boolean;
-  posture: PostureClass;
+  posture?: PostureClass;
 }
 
 const GROUPS: Array<{ group: string; rows: SeedRow[] }> = [
+  {
+    // The 5-breath hold of every sun salutation; no posture class (none of the coarse classes fits).
+    group: 'Surya Namaskara',
+    rows: [{ name: 'Adho Mukha Svanasana' }],
+  },
   {
     group: 'Standing',
     rows: [
@@ -104,15 +109,30 @@ export function asanaId(name: string): string {
 }
 
 export const SEED_ASANAS: readonly Asana[] = GROUPS.flatMap(({ group, rows }) =>
-  rows.map((r) => ({ id: asanaId(r.name), name: r.name, sided: r.sided === true, group, posture: r.posture })),
+  rows.map((r) => ({ id: asanaId(r.name), name: r.name, sided: r.sided === true, group, ...(r.posture ? { posture: r.posture } : {}) })),
 );
+
+/** Downward dog: held for 5 breaths once per sun salutation. */
+export const DOWNWARD_DOG_ID = 'adho-mukha-svanasana';
+/** Sun salutations at the start of the Primary series: 5 × A, then 3 × B. */
+export const SUN_SALUTATIONS = 5 + 3;
+
+/** Seed asanas added after the first catalog version, by version. Deleted asanas are not re-added. */
+export const SEED_ADDED: Readonly<Record<number, readonly string[]>> = { 2: [DOWNWARD_DOG_ID] };
+
+/** Catalog upgrade for an existing Primary series template: prepends the sun salutations once. */
+export function withSunSalutations(t: SequenceTemplate): SequenceTemplate {
+  if (t.entries.some((e) => e.asanaId === DOWNWARD_DOG_ID)) return t;
+  return { ...t, entries: [...Array.from({ length: SUN_SALUTATIONS }, () => ({ asanaId: DOWNWARD_DOG_ID })), ...t.entries] };
+}
 
 export const PRIMARY_SERIES_ID = 'primary-series';
 
 /**
  * Default "Primary series" template: catalog order, sided asanas right then left. Exceptions to
- * plain catalog order: Utthita Hasta Padangusthasana runs A/B/C right, then A/B/C left, and
- * Paschimottanasana (A) appears again after Urdhva Dhanurasana as the closing forward bend.
+ * plain catalog order: Adho Mukha Svanasana once per sun salutation, Utthita Hasta Padangusthasana
+ * runs A/B/C right, then A/B/C left, and Paschimottanasana (A) appears again after Urdhva
+ * Dhanurasana as the closing forward bend.
  */
 export function primarySeriesTemplate(asanas: readonly Asana[] = SEED_ASANAS): SequenceTemplate {
   const entries: Array<{ asanaId: string; side?: Side }> = [];
@@ -129,6 +149,10 @@ export function primarySeriesTemplate(asanas: readonly Asana[] = SEED_ASANAS): S
       if (a.id === uhp[0]) {
         for (const side of ['R', 'L'] as const) for (const id of uhp) entries.push({ asanaId: id, side });
       }
+      continue;
+    }
+    if (a.id === DOWNWARD_DOG_ID) {
+      for (let i = 0; i < SUN_SALUTATIONS; i++) entries.push({ asanaId: a.id });
       continue;
     }
     add(a.id);

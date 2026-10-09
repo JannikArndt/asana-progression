@@ -3,6 +3,8 @@ import { openMetadataStore, type MetadataStore } from '../../storage';
 import {
   newId,
   primarySeriesTemplate,
+  SEED_ADDED,
+  withSunSalutations,
   PRIMARY_SERIES_ID,
   SEED_ASANAS,
   sortCatalog,
@@ -29,7 +31,7 @@ export interface AnalysisSummary {
   createdAt: string;
 }
 
-const CATALOG_VERSION = 1;
+const CATALOG_VERSION = 2;
 
 /** App-wide state: the metadata store, lists for the home screen, session-only file handles. */
 class AppState {
@@ -75,13 +77,26 @@ class AppState {
     return this.store;
   }
 
-  /** Seeds the asana catalog and the Primary series template on first run. */
+  /** Seeds the asana catalog and the Primary series template on first run; upgrades older seeds. */
   private async seedCatalog() {
     const db = this.db;
     const version = (await db.settings.get<number>('catalogVersion')) ?? 0;
     if (version >= CATALOG_VERSION) return;
-    if ((await db.asanas.all()).length === 0) for (const a of SEED_ASANAS) await db.asanas.put({ ...a });
-    if (!(await db.templates.get(PRIMARY_SERIES_ID))) await db.templates.put(primarySeriesTemplate());
+    const asanas = await db.asanas.all();
+    if (asanas.length === 0) for (const a of SEED_ASANAS) await db.asanas.put({ ...a });
+    else {
+      const have = new Set(asanas.map((a) => a.id));
+      for (let v = version + 1; v <= CATALOG_VERSION; v++) {
+        for (const id of SEED_ADDED[v] ?? []) {
+          const a = SEED_ASANAS.find((x) => x.id === id);
+          if (a && !have.has(id)) await db.asanas.put({ ...a });
+        }
+      }
+    }
+    const primary = await db.templates.get(PRIMARY_SERIES_ID);
+    // A template the user deleted stays deleted.
+    if (!primary && version === 0) await db.templates.put(primarySeriesTemplate());
+    else if (primary && version < 2) await db.templates.put(withSunSalutations(primary));
     await db.settings.set('catalogVersion', CATALOG_VERSION);
   }
 

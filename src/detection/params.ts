@@ -15,7 +15,11 @@ export const DEFAULT_PARAMS: Readonly<DetectionParams> = Object.freeze({
   clipWindowS: 4,
   similarMergeFactor: 2,
   similarMergeMaxGapS: 60,
+  similarMergeRelative: 0.45,
+  similarMergeRefPeak: 1.5,
+  similarMergeMinPairs: 5,
   singleStillMaxSpread: 4,
+  singleStillMaxS: 300,
 });
 
 /** Parameters whose change requires decoding the video again (they shape the samples). */
@@ -53,7 +57,11 @@ export const PARAM_SPECS: ReadonlyArray<ParamSpec> = [
   { key: 'clipWindowS', label: 'Clip window', min: 1, max: 30, step: 0.5, unit: 's' },
   { key: 'similarMergeFactor', label: 'Similar-merge factor', min: 0, max: 10, step: 0.1, unit: '× scale' },
   { key: 'similarMergeMaxGapS', label: 'Similar-merge max gap', min: 0, max: 120, step: 1, unit: 's' },
+  { key: 'similarMergeRelative', label: 'Similar-merge cap', min: 0.05, max: 5, step: 0.05, unit: '× median neighbour distance' },
+  { key: 'similarMergeRefPeak', label: 'Similar-merge cap: change peak ≥', min: 1, max: 10, step: 0.1, unit: '× threshold' },
+  { key: 'similarMergeMinPairs', label: 'Similar-merge cap from', min: 1, max: 100, step: 1, unit: 'pairs', integer: true },
   { key: 'singleStillMaxSpread', label: 'Single-still max spread', min: 1, max: 10, step: 0.1, unit: 'p99/p50' },
+  { key: 'singleStillMaxS', label: 'Single-still max length', min: 0, max: 7200, step: 30, unit: 's' },
 ];
 
 /** Returns a complete, sanitized parameter set (unknown keys dropped, out-of-range values clamped). */

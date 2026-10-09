@@ -25,16 +25,16 @@ test('import → review → asana', async ({ page }) => {
   await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
   await expect(page.locator('.timeline canvas').first()).toBeVisible();
 
-  // One tap confirms the suggested label (template order).
+  // One tap confirms the suggested label (template order: the series starts with the sun salutations).
   const first = cards(page).nth(0);
-  await expect(first.getByRole('button', { name: 'Padangusthasana', exact: true })).toBeVisible();
-  await first.getByRole('button', { name: 'Confirm Padangusthasana' }).click();
+  await expect(first.getByRole('button', { name: 'Adho Mukha Svanasana', exact: true })).toBeVisible();
+  await first.getByRole('button', { name: 'Confirm Adho Mukha Svanasana' }).click();
   await expect(first).toHaveAttribute('data-status', 'labeled');
 
   // The next card now suggests the next entry; pick a different one via search instead.
   const second = cards(page).nth(1);
-  await expect(second.getByRole('button', { name: 'Padahastasana', exact: true })).toBeVisible();
-  await second.getByRole('button', { name: 'Padahastasana', exact: true }).click();
+  await expect(second.getByRole('button', { name: 'Adho Mukha Svanasana', exact: true })).toBeVisible();
+  await second.getByRole('button', { name: 'Adho Mukha Svanasana', exact: true }).click();
   await page.getByPlaceholder('Search asanas').fill('utt trik');
   await page.getByRole('button', { name: 'Utthita Trikonasana right' }).click();
   await expect(second).toHaveAttribute('data-status', 'labeled');
@@ -162,7 +162,7 @@ test('capture works with the MediaPipe cropper (self-hosted wasm and model)', as
   await importVideo(page);
   await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
   const first = cards(page).nth(0);
-  await first.getByRole('button', { name: 'Confirm Padangusthasana' }).click();
+  await first.getByRole('button', { name: 'Confirm Adho Mukha Svanasana' }).click();
   await expect(first.locator('[data-capture=done]')).toHaveCount(1, { timeout: 90_000 });
   const cached = await page.evaluate(async () => (await (await caches.open('mediapipe-pose-v1')).keys()).map((r) => r.url.split('/').pop()));
   expect(cached).toEqual(expect.arrayContaining(['vision_wasm_module_internal.wasm', 'pose_landmarker_lite.task']));
