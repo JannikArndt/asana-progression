@@ -28,9 +28,10 @@ export function lumaBits(format: string | null): 8 | 16 | null {
 }
 
 /**
- * Box-filter downscale of a luma plane. `offset`/`stride` are in samples (not bytes). Inside each
- * output block every `step`-th row and column is averaged (≥ 16 samples per block), which is
- * plenty after a 10–25× reduction. `shift` scales high-bit-depth samples to 8 bits.
+ * Box-filter downscale of a luma plane (8-bit, or 16-bit with `shift` to 8-bit). Each output pixel
+ * averages up to 12 × 12 taps of its source block; tap positions are jittered by a fixed hash inside
+ * their cell so periodic textures (stripes, grids) don't alias onto one phase. Positions are the
+ * same for every frame, so static texture yields constant values.
  */
 export function downsampleLuma(
   src: Uint8Array | Uint16Array,
@@ -43,36 +44,38 @@ export function downsampleLuma(
   shift = 0,
 ): Uint8Array {
   const out = new Uint8Array(dstW * dstH);
-  const xs = new Int32Array(dstW + 1);
-  for (let i = 0; i <= dstW; i++) xs[i] = Math.min(srcW, Math.floor((i * srcW) / dstW));
   const block = Math.min(srcW / dstW, srcH / dstH);
-  const step = Math.max(1, Math.floor(block / 4));
-  const acc = new Float64Array(dstW);
-  const cnt = new Uint32Array(dstW);
+  const step = Math.max(1, Math.floor(block / 12));
+  const xTaps = tapsPerCell(srcW, dstW, step, 0x9e37);
+  const yTaps = tapsPerCell(srcH, dstH, step, 0x7f4a);
   const scale = 1 / (1 << shift);
   for (let oy = 0; oy < dstH; oy++) {
-    const y0 = Math.floor((oy * srcH) / dstH);
-    const y1 = Math.max(y0 + 1, Math.min(srcH, Math.floor(((oy + 1) * srcH) / dstH)));
-    acc.fill(0);
-    cnt.fill(0);
-    for (let y = y0; y < y1; y += step) {
-      const row = offset + y * stride;
-      for (let ox = 0; ox < dstW; ox++) {
-        const a = xs[ox]!;
-        const b = Math.max(a + 1, xs[ox + 1]!);
-        let s = 0;
-        let n = 0;
-        for (let x = a; x < b; x += step) {
-          s += src[row + x]!;
-          n++;
-        }
-        acc[ox]! += s;
-        cnt[ox]! += n;
-      }
-    }
+    const ys = yTaps[oy]!;
     for (let ox = 0; ox < dstW; ox++) {
-      out[oy * dstW + ox] = Math.min(255, Math.round((acc[ox]! / Math.max(1, cnt[ox]!)) * scale));
+      const xs = xTaps[ox]!;
+      let s = 0;
+      for (let j = 0; j < ys.length; j++) {
+        const row = offset + ys[j]! * stride;
+        for (let i = 0; i < xs.length; i++) s += src[row + xs[i]!]!;
+      }
+      out[oy * dstW + ox] = Math.min(255, Math.round((s / (xs.length * ys.length)) * scale));
     }
+  }
+  return out;
+}
+
+/** Source positions sampled for each output cell: one per `step`-wide sub-cell, at a hashed offset. */
+function tapsPerCell(srcLen: number, dstLen: number, step: number, seed: number): Int32Array[] {
+  const out: Int32Array[] = [];
+  for (let o = 0; o < dstLen; o++) {
+    const a = Math.min(srcLen - 1, Math.floor((o * srcLen) / dstLen));
+    const b = Math.max(a + 1, Math.min(srcLen, Math.floor(((o + 1) * srcLen) / dstLen)));
+    const taps: number[] = [];
+    for (let x = a; x < b; x += step) {
+      const h = Math.imul(x ^ seed, 0x45d9f3b) >>> 0;
+      taps.push(Math.min(b - 1, x + ((h >>> 8) % step)));
+    }
+    out.push(Int32Array.from(taps));
   }
   return out;
 }

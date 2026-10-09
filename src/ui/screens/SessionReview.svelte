@@ -186,12 +186,12 @@
       </p>
     </div>
 
-    {#if review.sameDay.length && !pipeline.running && importQueue.total === 0}
+    {#if review.combinable.length && !pipeline.running && importQueue.total === 0}
       <div class="card notice">
         <p class="small">
           {review.sameDay.length} other {review.sameDay.length === 1 ? 'session was' : 'sessions were'} recorded on this day.
         </p>
-        <button class="btn" type="button" onclick={() => review.combineSameDay()}>Combine into this session</button>
+        <button class="btn" type="button" onclick={() => review.combineSameDay()} disabled={review.combining}>Combine into this session…</button>
       </div>
     {/if}
 

@@ -23,6 +23,25 @@ import { pipeline } from '../pipeline/controller.svelte';
 import { invalidateSamples } from './samples';
 import { capture, deleteAssets } from './capture.svelte';
 
+const SEPARATE_KEY = 'asana.sessions.separate';
+
+/** Sessions the user chose to keep separate from their same-day sessions. */
+function separateSessions(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(SEPARATE_KEY) ?? '[]') as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+function keepSeparate(ids: string[]) {
+  try {
+    localStorage.setItem(SEPARATE_KEY, JSON.stringify([...new Set([...separateSessions(), ...ids])]));
+  } catch {
+    /* private mode */
+  }
+}
+
 /**
  * State and actions of the session review screen. Every action persists immediately
  * (IndexedDB), so there is never unsaved labeling state.
@@ -257,19 +276,54 @@ export class SessionReview {
     return this.session ? sameDaySessions(app.sessions, this.session) : [];
   }
 
-  /** Moves the videos and holds of all same-day sessions into this one. */
+  combining = $state(false);
+
+  /** Moves the videos and holds of all same-day sessions into this one, after a confirmation. */
   async combineSameDay() {
     const session = this.session;
-    if (!session) return;
+    if (!session || this.combining) return;
     const others = sameDaySessions(app.sessions, session);
     if (!others.length) return;
-    const db = app.db;
-    const r = combineSessions(session, others, app.videos, app.holds);
-    await db.sessions.put(r.session);
-    for (const h of r.holds) await db.holds.put(h);
-    for (const id of r.deleteIds) await db.sessions.delete(id);
-    await app.refresh();
-    await this.load(session.id);
+    const holdsOf = (id: string) => app.holds.filter((h) => h.sessionId === id).length;
+    const list = others.map((o) => `${o.videoIds.length} ${o.videoIds.length === 1 ? 'video' : 'videos'}, ${holdsOf(o.id)} labeled`).join('; ');
+    const choice = await dialog.ask({
+      title: 'Combine sessions?',
+      message: `Moves ${others.length === 1 ? 'the other session' : `${others.length} other sessions`} (${list}) into this one. Notes are joined; this cannot be undone.`,
+      options: [
+        { id: 'combine', label: 'Combine', kind: 'primary' },
+        { id: 'separate', label: 'Keep separate', detail: 'Stop suggesting this for these sessions.' },
+        { id: 'cancel', label: 'Cancel', kind: 'quiet' },
+      ],
+    });
+    if (choice === 'separate') {
+      keepSeparate([session.id, ...others.map((o) => o.id)]);
+      this.separateVersion++;
+      return;
+    }
+    if (choice !== 'combine') return;
+    this.combining = true;
+    try {
+      const db = app.db;
+      const r = combineSessions(session, others, app.videos, app.holds);
+      // Order makes an interrupted run safe to repeat: the target gets every video first, then the
+      // holds move, and only then are the other sessions deleted.
+      await db.sessions.put(r.session);
+      for (const h of r.holds) await db.holds.put(h);
+      for (const id of r.deleteIds) await db.sessions.delete(id);
+      await app.refresh();
+      await this.load(session.id);
+    } finally {
+      this.combining = false;
+    }
+  }
+
+  separateVersion = $state(0);
+
+  /** Same-day sessions the user has not chosen to keep separate. */
+  get combinable(): Session[] {
+    void this.separateVersion;
+    const kept = separateSessions();
+    return this.sameDay.filter((o) => !(kept.has(o.id) && this.session && kept.has(this.session.id)));
   }
 
   async setNote(note: string) {

@@ -41,7 +41,8 @@ describe('analysis export', () => {
 /**
  * Real-signal fixtures exported from the app (debug panel → "Export analysis JSON") go into
  * src/detection/__fixtures__/real/. Each must replay to the exported candidates; if a `truth`
- * array was added by hand, every true hold ≥ minHoldS must be found.
+ * array was added by hand, every true hold ≥ minHoldS must be found (and its best frame must be
+ * near the confirmed `bestS`, if given).
  */
 const dir = join(import.meta.dirname, '__fixtures__', 'real');
 let files: string[] = [];
@@ -63,6 +64,7 @@ describe.skipIf(files.length === 0)('real-signal fixtures', () => {
         if (t.endS - t.startS < params.minHoldS) continue;
         const hit = r.candidates.find((c) => c.bestS >= t.startS && c.bestS <= t.endS);
         expect(hit, `hold ${t.name ?? ''} ${t.startS}–${t.endS}`).toBeDefined();
+        if (t.bestS !== undefined) expect(Math.abs(hit!.bestS - t.bestS), `best frame of ${t.name ?? ''}`).toBeLessThanOrEqual(t.bestTolS ?? 1.5);
       }
     });
   }

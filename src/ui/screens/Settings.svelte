@@ -59,11 +59,21 @@
     const before = est?.usage ?? null;
     await refresh(); // re-plan against the current database right before deleting
     const removing = plan?.remove ?? [];
-    const bytes = plan?.removeBytes ?? 0;
-    for (const e of removing) await removeOpfsPath(e.path);
+    let removed = 0;
+    let removedBytes = 0;
+    for (const e of removing) {
+      if (await removeOpfsPath(e.path)) {
+        removed++;
+        removedBytes += Math.max(0, e.size);
+      }
+    }
     await refresh();
     cleaning = false;
-    cleanMessage = `Removed ${removing.length} file(s), ${formatBytes(bytes)}. Safari's usage estimate: ${formatBytes(before)} → ${formatBytes(est?.usage ?? null)}.`;
+    const failed = removing.length - removed;
+    cleanMessage =
+      `Removed ${removed} file(s), ${formatBytes(removedBytes)}.` +
+      (failed ? ` ${failed} could not be removed (in use) — try again later.` : '') +
+      ` Safari's usage estimate: ${formatBytes(before)} → ${formatBytes(est?.usage ?? null)}.`;
   }
 
   async function checkCodecs() {
@@ -210,9 +220,10 @@
         <dt>Kept</dt><dd>{plan.keep.length} file(s), {formatBytes(plan.keep.reduce((s, e) => s + Math.max(0, e.size), 0))}</dd>
         <dt>Leftovers</dt><dd>{plan.remove.length ? `${plan.remove.length} file(s), ${formatBytes(plan.removeBytes)}` : 'none'}</dd>
       </dl>
-      {#if plan.remove.length}
+      {#if plan.remove.length || plan.inUse.length}
         <ul class="leftovers small muted">
           {#each plan.remove as e (e.path)}<li>{e.path} · {formatBytes(e.size)}</li>{/each}
+          {#each plan.inUse as e (e.path)}<li>{e.path} · in use</li>{/each}
         </ul>
       {/if}
     {/if}
@@ -220,7 +231,7 @@
       Safari's usage estimate can stay high after files are deleted; the file list above is what is actually stored.
     </p>
     <div class="actions">
-      <button class="btn" type="button" onclick={cleanUp} disabled={!plan || plan.remove.length === 0 || cleaning || pipeline.running}>
+      <button class="btn" type="button" onclick={cleanUp} disabled={!plan || plan.remove.length === 0 || cleaning || probing !== null || pipeline.running}>
         {cleaning ? 'Removing…' : 'Remove leftovers'}
       </button>
       <button class="btn" type="button" onclick={persist}>Request persistent storage</button>
