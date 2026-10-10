@@ -82,6 +82,8 @@ test('import → review → asana', async ({ page }) => {
   await page.getByRole('tab', { name: 'Asanas' }).click();
   const row = page.getByRole('button', { name: /Utthita Trikonasana\s+1 hold/ });
   await expect(row).toBeVisible();
+  // The row previews the captured colour still, not the gray analysis frame.
+  await expect(row.locator('.thumb img')).toBeVisible({ timeout: 60_000 });
   await row.click();
   await expect(page.getByRole('heading', { name: 'Utthita Trikonasana' })).toBeVisible();
   // Progression: the captured still in the feed, the viewer, grid and side filter.
@@ -102,7 +104,9 @@ test('import → review → asana', async ({ page }) => {
   await page.getByRole('button', { name: '‹ Asanas' }).click();
   await page.locator('input[type=file]').first().setInputFiles(video);
   await expect(page.getByText('This video was imported before')).toBeVisible();
-  await page.getByRole('button', { name: /Cancel/ }).click();
+  // "Cancel" of a question is the sheet's ✕ in the header.
+  await page.getByRole('dialog').locator('header').getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByRole('dialog')).toBeHidden();
 
   expect(errors).toEqual([]);
 });
@@ -180,6 +184,49 @@ test('capture works with the MediaPipe cropper (self-hosted wasm and model)', as
   expect(errors).toEqual([]);
 });
 
+test('sheets: close in the header, backdrop tap and swipe down dismiss', async ({ page }) => {
+  await page.goto('./#/catalog');
+  // An editor: Cancel top-left, Save top-right.
+  await page.getByRole('button', { name: 'Add asana' }).click();
+  const edit = page.getByRole('dialog', { name: 'Add asana' });
+  const header = edit.locator('header');
+  await expect(header.getByRole('button', { name: 'Cancel' })).toBeVisible();
+  await page.waitForTimeout(400); // opening animation
+  await expect(header.getByRole('button', { name: 'Save' })).toBeVisible();
+  const cancelBox = (await header.getByRole('button', { name: 'Cancel' }).boundingBox())!;
+  const saveBox = (await header.getByRole('button', { name: 'Save' }).boundingBox())!;
+  const bodyBox = (await edit.locator('.body').boundingBox())!;
+  expect(cancelBox.x).toBeLessThan(saveBox.x);
+  expect(cancelBox.y + cancelBox.height).toBeLessThanOrEqual(bodyBox.y + 1);
+  await expect(edit.getByRole('button', { name: /Cancel|Close/ })).toHaveCount(1);
+  await page.touchscreen.tap(195, 40);
+  await expect(edit).toBeHidden();
+
+  await page.getByRole('button', { name: 'Add asana' }).click();
+  await expect(edit).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(edit).toBeHidden();
+
+  // Dragging the grabber: a short pull snaps back, a long one dismisses.
+  const drag = async (dy: number) => {
+    const g = (await edit.locator('.grabber').boundingBox())!;
+    const x = g.x + g.width / 2;
+    const y = g.y + g.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    for (let i = 1; i <= 10; i++) await page.mouse.move(x, y + (dy * i) / 10);
+    await page.mouse.up();
+  };
+  await page.getByRole('button', { name: 'Add asana' }).click();
+  await expect(edit).toBeVisible();
+  await page.waitForTimeout(400);
+  await drag(30);
+  await page.waitForTimeout(400);
+  await expect(edit).toBeVisible();
+  await drag(400);
+  await expect(edit).toBeHidden();
+});
+
 test('catalog and template editor', async ({ page }) => {
   await page.goto('./#/catalog');
   await page.getByRole('button', { name: 'Add asana' }).click();
@@ -194,7 +241,9 @@ test('catalog and template editor', async ({ page }) => {
   await page.getByRole('button', { name: 'Add asanas' }).click();
   await page.getByPlaceholder('Search asanas').fill('pb');
   await page.getByRole('button', { name: /^Parsva Bakasana/ }).click();
-  await page.getByRole('button', { name: 'Close' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Add asanas' });
+  await sheet.locator('header').getByRole('button', { name: 'Close' }).click();
+  await expect(sheet).toBeHidden();
   await expect(page.locator('.entries li')).toHaveText([/1\s*Parsva Bakasana R/, /2\s*Parsva Bakasana L/]);
   await page.reload();
   await expect(page.locator('.entries li')).toHaveCount(2);

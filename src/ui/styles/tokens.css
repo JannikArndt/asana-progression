@@ -16,6 +16,7 @@
   --color-on-accent: #ffffff;
   --color-danger: #a4513f;
   --color-overlay: rgba(20, 19, 17, 0.97);
+  --color-scrim: rgba(29, 28, 26, 0.28);
 
   /* Spacing (4 px grid). */
   --space-1: 4px;

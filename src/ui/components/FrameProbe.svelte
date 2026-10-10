@@ -138,8 +138,8 @@
 
 <div class="overlay" role="dialog" aria-modal="true" aria-label="Full-resolution frame">
   <header>
+    <button class="btn quiet close" type="button" onclick={onclose} aria-label="Close">✕</button>
     <span class="tabular">Frame at {formatTime(timestampS)}</span>
-    <button class="btn quiet close" type="button" onclick={onclose}>Done</button>
   </header>
   <div class="scroll">
     {#if status === 'loading'}<p class="note">Decoding…</p>{/if}
@@ -201,8 +201,8 @@
   header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 0 var(--space-2) 0 var(--space-4);
+    gap: var(--space-1);
+    padding: 0 var(--space-4) 0 var(--space-1);
     border-bottom: 1px solid var(--color-hairline);
     min-height: var(--touch);
   }

@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const executablePath = process.env.PW_CHROMIUM_PATH;
+// Parallel checkouts can run their own preview server.
+const port = Number(process.env.PW_PORT ?? 4173);
 
 export default defineConfig({
   testDir: 'tests/e2e',
@@ -8,7 +10,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
   use: {
-    baseURL: 'http://localhost:4173/asana-progression/',
+    baseURL: `http://localhost:${port}/asana-progression/`,
     trace: 'retain-on-failure',
   },
   projects: [
@@ -24,8 +26,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run build && npx vite preview --port 4173 --strictPort',
-    url: 'http://localhost:4173/asana-progression/',
+    command: `npm run build && npx vite preview --port ${port} --strictPort`,
+    url: `http://localhost:${port}/asana-progression/`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

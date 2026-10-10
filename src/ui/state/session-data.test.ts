@@ -74,6 +74,27 @@ describe('session data', () => {
     expect(asanaStats([], [hold('z', 'nope', 'v', 'q', 1)]).get('q')!.latestDate).toBe('');
   });
 
+  it('counts practice days and previews the newest captured hold', () => {
+    const sameDay: Session = { ...s1, id: 's3', date: '2026-10-01T18:00:00+02:00' };
+    const holds = [
+      hold('a', 's1', 'v1', 'navasana', 1),
+      hold('b', 's3', 'v4', 'navasana', 1),
+      hold('c', 's2', 'v3', 'navasana', 50),
+      hold('e', 's2', 'v3', 'navasana', 10),
+      hold('d', 's1', 'v1', 'balasana', 1),
+      hold('f', 's1', 'v1', 'balasana', 9),
+    ];
+    const st = asanaStats([s1, s2, sameDay], holds, new Set(['a', 'b', 'e']));
+    expect(st.get('navasana')).toMatchObject({ count: 4, days: 2 });
+    // The newest hold ('c') has no image yet: the newest one that has wins.
+    expect(st.get('navasana')!.latest!.id).toBe('c');
+    expect(st.get('navasana')!.preview!.id).toBe('e');
+    // Nothing captured: the newest hold (its analysis frame).
+    expect(st.get('balasana')).toMatchObject({ count: 2, days: 1 });
+    expect(st.get('balasana')!.preview!.id).toBe('f');
+    expect(asanaStats([s1, s2, sameDay], holds, new Set(['a', 'b'])).get('navasana')!.preview!.id).toBe('b');
+  });
+
   it('summarizes sessions and finds orphans', () => {
     const sum = summarizeSession(s1, [video('v1', 100), video('v2', 50)], { v1: { candidates: [cand('a', 1, 'labeled'), cand('b', 2)] }, v2: { candidates: [cand('c', 1, 'dismissed')] } });
     expect(sum).toEqual({ durationS: 150, labeled: 1, open: 1, dismissed: 1 });

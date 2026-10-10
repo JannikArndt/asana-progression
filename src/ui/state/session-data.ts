@@ -78,23 +78,44 @@ export function historyFrom(sessions: Session[], holds: Hold[], excludeSessionId
 
 export interface AsanaStats {
   count: number;
+  /** Distinct practice days (session dates). */
+  days: number;
   latest: Hold | null;
   latestDate: string | null;
+  /** Newest hold with a captured image (`captured`), else the newest hold: the list's preview. */
+  preview: Hold | null;
 }
 
-/** Hold count and newest hold per asana (newest by session date, then best time). */
-export function asanaStats(sessions: Session[], holds: Hold[]): Map<string, AsanaStats> {
+/**
+ * Hold count, practice days and newest hold per asana (newest by session date, then best time).
+ * `captured` = ids of holds with a captured still or thumbnail.
+ */
+export function asanaStats(sessions: Session[], holds: Hold[], captured: ReadonlySet<string> = new Set()): Map<string, AsanaStats> {
   const dateOf = new Map(sessions.map((s) => [s.id, s.date]));
+  const newer = (h: Hold, d: string, than: Hold | null, thanDate: string) => !than || d > thanDate || (d === thanDate && h.bestS > than.bestS);
   const out = new Map<string, AsanaStats>();
+  const days = new Map<string, Set<string>>();
+  const previewDate = new Map<string, string>();
   for (const h of holds) {
     const d = dateOf.get(h.sessionId) ?? '';
-    const cur = out.get(h.asanaId) ?? { count: 0, latest: null, latestDate: null };
+    const cur = out.get(h.asanaId) ?? { count: 0, days: 0, latest: null, latestDate: null, preview: null };
     cur.count++;
-    if (!cur.latest || d > (cur.latestDate ?? '') || (d === cur.latestDate && h.bestS > cur.latest.bestS)) {
+    if (newer(h, d, cur.latest, cur.latestDate ?? '')) {
       cur.latest = h;
       cur.latestDate = d;
     }
+    if (captured.has(h.id) && newer(h, d, cur.preview, previewDate.get(h.asanaId) ?? '')) {
+      cur.preview = h;
+      previewDate.set(h.asanaId, d);
+    }
+    const set = days.get(h.asanaId) ?? new Set<string>();
+    set.add(dayOf(d));
+    days.set(h.asanaId, set);
     out.set(h.asanaId, cur);
+  }
+  for (const [id, st] of out) {
+    st.days = days.get(id)!.size;
+    st.preview ??= st.latest;
   }
   return out;
 }

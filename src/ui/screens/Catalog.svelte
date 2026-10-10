@@ -142,8 +142,9 @@
 </main>
 
 {#if draft}
-  <Sheet title={draft.id ? 'Edit asana' : 'Add asana'} onclose={() => (draft = null)}>
+  <Sheet title={draft.id ? 'Edit asana' : 'Add asana'} onclose={() => (draft = null)} action={{ label: 'Save', form: 'asana-form' }}>
     <form
+      id="asana-form"
       class="form"
       onsubmit={(e) => {
         e.preventDefault();
@@ -172,12 +173,9 @@
         </select>
       </label>
       {#if error}<p class="error">{error}</p>{/if}
-      <div class="actions">
-        <button class="btn primary" type="submit">Save</button>
-        {#if draft.id}
-          <button class="btn danger" type="button" onclick={remove}>Delete</button>
-        {/if}
-      </div>
+      {#if draft.id}
+        <button class="btn danger delete" type="button" onclick={remove}>Delete asana</button>
+      {/if}
     </form>
   </Sheet>
 {/if}
@@ -297,8 +295,7 @@
     font-size: var(--text-s);
   }
 
-  .actions {
-    display: flex;
-    gap: var(--space-2);
+  .delete {
+    align-self: flex-start;
   }
 </style>

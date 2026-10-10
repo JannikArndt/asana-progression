@@ -21,6 +21,15 @@ export interface DialogRequest {
   options: DialogOption[];
 }
 
+/**
+ * What dismissing (✕, backdrop tap, swipe down, Escape) answers: the "cancel" option, or the only
+ * option of a notice ("OK"); null = the question needs an explicit answer.
+ */
+export function dismissOf(req: DialogRequest): string | null {
+  if (req.options.some((o) => o.id === 'cancel')) return 'cancel';
+  return req.options.length === 1 ? req.options[0]!.id : null;
+}
+
 class DialogState {
   current = $state<(DialogRequest & { resolve: (id: string) => void }) | null>(null);
 

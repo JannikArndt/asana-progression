@@ -21,7 +21,8 @@ npm run icons        # regenerate public/icons/*.png
 ```
 
 In the cloud container, Playwright must use the preinstalled browser:
-`PW_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e`.
+`PW_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e` (`PW_PORT=<port>`
+for a parallel checkout; default 4173).
 Playwright's Chromium decodes VP9/AV1 but not H.264/HEVC, so e2e fixtures are VP9.
 
 ## Architecture
@@ -285,6 +286,25 @@ accent, system font, hairlines, no heavy shadows, touch targets ≥ 44 px.
 
 Sheets (`components/Sheet.svelte`) are pinned to `visualViewport` (iOS keyboard: the layout
 viewport extends behind it); search sheets pass `fill` to keep their height while results shrink.
+Every bottom surface is a `Sheet`, including `dialog.ask` questions and the review ••• menu
+(`Dialog.svelte`; `layer="dialog"` stacks above sheets and overlays). One anatomy: grabber, then a
+header row — dismiss **top-left** (a round ✕ "Close"; "Cancel" when the sheet has a confirming
+`action`, which sits top-right, e.g. Save / Split here, `action.form` submits a form), title
+centred. Never a close/cancel button at the bottom; full-screen overlays follow the same rule (✕ or
+Cancel top-left). Dismiss = cancel (drafts are dropped, never saved silently): ✕/Cancel, a tap on
+the backdrop, Escape, or swiping down. A dialog's `cancel` option becomes the ✕ (`dismissOf`: a
+single-option notice dismisses with that option; otherwise it is not dismissible).
+Swipe (`sheet-gesture.ts`, unit-tested): grabber/header always drag (`touch-action: none`); the
+content drags only from scroll top, downwards (pointer events + a non-passive `touchmove` that
+stops native scrolling once the sheet drags); sliders and `[data-sheet-no-drag]` never; mouse only
+on the header. Slop 6 px, vertical only; the sheet follows the finger (rubber band upwards),
+dismisses past 30 % of its height or on a flick ≥ 0.5 px/ms (upward flick keeps it), otherwise
+springs back; the backdrop fades with the offset. `prefers-reduced-motion`: no slide animations.
+Focus moves into the sheet, Tab is trapped, focus returns on close.
+
+Asanas list (Home): the preview is the newest hold that has a captured image (thumb, else still),
+filling a square via `progression.fillCrop` around the display crop; the gray analysis frame only
+when nothing is captured. The line reads "N holds", plus "· M days" when they span several days.
 
 Timeline graph (`src/ui/components/TimelineGraph.svelte`, maths in `timeline.ts`): canvas,
 min/max envelope per pixel when zoomed out, pinch zoom, inertial horizontal pan
