@@ -303,4 +303,15 @@ Fill in from the user's device reports (Settings → "Copy diagnostics report", 
    unused; templates: new, rename, insert/move/remove entries, duplicate, delete). Re-import
    reuses labels and re-captures ✅. Backup export/import ✅. Design polish ✅ (shared overlay
    frame, one date formatter, clip quality badge, re-attach from the asana page). Still open:
-   on-device verification (see `docs/next-session.md`).
+   on-device verification.
+
+Open (needs the user):
+
+- A failed video: reproduce from its diagnostics report (codec string, `decoderSupport`, sampler
+  stats, error stage). A detection miss becomes a fixture with `truth`, tuned via `DetectionParams`.
+- On the iPhone: 720p/1080p clips are H.264 at the right size (Chromium has no AVC encoder, so
+  untested); MediaPipe load/per-still time and crop quality; gestures (grid pinch, viewer swipe,
+  split/crossfade slider, crop pinch); memory with long clips and big flipbooks; backup Save,
+  Share → Save to Files and importing a multi-GB backup. Record results in "Measured iOS limits".
+- Outdoor primary series: a fully labeled re-export to replace the by-eye truth in
+  `ashtanga-primary-outdoor.json` (Padangusthasana + Padahastasana come out as one 49 s run).
