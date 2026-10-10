@@ -244,8 +244,9 @@
     justify-content: center;
   }
 
+  /* Above full-screen overlays (50), the crop editor (60) and sheets opened over the viewer (70). */
   .scrim.dialog {
-    z-index: 50;
+    z-index: 80;
   }
 
   .backdrop {
