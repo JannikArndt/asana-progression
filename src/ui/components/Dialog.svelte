@@ -1,63 +1,47 @@
 <script lang="ts">
+  import Sheet from './Sheet.svelte';
   import TinyFrame from './TinyFrame.svelte';
-  import { dialog } from '../state/dialog.svelte';
+  import { dialog, dismissOf } from '../state/dialog.svelte';
 </script>
 
+<!-- Questions are sheets too: a "cancel" option becomes the header's ✕ (and backdrop tap, swipe down, Escape). -->
 {#if dialog.current}
   {@const d = dialog.current}
-  <div class="scrim" role="presentation">
-    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
-      <h2 id="dialog-title">{d.title}</h2>
-      {#if d.message}<p class="muted message">{d.message}</p>{/if}
-      {#if d.frames}
-        {@const f = d.frames}
-        {@const tileW = Math.round(Math.min(96, Math.max(44, (56 * f.width) / f.height)))}
-        <ol class="frames" aria-label="Frames of this hold">
-          {#each f.items as item, i (i)}
-            <li style:width="{tileW}px">
-              <TinyFrame videoId={f.videoId} frameWidth={f.width} frameHeight={f.height} index={item.index} alt="Frame at {item.label}" />
-              <span class="tabular">{item.label}</span>
-            </li>
+  {@const dismiss = dismissOf(d)}
+  {#key d}
+    <Sheet title={d.title} layer="dialog" dismissible={dismiss !== null} onclose={() => dismiss !== null && dialog.answer(dismiss)}>
+      <div class="content">
+        {#if d.message}<p class="muted message">{d.message}</p>{/if}
+        {#if d.frames}
+          {@const f = d.frames}
+          {@const tileW = Math.round(Math.min(96, Math.max(44, (56 * f.width) / f.height)))}
+          <ol class="frames" aria-label="Frames of this hold">
+            {#each f.items as item, i (i)}
+              <li style:width="{tileW}px">
+                <TinyFrame videoId={f.videoId} frameWidth={f.width} frameHeight={f.height} index={item.index} alt="Frame at {item.label}" />
+                <span class="tabular">{item.label}</span>
+              </li>
+            {/each}
+          </ol>
+        {/if}
+        <div class="options">
+          {#each d.options.filter((o) => o.id !== 'cancel') as o (o.id)}
+            <button type="button" class="btn option {o.kind ?? ''}" onclick={() => dialog.answer(o.id)}>
+              <span class="label">{o.label}</span>
+              {#if o.detail}<span class="detail">{o.detail}</span>{/if}
+            </button>
           {/each}
-        </ol>
-      {/if}
-      <div class="options">
-        {#each d.options as o (o.id)}
-          <button type="button" class="btn option {o.kind ?? ''}" onclick={() => dialog.answer(o.id)}>
-            <span class="label">{o.label}</span>
-            {#if o.detail}<span class="detail">{o.detail}</span>{/if}
-          </button>
-        {/each}
+        </div>
       </div>
-    </div>
-  </div>
+    </Sheet>
+  {/key}
 {/if}
 
 <style>
-  .scrim {
-    position: fixed;
-    inset: 0;
-    z-index: 50;
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-    background: rgba(29, 28, 26, 0.28);
-    animation: fade var(--duration) var(--ease);
-  }
-
-  .sheet {
-    width: 100%;
-    max-width: 520px;
-    padding: var(--space-5) var(--space-4) calc(var(--space-4) + var(--safe-bottom));
-    background: var(--color-bg);
-    border-radius: var(--radius-l) var(--radius-l) 0 0;
+  .content {
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
-    max-height: calc(100% - var(--safe-top) - var(--space-6));
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    animation: rise var(--duration) var(--ease);
   }
 
   .message {
@@ -94,7 +78,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
-    margin-top: var(--space-2);
   }
 
   .option {
@@ -110,18 +93,5 @@
     font-size: var(--text-s);
     font-weight: var(--weight-regular);
     opacity: 0.8;
-  }
-
-  @keyframes fade {
-    from {
-      opacity: 0;
-    }
-  }
-
-  @keyframes rise {
-    from {
-      transform: translateY(24px);
-      opacity: 0;
-    }
   }
 </style>

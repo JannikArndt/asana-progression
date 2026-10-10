@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayCrop, flipbookInterval, hasBothSides, hasReps, holdReps, itemAspect, nextColumns, progressionItems, repLabel, swipeIndex, typicalAspect } from './views';
+import { displayCrop, fillCrop, flipbookInterval, hasBothSides, hasReps, holdReps, itemAspect, nextColumns, progressionItems, repLabel, swipeIndex, typicalAspect } from './views';
 import type { Asset, Hold, Session } from '../model/types';
 
 const hold = (id: string, sessionId: string, asanaId: string, side: Hold['side'], startS = 0): Hold => ({
@@ -132,5 +132,17 @@ describe('crop aspects', () => {
     expect(typicalAspect([sq(0.6), sq(1)])).toBeCloseTo(0.8);
     expect(typicalAspect([sq(0.1)])).toBe(0.5);
     expect(typicalAspect([item({}, still(400, 100))])).toBe(2);
+  });
+
+  it('fills a fixed tile around the crop, inside the frame', () => {
+    const px = (b: { x: number; y: number; w: number; h: number }, W: number, H: number) => [b.x * W, b.y * H, b.w * W, b.h * H].map((v) => Math.round(v));
+    // Tall crop in a wide frame: grown sideways around its centre.
+    expect(px(fillCrop({ x: 0.4, y: 0.2, w: 0.1, h: 0.6 }, 1000, 500, 1), 1000, 500)).toEqual([300, 100, 300, 300]);
+    // Wide crop: grown vertically, pushed back inside the frame at the bottom.
+    expect(px(fillCrop({ x: 0.1, y: 0.8, w: 0.5, h: 0.2 }, 1000, 1000, 1), 1000, 1000)).toEqual([100, 500, 500, 500]);
+    // The full 16:9 frame as a square: the frame's height limits it, centred.
+    expect(px(fillCrop(null, 1600, 900, 1), 1600, 900)).toEqual([350, 0, 900, 900]);
+    // A tall crop that cannot grow wide enough in a portrait frame is cut instead.
+    expect(px(fillCrop({ x: 0, y: 0, w: 1, h: 1 }, 900, 1600, 1), 900, 1600)).toEqual([0, 350, 900, 900]);
   });
 });

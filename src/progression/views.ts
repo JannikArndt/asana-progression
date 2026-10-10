@@ -140,3 +140,25 @@ export function typicalAspect(items: Array<Pick<ProgressionItem, 'hold' | 'still
   const median = list.length % 2 ? list[mid]! : (list[mid - 1]! + list[mid]!) / 2;
   return Math.min(max, Math.max(min, median));
 }
+
+/**
+ * Crop of exactly `aspect` (width / height in pixels) that fills a fixed tile: the display crop
+ * grown around its centre (or, where the frame ends, cut) and kept inside the frame.
+ */
+export function fillCrop(crop: Box | null, width: number, height: number, aspect: number): Box {
+  const c = crop ?? { x: 0, y: 0, w: 1, h: 1 };
+  let w = c.w * width;
+  let h = c.h * height;
+  if (w / h < aspect) {
+    w = Math.min(width, h * aspect);
+    h = w / aspect;
+  } else {
+    h = Math.min(height, w / aspect);
+    w = h * aspect;
+  }
+  const cx = (c.x + c.w / 2) * width;
+  const cy = (c.y + c.h / 2) * height;
+  const x = Math.min(width - w, Math.max(0, cx - w / 2));
+  const y = Math.min(height - h, Math.max(0, cy - h / 2));
+  return { x: x / width, y: y / height, w: w / width, h: h / height };
+}
