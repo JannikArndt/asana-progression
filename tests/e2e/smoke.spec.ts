@@ -54,6 +54,14 @@ test('import → review → asana', async ({ page }) => {
   await third.getByRole('button', { name: 'Restore' }).click();
   await expect(third).toHaveAttribute('data-status', 'open');
 
+  // A tap on a thumbnail selects the hold and offers frame actions.
+  await first.getByRole('button', { name: 'Frame actions for hold 1' }).click();
+  const menu = page.getByRole('menu', { name: 'Hold 1' });
+  await expect(menu.getByRole('menuitem', { name: 'Choose frame…' })).toBeVisible();
+  await expect(first).toHaveClass(/selected/);
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+
   // Choose another best frame from the stored samples.
   await third.getByRole('button', { name: /More actions/ }).click();
   await page.getByRole('button', { name: 'Choose frame…' }).click();
@@ -92,9 +100,64 @@ test('import → review → asana', async ({ page }) => {
   await page.locator('.feed .item').click();
   const viewer = page.getByRole('dialog', { name: 'Utthita Trikonasana holds' });
   await expect(viewer.locator('img')).toBeVisible();
-  await viewer.getByRole('button', { name: 'Pin' }).click();
-  await expect(viewer.getByRole('button', { name: 'Pinned' })).toBeVisible();
-  await viewer.getByRole('button', { name: 'Close' }).click();
+  // A tap on the image shows the action bar (nothing opens directly).
+  const bar = viewer.getByRole('toolbar', { name: 'Hold actions' });
+  await expect(bar).toBeHidden();
+  await viewer.locator('.slide.current .media').click();
+  await expect(bar).toBeVisible();
+  /** The bar hides itself after a few seconds: tap the image again if needed. */
+  const action = async (name: string) => {
+    if (!(await bar.isVisible())) await viewer.locator('.slide.current .media').click();
+    await bar.getByRole('button', { name, exact: true }).click();
+  };
+  // Choose frame opens the frame picker above the viewer; the page has no video file since the reload.
+  await action('Choose frame');
+  await expect(bar).toBeHidden();
+  await page.getByRole('button', { name: '+1 s' }).click();
+  await page.getByRole('button', { name: 'Use this frame' }).click();
+  await expect(viewer.getByText(/Select synthetic-practice-vp9\.mp4 to save the still/)).toBeVisible();
+  await viewer.locator('input[type=file]').setInputFiles(video);
+  await expect(viewer.getByText(/to save the still|Saving the still/)).toBeHidden({ timeout: 60_000 });
+  // Compare, pose (no model in this test) and the crop editor with portrait presets.
+  await action('Compare');
+  await expect(bar.getByRole('button', { name: 'Compare' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(viewer.getByText('Compare needs a second hold of this asana.')).toBeVisible();
+  await viewer.getByRole('button', { name: 'Stop', exact: true }).click();
+  await action('Pose');
+  await expect(viewer.getByRole('status')).toHaveText('Pose model off');
+  await action('Edit crop');
+  const editor = page.getByRole('dialog', { name: /^Crop/ });
+  await editor.getByRole('radio', { name: '2:3' }).click();
+  await expect(editor.getByRole('radio', { name: '2:3' })).toHaveAttribute('aria-checked', 'true');
+  const mask = editor.locator('.mask');
+  const maskAspect = async () => {
+    const b = (await mask.boundingBox())!;
+    return Math.round((b.width / b.height) * 100) / 100;
+  };
+  await expect.poll(maskAspect).toBe(0.67);
+  // Free: the frame's handles change its shape.
+  await editor.getByRole('radio', { name: 'Free' }).click();
+  const handle = (await editor.locator('[data-handle=s]').boundingBox())!;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2 - 120, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(maskAspect).toBeGreaterThan(0.8);
+  await editor.getByRole('button', { name: 'Save' }).click();
+  await expect(editor).toBeHidden();
+  // A tap beside the image closes the viewer; so do a pull down and Escape.
+  await viewer.locator('.stage').click({ position: { x: 4, y: 4 } });
+  await expect(viewer).toBeHidden();
+  await page.locator('.feed .item').click();
+  const center = (await viewer.locator('.slide.current .media').boundingBox())!;
+  await page.mouse.move(center.x + center.width / 2, center.y + center.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(center.x + center.width / 2, center.y + center.height / 2 + 260, { steps: 8 });
+  await page.mouse.up();
+  await expect(viewer).toBeHidden();
+  await page.locator('.feed .item').click();
+  await page.keyboard.press('Escape');
+  await expect(viewer).toBeHidden();
   await page.getByRole('radio', { name: 'Grid' }).click();
   await expect(page.locator('.tile')).toHaveCount(1);
   await page.getByRole('radio', { name: 'Left' }).click();
@@ -193,6 +256,13 @@ test('capture works with the MediaPipe cropper (self-hosted wasm and model)', as
   await expect(first.locator('[data-capture=done]')).toHaveCount(1, { timeout: 90_000 });
   const cached = await page.evaluate(async () => (await (await caches.open('mediapipe-pose-v1')).keys()).map((r) => r.url.split('/').pop()));
   expect(cached).toEqual(expect.arrayContaining(['vision_wasm_module_internal.wasm', 'pose_landmarker_lite.task']));
+  // The pose overlay runs the model on the stored still (the synthetic figure is no person).
+  await page.goto('./#/asana/adho-mukha-svanasana');
+  await page.locator('.feed .item').click();
+  const viewer = page.getByRole('dialog', { name: 'Adho Mukha Svanasana holds' });
+  await viewer.locator('.slide.current .media').click();
+  await viewer.getByRole('toolbar', { name: 'Hold actions' }).getByRole('button', { name: 'Pose', exact: true }).click();
+  await expect(viewer.getByRole('status')).toHaveText(/^(No pose found|Pose · .+)$/, { timeout: 30_000 });
   expect(errors).toEqual([]);
 });
 

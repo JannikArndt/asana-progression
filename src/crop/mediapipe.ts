@@ -92,7 +92,8 @@ export async function createMediaPipeCropper(opts: MediaPipeCropperOptions): Pro
       const aspect = image.height > 0 ? image.width / image.height : 1;
       const box = pose ? boxFromLandmarks(pose, { aspect }) : null;
       if (!pose || !box) return null;
-      return { box, posture: postureFromLandmarks(pose, { aspect }) };
+      const landmarks = pose.map(({ x, y, visibility }) => ({ x, y, visibility }));
+      return { box, posture: postureFromLandmarks(pose, { aspect }), landmarks };
     },
     close() {
       if (closed) return;

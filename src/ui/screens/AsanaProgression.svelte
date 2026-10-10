@@ -4,11 +4,12 @@
   import HoldViewer from '../components/HoldViewer.svelte';
   import Flipbook from '../components/Flipbook.svelte';
   import CropEditor from '../components/CropEditor.svelte';
+  import FrameScrubber from '../components/FrameScrubber.svelte';
   import { displayCrop, hasReps, itemAspect, nextColumns, progressionItems, repLabel, typicalAspect, type ProgressionItem, type RepFilter, type SideFilter } from '../../progression';
   import { app } from '../state/app.svelte';
   import { router } from '../state/router.svelte';
   import { capture } from '../state/capture.svelte';
-  import { reattachVideo, setManualCrop } from '../state/hold-actions';
+  import { chooseBestFrame, reattachVideo, setManualCrop } from '../state/hold-actions';
   import type { Video } from '../../model';
   import { formatDay } from '../format';
 
@@ -44,17 +45,20 @@
   let viewerIndex = $state<number | null>(null);
   let flipbook = $state(false);
   let editing = $state<ProgressionItem | null>(null);
-  let pinnedId = $state<string | null>(readPin());
+  /** Choosing another best frame for this hold (from the viewer). */
+  let framing = $state<ProgressionItem | null>(null);
+  /** The hold the viewer compares the others with (remembered per asana; key from when it was "pin"). */
+  let compareId = $state<string | null>(readCompare());
 
-  function readPin(): string | null {
+  function readCompare(): string | null {
     try {
       return localStorage.getItem(`asana.pinned.${id}`);
     } catch {
       return null;
     }
   }
-  function pin(holdId: string | null) {
-    pinnedId = holdId;
+  function setCompare(holdId: string | null) {
+    compareId = holdId;
     try {
       if (holdId) localStorage.setItem(`asana.pinned.${id}`, holdId);
       else localStorage.removeItem(`asana.pinned.${id}`);
@@ -234,6 +238,7 @@
               <span class="caption">
                 <span class="line">
                   <span class="date tabular">{formatDay(item.date, true)}{item.hold.side ? ` · ${item.hold.side}` : ''}{repLabel(item) ? ` · rep ${repLabel(item)}` : ''}</span>
+                  {#if item.hold.id === compareId}<span class="badge reference" title="Compared with the other days in the viewer">Compare</span>{/if}
                   {#if item.clip}<span class="badge" title="Clip quality">{item.clip.quality ? (QUALITY[item.clip.quality] ?? item.clip.quality) : 'Clip'}</span>{/if}
                 </span>
                 {#if item.note}<span class="note">{item.note}</span>{/if}
@@ -283,13 +288,43 @@
   <HoldViewer
     {items}
     bind:index={viewerIndex}
-    {pinnedId}
+    {compareId}
     title={asana.name}
-    onpin={pin}
+    covered={!!editing || !!framing}
+    oncompare={setCompare}
     onedit={(item) => (editing = item)}
+    onframe={(item) => (framing = item)}
     onsession={(sessionId) => router.go({ name: 'session', id: sessionId })}
     onclose={() => (viewerIndex = null)}
   />
+{/if}
+
+{#if framing}
+  {@const hold = app.holds.find((h) => h.id === framing!.hold.id) ?? framing.hold}
+  {@const sum = app.summaries[hold.videoId]}
+  {#if sum}
+    <!-- Sheets sit below full-screen overlays; this one opens from the viewer. -->
+    <div class="above-viewer">
+      <FrameScrubber
+        title="Choose frame · {formatDay(framing.date)}"
+        confirmLabel="Use this frame"
+        videoId={hold.videoId}
+        frameWidth={sum.frameWidth}
+        frameHeight={sum.frameHeight}
+        sampleHz={sum.sampleHz}
+        fromS={hold.startS}
+        toS={hold.endS}
+        valueS={hold.bestS}
+        marks={sum.candidates.find((c) => c.holdId === hold.id)?.alternatesS ?? []}
+        onconfirm={async (t) => {
+          const holdId = hold.id;
+          framing = null;
+          await chooseBestFrame(holdId, t);
+        }}
+        onclose={() => (framing = null)}
+      />
+    </div>
+  {/if}
 {/if}
 
 {#if flipbook && asana}
@@ -411,6 +446,17 @@
     align-items: baseline;
     justify-content: space-between;
     gap: var(--space-2);
+  }
+
+  .above-viewer {
+    position: relative;
+    z-index: 70;
+  }
+
+  .badge.reference {
+    margin-left: auto;
+    background: var(--color-accent-tint);
+    color: var(--color-accent-strong);
   }
 
   .badge {

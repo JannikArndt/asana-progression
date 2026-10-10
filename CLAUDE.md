@@ -140,6 +140,19 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   version are cropped again from their stored still in the capture worker (`recrop`, no video
   file needed) on startup and whenever capture is requested. Bump `CROP_VERSION` when the box
   changes.
+- `CropEditor`: aspect presets Free, 2:3, 3:4, 4:5, 1:1, 3:2, 16:9 (portrait first). The frame has
+  corner and edge handles (44 px hit areas): Free changes its shape, a preset keeps the aspect;
+  on release the frame grows back to fill the stage and the image zooms with it (like Photos).
+  Pinch/drag moves the image. Geometry (`resizeFrame`, `fitFrame`, `cropWithAspect`) in
+  `ui/state/crop-frame.ts` (tested). Escape cancels.
+- Pose overlay: `capture.pose(still)` sends a `pose` request to the capture worker (beside any
+  running capture; own job id and listener) → `PoseDetection` incl. the 33 landmarks (never
+  stored; cached per still storage key for the page's lifetime). `crop/overlay.ts` maps landmarks
+  and the box into the displayed crop (tested); `PoseOverlay.svelte` draws skeleton, dots (dimmed
+  below visibility 0.3), dashed body box; the posture class is a chip. Null cropper → "Pose model off".
+- ReviewCard: a tap on the thumbnail selects the hold and opens a small anchored menu (Choose
+  frame, Edit crop when a still exists, Full-resolution frame when the file is attached); entries
+  come from optional callback props.
 - MediaPipe wasm loader/binary are emitted by the `mediapipe-wasm` Vite plugin at
   `<base>mediapipe/`, the model is `public/models/pose_landmarker_lite.task` (Apache-2.0).
   Debug switch: `localStorage['asana.debug.capture'] = '{"cropper":"none"}'` (used by e2e).
@@ -150,8 +163,14 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
 `#/asana/<id>` (`screens/AsanaProgression.svelte`): feed (newest first, date, side, note) or grid
 (2–4 columns, pinch or ctrl+wheel; tiles share the median crop aspect), side filter, rep filter
 (All reps / First / Last, when the asana has runs of reps), viewer
-(`HoldViewer`: swipe through all holds oldest → newest, tap plays the looping clip, pin a hold →
-split slider or crossfade, edit crop, jump to session), flipbook (`Flipbook`: stills in date order,
+(`HoldViewer`: swipe through all holds oldest → newest; a tap on the image toggles a translucent
+action bar — Edit crop, Choose frame, Play clip, Pose, Compare — that hides after 4 s; nothing
+opens directly from a tap; a tap beside the image, a pull down or Escape closes; axis decided after
+10 px in `viewer-gestures.ts`, tested). Compare (formerly "pin", same localStorage key
+`asana.pinned.<id>`) marks a reference hold: swiping to another day shows split slider or
+crossfade with both dates and a Stop button; the feed marks the reference. Choose frame opens
+`FrameScrubber` above the viewer and `hold-actions.chooseBestFrame` updates candidate + hold and
+re-captures the still (no file → re-attach row in the viewer). Flipbook (`Flipbook`: stills in date order,
 0.5–12 per second, preloads ahead). Holds without a still fall back to the tiny analysis frame.
 
 ### Backup (milestone 5)

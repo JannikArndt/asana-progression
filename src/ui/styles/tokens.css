@@ -17,6 +17,11 @@
   --color-danger: #a4513f;
   --color-overlay: rgba(20, 19, 17, 0.97);
   --color-scrim: rgba(29, 28, 26, 0.28);
+  /* Overlays opened on top of another overlay (no text shining through). */
+  --color-overlay-solid: #141311;
+  /* Translucent controls on top of photos (viewer action bar) and the pose overlay's skeleton. */
+  --color-glass: rgba(20, 19, 17, 0.62);
+  --color-pose: #b9d3c8;
 
   /* Spacing (4 px grid). */
   --space-1: 4px;
