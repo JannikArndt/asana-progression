@@ -1,7 +1,7 @@
 /**
  * Deployment update check: on visibilitychange the app fetches version.json (no-store). If the
  * version differs, a subtle banner appears; the reload happens at a quiet moment only (no
- * processing running, nothing unsaved) — when the page is hidden, or when the user taps the banner.
+ * analysis, capture or backup running) — when the page is hidden, or when the user taps the banner.
  */
 type QuietCheck = () => boolean;
 

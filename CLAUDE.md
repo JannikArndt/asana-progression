@@ -255,8 +255,9 @@ on `main` only and needs both. Vite `base: '/asana-progression/'`.
 
 `version.json` (`{version, builtAt}`, version = short SHA + build time) is emitted by the build.
 On `visibilitychange` → visible the app fetches it with `cache: 'no-store'`; a new version shows a
-subtle "Update available" pill. Reload happens only when quiet (no processing; later: no unsaved
-labels — register via `updates.addQuietCheck`): when the page is hidden, or on tap.
+subtle "Update available" pill. Reload happens only when quiet (no analysis, capture, backup
+export/import or prepared backup file — register via `updates.addQuietCheck`; labels are never
+unsaved): when the page is hidden, or on tap.
 
 ## Design
 
