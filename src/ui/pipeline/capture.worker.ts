@@ -2,7 +2,8 @@
  * Capture worker: wires source → capture → crop → asset store. For each hold it renders the
  * still + thumbnail (and the clip), finds the body box on a small preview, writes the files to
  * OPFS and reports asset records back; the main thread stores records and crops in IndexedDB.
- * `recrop` runs pose detection again on stored stills (after the crop algorithm changed).
+ * `recrop` runs pose detection again on stored stills (after the crop algorithm changed); `pose`
+ * returns the landmarks of one stored still for the viewer's overlay (independent of the queue).
  */
 import { captureHold, previewFromStill, type CapturedAsset } from '../../capture';
 import { createMediaPipeCropper, nullCropper, type Cropper } from '../../crop';
@@ -150,9 +151,29 @@ async function recrop(req: Extract<CaptureRequest, { type: 'recrop' }>) {
   }
 }
 
+async function pose(req: Extract<CaptureRequest, { type: 'pose' }>) {
+  const { jobId } = req;
+  let cropperName = 'none';
+  try {
+    const cropper = await getCropper(req.cropper, req.baseUrl);
+    cropperName = cropper.name;
+    const still = await store.get(req.stillKey);
+    if (!still) throw new Error('Still file missing');
+    const preview = await previewFromStill(still);
+    try {
+      post({ type: 'pose-done', jobId, detection: await cropper.detect(preview), cropper: cropper.name });
+    } finally {
+      preview.close();
+    }
+  } catch (e) {
+    post({ type: 'pose-done', jobId, detection: null, cropper: cropperName, message: e instanceof Error ? e.message : String(e) });
+  }
+}
+
 scope.onmessage = (e) => {
   const req = e.data;
   if (req.type === 'capture') void capture(req);
   else if (req.type === 'recrop') void recrop(req);
+  else if (req.type === 'pose') void pose(req);
   else current?.abort();
 };

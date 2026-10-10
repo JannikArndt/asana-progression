@@ -13,6 +13,8 @@ export interface PoseDetection {
   box: BodyBox;
   /** Coarse posture from the landmarks (feeds label suggestions), null if unclear. */
   posture: PostureClass | null;
+  /** The 33 BlazePose landmarks the box and posture came from (display only; not stored). */
+  landmarks: Landmark[];
 }
 
 export type CropperInput = ImageBitmap | OffscreenCanvas | ImageData;

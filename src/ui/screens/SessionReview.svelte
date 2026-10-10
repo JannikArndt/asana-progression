@@ -278,6 +278,9 @@
                 rep={entry.hold ? reps.get(entry.hold.id) : undefined}
                 expected={expectedAt(entry)}
                 onsplit={(k) => review.splitInto(entry.key, k)}
+                onframe={() => (scrub = { mode: 'nudge', videoId: video.id, key: entry.key })}
+                oncrop={entry.hold ? () => (cropHoldId = entry.hold?.id ?? null) : undefined}
+                onfullframe={app.files.has(video.id) ? () => (probe = { videoId: video.id, t: entry.candidate.bestS }) : undefined}
                 onselect={() => (selectedKey = entry.key)}
                 onconfirm={() => review.confirm(entry.key)}
                 onpick={() => (pickerKey = entry.key)}
