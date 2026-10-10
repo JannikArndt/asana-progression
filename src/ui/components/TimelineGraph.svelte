@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import {
     clampView,
     envelope,
@@ -32,7 +32,14 @@
     /** Processed media time (s) shown as a playhead while processing. */
     playheadS?: number | null;
     height?: number;
+    /**
+     * Time range to show instead of the whole video (session review: a window of a long video).
+     * A new object moves the view there (animated unless `animate` is false); pinch and pan stay free.
+     */
+    range?: { startS: number; endS: number; animate?: boolean } | null;
     onselect?: (id: string) => void;
+    /** Called with the visible time range whenever the view changes. */
+    onview?: (startS: number, endS: number) => void;
   }
 
   let {
@@ -46,7 +53,9 @@
     selectedId = null,
     playheadS = null,
     height = 168,
+    range = null,
     onselect,
+    onview,
   }: Props = $props();
 
   let wrap: HTMLDivElement;
@@ -68,6 +77,8 @@
 
   const LABEL_BAND = 20;
   const AXIS = 20;
+  /** Minimum distance (px) between the centres of two rotated labels. */
+  const ROTATED_SPACING = 12;
 
   function readColors() {
     const s = getComputedStyle(document.documentElement);
@@ -233,6 +244,9 @@
     // Labels
     ctx.font = `500 11px ${colors.font}`;
     ctx.textBaseline = 'middle';
+    // Rotated labels go wherever they do not collide with the previous one, even on spans
+    // narrower than the text (a 20 min window of a long practice has 7–15 px holds).
+    let lastRotated = -Infinity;
     for (const s of spans) {
       if (!s.label || s.status !== 'labeled') continue;
       const x0 = timeToX(view, s.startS);
@@ -244,7 +258,8 @@
       if (bw >= tw + 8) {
         ctx.textAlign = 'left';
         ctx.fillText(s.label, Math.max(x0 + 4, 4), top / 2 + 1);
-      } else if (bw >= 11) {
+      } else if (bw >= 2 && x0 + bw / 2 - lastRotated >= ROTATED_SPACING) {
+        lastRotated = x0 + bw / 2;
         ctx.save();
         ctx.translate(x0 + bw / 2, top + 4);
         ctx.rotate(Math.PI / 2);
@@ -408,30 +423,52 @@
 
   function fit() {
     stopMotion();
-    view = fitView(durationS, view.widthPx);
+    if (!range) {
+      view = fitView(durationS, view.widthPx);
+      return;
+    }
+    // Back to the window length, around the current centre.
+    const len = range.endS - range.startS;
+    const centre = view.startS + visibleS(view) / 2;
+    animateTo(clampView({ ...view, pxPerS: view.widthPx / len, startS: centre - len / 2 }));
   }
 
   function animateTo(target: View) {
     stopMotion();
     const from = view;
+    const fromEnd = from.startS + from.widthPx / from.pxPerS;
+    const toEnd = target.startS + target.widthPx / target.pxPerS;
     const t0 = performance.now();
     const dur = 250;
     const step = () => {
       const k = Math.min(1, (performance.now() - t0) / dur);
       const e = 1 - Math.pow(1 - k, 3);
-      view = clampView({ ...target, startS: from.startS + (target.startS - from.startS) * e });
+      // Interpolate both edges, so a change of the visible length animates too.
+      const a = from.startS + (target.startS - from.startS) * e;
+      const b = fromEnd + (toEnd - fromEnd) * e;
+      view = k < 1 ? clampView({ ...target, startS: a, pxPerS: target.widthPx / Math.max(1e-3, b - a) }) : target;
       if (k < 1) animation = requestAnimationFrame(step);
     };
     animation = requestAnimationFrame(step);
   }
 
+  /** The view without user zoom: the whole video, or `range`. */
+  function homeView(width: number): View {
+    if (!range) return fitView(durationS, width);
+    const len = Math.max(1e-3, Math.min(durationS, range.endS - range.startS));
+    return clampView({ startS: range.startS, pxPerS: width / len, widthPx: width, durationS });
+  }
+
+  const visibleS = (v: View) => v.widthPx / v.pxPerS;
+
   onMount(() => {
     readColors();
-    view = fitView(durationS, wrap.clientWidth);
+    view = homeView(wrap.clientWidth);
     const ro = new ResizeObserver(() => {
       const width = wrap.clientWidth;
       if (width === view.widthPx) return;
-      view = isFit(view) ? fitView(durationS, width) : clampView({ ...view, widthPx: width });
+      // Keep the visible time span.
+      view = view.widthPx > 0 ? clampView({ ...view, widthPx: width, pxPerS: width / visibleS(view) }) : homeView(width);
     });
     ro.observe(wrap);
     const prevent = (e: Event) => e.preventDefault();
@@ -451,7 +488,33 @@
   // Refit when the duration changes.
   $effect(() => {
     const d = durationS;
-    if (view.widthPx > 0 && d !== view.durationS) view = fitView(d, view.widthPx);
+    if (view.widthPx > 0 && d !== view.durationS) view = untrack(() => homeView(view.widthPx));
+  });
+
+  // Move to a new range.
+  let lastRange: Props['range'] = null;
+  $effect(() => {
+    const r = range;
+    if (!r || r === lastRange) return;
+    lastRange = r;
+    untrack(() => {
+      if (view.widthPx <= 0) return;
+      const target = homeView(view.widthPx);
+      if (r.animate === false) {
+        stopMotion();
+        view = target;
+      } else if (target.startS !== view.startS || target.pxPerS !== view.pxPerS) {
+        animateTo(target);
+      }
+    });
+  });
+
+  // Report the visible range.
+  $effect(() => {
+    const v = view;
+    if (v.widthPx <= 0 || !onview) return;
+    const report = onview;
+    untrack(() => report(v.startS, Math.min(v.durationS, v.startS + visibleS(v))));
   });
 
   // Reveal the selected span (selection from the list).
@@ -472,7 +535,9 @@
     schedule();
   });
 
-  const zoomed = $derived(view.widthPx > 0 && !isFit(view));
+  const zoomed = $derived(
+    view.widthPx > 0 && (range ? Math.abs(visibleS(view) / Math.max(1e-3, range.endS - range.startS) - 1) > 0.02 : !isFit(view)),
+  );
 </script>
 
 <div class="timeline" bind:this={wrap} style:height="{height}px">
@@ -487,7 +552,7 @@
     onlostpointercapture={(e) => onPointerUp(e, true)}
   ></canvas>
   {#if zoomed}
-    <button class="fit" type="button" onclick={fit} aria-label="Show whole video">Fit</button>
+    <button class="fit" type="button" onclick={fit} aria-label={range ? 'Reset zoom' : 'Show whole video'}>Fit</button>
   {/if}
 </div>
 

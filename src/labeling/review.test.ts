@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { editedId, fitSpan, holdFromCandidate, mergeCandidates, missedCandidate, nudgeBest, reconcile, sortCandidates, splitCandidate, splitInto, valleyProminence } from './review';
+import { editedId, fitSpan, freeSpanAround, holdFromCandidate, mergeCandidates, missedCandidate, nudgeBest, reconcile, sortCandidates, splitCandidate, splitInto, valleyProminence } from './review';
 import { searchAsanas } from './search';
 import { SEED_ASANAS } from '../model/seed';
 import type { Hold, ReviewCandidate } from '../model/types';
@@ -81,6 +81,34 @@ describe('missedCandidate', () => {
     const d = missedCandidate(-5, sig);
     expect(d.startS).toBe(0);
     expect(d.endS).toBe(15);
+  });
+  it('stays inside the given bounds', () => {
+    const sig = signals(120, [[0, 120]]);
+    sig.C = Float32Array.from({ length: 480 }, () => 1);
+    const c = missedCandidate(40, sig, { fromS: 35, toS: 52 });
+    expect(c.startS).toBe(35);
+    expect(c.endS).toBe(52);
+    expect(c.bestS).toBeGreaterThanOrEqual(35);
+    // The ±2 s minimum yields to the bounds; an open end uses the video end.
+    const d = missedCandidate(36, sig, { fromS: 35.5, toS: Infinity });
+    expect(d.startS).toBe(35.5);
+    expect(d.endS).toBe(96);
+    // Degenerate bounds are ignored.
+    expect(missedCandidate(40, sig, { fromS: 40, toS: 40 }).startS).toBe(0);
+  });
+});
+
+describe('freeSpanAround', () => {
+  const list = [cand('a', 10, 20, 15), cand('b', 50, 60, 55, { status: 'dismissed' }), cand('c', 30, 40, 35)];
+  it('is the stretch between the neighbouring candidates', () => {
+    expect(freeSpanAround(list, 25)).toEqual({ fromS: 20, toS: 30 });
+    expect(freeSpanAround(list, 45)).toEqual({ fromS: 40, toS: 50 });
+    expect(freeSpanAround(list, 5)).toEqual({ fromS: 0, toS: 10 });
+    expect(freeSpanAround(list, 70)).toEqual({ fromS: 60, toS: Infinity });
+  });
+  it('is null inside a candidate', () => {
+    expect(freeSpanAround(list, 15)).toBeNull();
+    expect(freeSpanAround(list, 50)).toBeNull();
   });
 });
 

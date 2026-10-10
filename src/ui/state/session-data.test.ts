@@ -3,6 +3,10 @@ import {
   asanaStats,
   combineSessions,
   compareVideos,
+  coverageGaps,
+  GAP_ALWAYS_S,
+  GAP_MIN_S,
+  gapThreshold,
   orderVideoIds,
   dayOf,
   groupByDay,
@@ -135,5 +139,39 @@ describe('orderVideoIds', () => {
     const videos = [v('a', '10 Savasana.mp4'), v('b', '4 Ubhaya.mp4'), v('c', '7 Sarvangasana.mp4')];
     expect(orderVideoIds(['a', 'x', 'c', 'b'], videos)).toEqual(['b', 'c', 'a', 'x']);
     expect(orderVideoIds(['b', 'b'], videos)).toEqual(['b']);
+  });
+});
+
+describe('coverageGaps', () => {
+  const span = (startS: number, endS: number) => ({ startS, endS });
+  it('lists uncovered stretches before, between and after the spans', () => {
+    expect(coverageGaps([span(12, 40), span(45, 80), span(95, 120)], 150)).toEqual([
+      { startS: 0, endS: 12, beforeIndex: 0 },
+      { startS: 80, endS: 95, beforeIndex: 2 },
+      { startS: 120, endS: 150, beforeIndex: 3 },
+    ]);
+  });
+  it('skips short gaps and handles overlapping spans', () => {
+    expect(GAP_MIN_S).toBe(10);
+    // The second span lies inside the first: coverage continues to 60.
+    expect(coverageGaps([span(5, 60), span(10, 20), span(65, 100)], 104)).toEqual([]);
+    expect(coverageGaps([span(5, 60), span(10, 20), span(75, 100)], 104)).toEqual([{ startS: 60, endS: 75, beforeIndex: 2 }]);
+    expect(coverageGaps([span(0, 30)], 45, 15)).toEqual([{ startS: 30, endS: 45, beforeIndex: 1 }]);
+  });
+  it('adapts the threshold to the usual gap between holds', () => {
+    // Five 20 s gaps: only gaps of at least 30 s count.
+    const spans = [0, 50, 100, 150, 200, 250].map((t) => span(t, t + 30));
+    expect(gapThreshold(spans)).toBe(GAP_ALWAYS_S);
+    expect(coverageGaps(spans, 300)).toEqual([]);
+    expect(coverageGaps([...spans, span(330, 340)], 340)).toEqual([{ startS: 280, endS: 330, beforeIndex: 6 }]);
+    // Short gaps (4 s): the 10 s floor.
+    expect(gapThreshold([0, 10, 20, 30, 40, 50].map((t) => span(t, t + 6)))).toBe(GAP_MIN_S);
+    // In between: 1.5 × the median (12 s → 18 s); overlapping spans add no gap.
+    expect(gapThreshold([0, 20, 40, 60, 80, 100].map((t) => span(t, t + 8)).concat(span(101, 105)))).toBe(18);
+    expect(gapThreshold([span(0, 10)])).toBe(GAP_MIN_S);
+  });
+  it('is the whole video without spans', () => {
+    expect(coverageGaps([], 30)).toEqual([{ startS: 0, endS: 30, beforeIndex: 0 }]);
+    expect(coverageGaps([], 5)).toEqual([]);
   });
 });

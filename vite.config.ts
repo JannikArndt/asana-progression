@@ -89,7 +89,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       // Browser-only code (WebCodecs sampler, UI wiring) is covered by the Playwright smoke tests.
-      include: ['src/detection/**/*.ts', 'src/labeling/**/*.ts', 'src/model/**/*.ts', 'src/storage/**/*.ts', 'src/source/**/*.ts', 'src/ui/components/timeline.ts', 'src/ui/state/session-data.ts'],
+      include: ['src/detection/**/*.ts', 'src/labeling/**/*.ts', 'src/model/**/*.ts', 'src/storage/**/*.ts', 'src/source/**/*.ts', 'src/ui/components/timeline.ts', 'src/ui/components/session-timeline.ts', 'src/ui/state/session-data.ts'],
       exclude: ['**/*.test.ts', '**/types.ts', '**/index.ts', '**/__fixtures__/**', 'src/source/sampler.ts'],
       reporter: ['text-summary', 'text'],
       thresholds: {
