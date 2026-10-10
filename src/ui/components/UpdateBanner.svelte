@@ -10,7 +10,7 @@
 
 {#if updates.available}
   <button class="update" type="button" onclick={apply}>
-    {waiting ? 'Update after processing finishes' : 'Update available'}
+    {waiting ? 'Update after the current task finishes' : 'Update available'}
   </button>
 {/if}
 

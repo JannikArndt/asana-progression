@@ -8,10 +8,13 @@ no uploads, no backend.
 
 ## Status
 
-Milestones 1–2: import a video, watch the posture-change graph draw itself while the video
-is decoded, label the detected holds with one tap (suggestions follow the Primary series or your
-recent practice), fix them up (choose frame, split, merge, add missed holds), browse holds per
-asana, tune detection parameters, and collect device diagnostics.
+Milestones 1–5 are done: import a video and watch the posture-change graph draw itself while it
+is decoded; label the detected holds with one tap (suggestions follow a sequence template such as
+the Primary series, or your recent practice); fix them up (choose frame, split, merge, add missed
+holds); capture a still and a short clip per hold, auto-cropped to the body; follow each asana's
+progression as a feed, grid, side-by-side comparison or flipbook; edit the asana catalog and
+templates; back up everything to one ZIP file and restore it. Open: verification on the iPhone
+(see [docs/next-session.md](docs/next-session.md)).
 
 ## Development
 

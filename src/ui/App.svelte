@@ -13,6 +13,8 @@
   import { app } from './state/app.svelte';
   import { router } from './state/router.svelte';
   import { pipeline } from './pipeline/controller.svelte';
+  import { capture } from './state/capture.svelte';
+  import { backup } from './state/backup.svelte';
   import { updates } from './update.svelte';
 
   // Old milestone-1 links (#/video/<id>) open the session containing the video.
@@ -26,6 +28,9 @@
   onMount(() => {
     void app.init();
     updates.addQuietCheck(() => !pipeline.running);
+    updates.addQuietCheck(() => !capture.busy);
+    // A prepared backup file would be lost, e.g. while the share sheet hides the page.
+    updates.addQuietCheck(() => !backup.exporting && !backup.importing && !backup.ready);
     updates.start();
     void updates.check();
   });
