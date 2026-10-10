@@ -1,5 +1,6 @@
 import {
   alignToTemplate,
+  freeSpanAround,
   holdFromCandidate,
   matchTemplateEntry,
   mergeCandidates,
@@ -12,6 +13,7 @@ import {
   type Label,
   type SignalView,
   type Suggestion,
+  type TimeRange,
 } from '../../labeling';
 import type { DetectionParams } from '../../detection';
 import { newId, type Analysis, type Hold, type ReviewCandidate, type Session, type Video } from '../../model';
@@ -222,9 +224,13 @@ export class SessionReview {
     await this.refreshSuggestions();
   }
 
-  async addMissed(videoId: string, atS: number): Promise<string | null> {
+  /**
+   * Adds a hold the detector missed around `atS`. Its span stays inside `bounds` (the uncovered
+   * gap it was picked from) or, without bounds, between the neighbouring candidates.
+   */
+  async addMissed(videoId: string, atS: number, bounds?: TimeRange): Promise<string | null> {
     if (!this.analyses[videoId]) return null;
-    const c = missedCandidate(atS, this.signals(videoId));
+    const c = missedCandidate(atS, this.signals(videoId), bounds ?? freeSpanAround(this.candidates(videoId), atS) ?? undefined);
     await this.saveCandidates(videoId, [...this.candidates(videoId), c]);
     await this.refreshSuggestions();
     return `${videoId}/${c.id}`;

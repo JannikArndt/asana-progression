@@ -53,7 +53,7 @@
   }
 </script>
 
-<Sheet {title} {onclose}>
+<Sheet {title} {onclose} action={{ label: confirmLabel, onclick: () => onconfirm(index / sampleHz) }}>
   <div class="frame" style:aspect-ratio="{frameWidth} / {frameHeight}">
     <canvas bind:this={canvas}></canvas>
   </div>
@@ -80,9 +80,6 @@
       {/each}
     </div>
   {/if}
-  {#snippet footer()}
-    <button class="btn primary wide" type="button" onclick={() => onconfirm(index / sampleHz)}>{confirmLabel}</button>
-  {/snippet}
 </Sheet>
 
 <style>
@@ -117,9 +114,5 @@
     justify-content: center;
     flex-wrap: wrap;
     gap: var(--space-2);
-  }
-
-  .wide {
-    width: 100%;
   }
 </style>

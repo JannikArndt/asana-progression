@@ -6,6 +6,7 @@ export {
   splitCandidate,
   splitInto,
   missedCandidate,
+  freeSpanAround,
   nudgeBest,
   reconcile,
   sortCandidates,

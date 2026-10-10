@@ -1,3 +1,4 @@
+import { holdFromCandidate, nudgeBest, sortCandidates } from '../../labeling';
 import type { Box, Hold, Video } from '../../model';
 import { fingerprint, openVideo } from '../../source';
 import { app } from './app.svelte';
@@ -29,4 +30,26 @@ export async function setManualCrop(holdId: string, manual: Box | null): Promise
   const updated: Hold = { ...hold, crop: manual ? { ...rest, manual } : rest };
   await app.db.holds.put(updated);
   app.upsertHold(updated);
+}
+
+/**
+ * New best frame for a labeled hold outside the review screen (hold viewer): updates its review
+ * candidate and the hold, then re-captures the still (needs the video file, else "re-attach").
+ */
+export async function chooseBestFrame(holdId: string, bestS: number): Promise<void> {
+  const hold = app.holds.find((h) => h.id === holdId);
+  if (!hold) return;
+  let updated: Hold = { ...hold, bestS: Math.min(hold.endS, Math.max(hold.startS, bestS)) };
+  const analysis = await app.db.analyses.get(hold.videoId);
+  const candidate = analysis?.candidates.find((c) => c.holdId === holdId);
+  if (analysis && candidate) {
+    const next = nudgeBest(candidate, bestS);
+    const candidates = sortCandidates(analysis.candidates.map((c) => (c.id === candidate.id ? next : c)));
+    await app.db.analyses.put({ ...analysis, candidates });
+    app.setCandidates(hold.videoId, candidates);
+    updated = holdFromCandidate(hold, next);
+  }
+  await app.db.holds.put(updated);
+  app.upsertHold(updated);
+  capture.request([updated]);
 }

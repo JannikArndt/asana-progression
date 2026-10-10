@@ -22,13 +22,17 @@
     /** Holds the template expects in place of this card (≥ 2 offers a split). */
     expected?: number | undefined;
     onsplit?: (k: number) => void;
+    /** Thumbnail menu actions; a missing callback hides its entry (no entries: the tap only selects). */
+    onframe?: (() => void) | undefined;
+    oncrop?: (() => void) | undefined;
+    onfullframe?: (() => void) | undefined;
     onselect: () => void;
     onconfirm: () => void;
     onpick: () => void;
     onmore: () => void;
     onrestore: () => void;
   }
-  let { entry, number, suggestion, nameOf, frame, selected, thumb, captureStatus, rep, expected, onsplit, onselect, onconfirm, onpick, onmore, onrestore }: Props = $props();
+  let { entry, number, suggestion, nameOf, frame, selected, thumb, captureStatus, rep, expected, onsplit, onframe, oncrop, onfullframe, onselect, onconfirm, onpick, onmore, onrestore }: Props = $props();
   const statusText: Record<CaptureStatus, string> = {
     queued: 'Waiting to save still…',
     capturing: 'Saving still and clip…',
@@ -46,22 +50,73 @@
         ? `${nameOf(suggestion.asanaId)}${suggestion.side ? ` ${suggestion.side}` : ''}`
         : null,
   );
+
+  // ----- thumbnail menu: a tap selects the hold on the timeline and offers frame actions -----
+  const menuItems = $derived(
+    [
+      onframe && { id: 'frame', label: 'Choose frame…', run: onframe },
+      oncrop && status === 'labeled' && thumb && { id: 'crop', label: 'Edit crop…', run: oncrop },
+      onfullframe && { id: 'full', label: 'Full-resolution frame', run: onfullframe },
+    ].filter((x): x is { id: string; label: string; run: () => void } => !!x),
+  );
+  let menuOpen = $state(false);
+  let thumbWrap = $state<HTMLDivElement>();
+
+  function onThumb() {
+    onselect();
+    if (menuItems.length) menuOpen = !menuOpen;
+  }
+
+  function choose(run: () => void) {
+    menuOpen = false;
+    run();
+  }
+
+  $effect(() => {
+    if (!menuOpen) return;
+    const outside = (e: PointerEvent) => {
+      if (thumbWrap && !thumbWrap.contains(e.target as Node)) menuOpen = false;
+    };
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && (menuOpen = false);
+    window.addEventListener('pointerdown', outside, true);
+    window.addEventListener('keydown', key);
+    return () => {
+      window.removeEventListener('pointerdown', outside, true);
+      window.removeEventListener('keydown', key);
+    };
+  });
 </script>
 
 <article id="card-{entry.key}" class="card review {status}" class:selected data-status={status}>
-  <button class="thumb" type="button" onclick={onselect} aria-label="Show hold {number} on the timeline">
-    {#if status === 'labeled' && thumb && entry.hold}
-      <AssetImage asset={thumb} crop={effectiveCrop(entry.hold)} aspect={frame.width / frame.height} alt="Hold {number}" />
-    {:else}
-      <TinyFrame
-        videoId={entry.videoId}
-        frameWidth={frame.width}
-        frameHeight={frame.height}
-        index={Math.round(c.bestS * frame.hz)}
-        alt="Best frame of hold {number}"
-      />
+  <div class="thumb-wrap" bind:this={thumbWrap}>
+    <button
+      class="thumb"
+      type="button"
+      onclick={onThumb}
+      aria-label={menuItems.length ? `Frame actions for hold ${number}` : `Show hold ${number} on the timeline`}
+      aria-haspopup={menuItems.length ? 'menu' : undefined}
+      aria-expanded={menuItems.length ? menuOpen : undefined}
+    >
+      {#if status === 'labeled' && thumb && entry.hold}
+        <AssetImage asset={thumb} crop={effectiveCrop(entry.hold)} aspect={frame.width / frame.height} alt="Hold {number}" />
+      {:else}
+        <TinyFrame
+          videoId={entry.videoId}
+          frameWidth={frame.width}
+          frameHeight={frame.height}
+          index={Math.round(c.bestS * frame.hz)}
+          alt="Best frame of hold {number}"
+        />
+      {/if}
+    </button>
+    {#if menuOpen}
+      <div class="menu" role="menu" aria-label="Hold {number}">
+        {#each menuItems as m (m.id)}
+          <button type="button" role="menuitem" onclick={() => choose(m.run)}>{m.label}</button>
+        {/each}
+      </div>
     {/if}
-  </button>
+  </div>
   <div class="info">
     <div class="meta tabular">
       <span>{formatTime(c.startS)}–{formatTime(c.endS)}</span>
@@ -138,11 +193,59 @@
     opacity: 0.55;
   }
 
+  .thumb-wrap {
+    position: relative;
+    align-self: center;
+  }
+
   .thumb {
+    display: block;
+    width: 100%;
     padding: 0;
     border: 0;
     background: transparent;
-    align-self: center;
+  }
+
+  /* Anchored below the thumbnail, above the next cards. */
+  .menu {
+    position: absolute;
+    top: calc(100% + var(--space-1));
+    left: 0;
+    z-index: 5;
+    min-width: 200px;
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-1) 0;
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius-m);
+    background: var(--color-surface);
+    box-shadow: 0 6px 20px rgba(29, 28, 26, 0.12);
+    animation: pop var(--duration-fast) var(--ease);
+  }
+
+  .menu button {
+    min-height: var(--touch);
+    padding: 0 var(--space-4);
+    border: 0;
+    background: transparent;
+    color: var(--color-text);
+    font-size: var(--text-m);
+    text-align: left;
+  }
+
+  .menu button + button {
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  .menu button:active {
+    background: var(--color-neutral-tint);
+  }
+
+  @keyframes pop {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
   }
 
   .info {

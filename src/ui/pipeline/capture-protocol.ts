@@ -1,5 +1,5 @@
 import type { ClipQuality, HoldSpan } from '../../capture';
-import type { BodyBox } from '../../crop';
+import type { BodyBox, PoseDetection } from '../../crop';
 import type { Asset, PostureClass } from '../../model';
 
 export type CaptureRequest =
@@ -21,6 +21,14 @@ export type CaptureRequest =
       cropper: 'mediapipe' | 'none';
       baseUrl: string;
     }
+  | {
+      /** Pose landmarks of one stored still, for the overlay in the hold viewer (runs beside a capture). */
+      type: 'pose';
+      jobId: number;
+      stillKey: string;
+      cropper: 'mediapipe' | 'none';
+      baseUrl: string;
+    }
   | { type: 'cancel' };
 
 export type CaptureEvent =
@@ -38,5 +46,6 @@ export type CaptureEvent =
     }
   | { type: 'recrop-done'; jobId: number; holdId: string; crop: BodyBox | null; cropper: string }
   | { type: 'hold-error'; jobId: number; holdId: string; message: string }
+  | { type: 'pose-done'; jobId: number; detection: PoseDetection | null; cropper: string; message?: string }
   | { type: 'done'; jobId: number; cropper: string }
   | { type: 'error'; jobId: number; message: string };

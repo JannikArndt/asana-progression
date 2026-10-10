@@ -3,10 +3,17 @@ import type { ClipQuality } from '../../capture';
 import type { Asset, Hold } from '../../model';
 import type { CaptureEvent, CaptureRequest } from '../pipeline/capture-protocol';
 import { app } from './app.svelte';
-import { CROP_VERSION, type BodyBox } from '../../crop';
+import { CROP_VERSION, type BodyBox, type PoseDetection } from '../../crop';
 import { needsCapture, recropStill, replacedAssets, withAutoCrop } from './capture-plan';
 
 export type CaptureStatus = 'queued' | 'capturing' | 'done' | 'error' | 'needs-file';
+
+/** Pose landmarks of a still for the viewer's overlay; `cropper` 'none' = no pose model (debug switch or failed load). */
+export interface PoseResult {
+  detection: PoseDetection | null;
+  cropper: string;
+  error?: string;
+}
 
 const assetStore = new OpfsAssetStore();
 const urls = new Map<string, Promise<string | null>>();
@@ -61,6 +68,8 @@ class CaptureQueue {
   private running = false;
   private worker: Worker | null = null;
   private jobId = 0;
+  /** Pose results by still storage key, for the page's lifetime (a new still has a new key). */
+  private poses = new Map<string, Promise<PoseResult>>();
 
   get busy(): boolean {
     return this.running;
@@ -210,6 +219,37 @@ class CaptureQueue {
     });
   }
 
+  /**
+   * Pose landmarks of a stored still (run in the capture worker beside any capture; not stored).
+   * With the debug null cropper it answers right away without loading the model.
+   */
+  pose(still: Pick<Asset, 'storageKey'>): Promise<PoseResult> {
+    const cached = this.poses.get(still.storageKey);
+    if (cached) return cached;
+    const cropper = debugCropper();
+    const p: Promise<PoseResult> =
+      cropper === 'none'
+        ? Promise.resolve({ detection: null, cropper: 'none' })
+        : new Promise((resolve) => {
+            const worker = this.ensureWorker();
+            const jobId = ++this.jobId;
+            const listener = (e: MessageEvent<CaptureEvent>) => {
+              const ev = e.data;
+              if (ev.jobId !== jobId || ev.type !== 'pose-done') return;
+              worker.removeEventListener('message', listener);
+              resolve({ detection: ev.detection, cropper: ev.cropper, ...(ev.message ? { error: ev.message } : {}) });
+            };
+            // A listener beside the queue's onmessage: both filter by job id.
+            worker.addEventListener('message', listener);
+            const req: CaptureRequest = { type: 'pose', jobId, stillKey: still.storageKey, cropper, baseUrl: import.meta.env.BASE_URL };
+            worker.postMessage(req);
+          });
+    // Errors are not cached: the next toggle tries again.
+    void p.then((r) => r.error && this.poses.delete(still.storageKey));
+    this.poses.set(still.storageKey, p);
+    return p;
+  }
+
   /** Records a re-detected automatic crop (the stored still did not change). */
   private async storeCrop(holdId: string, box: BodyBox | null, cropper: string) {
     const version = cropVersion(cropper);
@@ -244,3 +284,4 @@ class CaptureQueue {
 }
 
 export const capture = new CaptureQueue();
+

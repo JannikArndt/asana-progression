@@ -21,7 +21,8 @@ npm run icons        # regenerate public/icons/*.png
 ```
 
 In the cloud container, Playwright must use the preinstalled browser:
-`PW_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e`.
+`PW_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e`
+(`PW_PORT=<port>` runs the preview server on another port than 4173, e.g. for parallel checkouts).
 Playwright's Chromium decodes VP9/AV1 but not H.264/HEVC, so e2e fixtures are VP9.
 
 ## Architecture
@@ -109,6 +110,15 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   split into several, merge with previous, not a pose, full-resolution frame, add missed hold),
   asana progression
   (`#/asana/<id>`). `#/video/<id>` redirects to the session.
+- Uncovered gaps (`session-data.coverageGaps`): between the cards of a video (and before the first /
+  after the last) a quiet row "1 min 7 s not covered · + Add hold" marks stretches covered by no
+  candidate. Dismissed candidates count as covered (the user has looked at them). Threshold
+  `gapThreshold`: always from 30 s, down to 10 s when the gap is ≥ 1.5 × the video's median gap
+  between candidates (the outdoor primary series has a 19 s median from vinyasas; 10 s would put a
+  row after most cards, while a missed hold leaves two transitions plus the hold). Tapping opens the
+  frame scrubber limited to the gap (starting in its middle); `missedCandidate(atS, sig, bounds)`
+  keeps the new span inside the gap. "+ Add missed hold" (whole video) clamps to the free stretch
+  between the neighbours (`freeSpanAround`) unless the time lies inside a candidate.
 - Labeled holds keep `templateEntryIndex`; `alignToTemplate` re-maps it whenever the session's
   template was switched or edited, so suggestions never follow stale indices.
 
@@ -130,6 +140,19 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   version are cropped again from their stored still in the capture worker (`recrop`, no video
   file needed) on startup and whenever capture is requested. Bump `CROP_VERSION` when the box
   changes.
+- `CropEditor`: aspect presets Free, 2:3, 3:4, 4:5, 1:1, 3:2, 16:9 (portrait first). The frame has
+  corner and edge handles (44 px hit areas): Free changes its shape, a preset keeps the aspect;
+  on release the frame grows back to fill the stage and the image zooms with it (like Photos).
+  Pinch/drag moves the image. Geometry (`resizeFrame`, `fitFrame`, `cropWithAspect`) in
+  `ui/state/crop-frame.ts` (tested). Escape cancels.
+- Pose overlay: `capture.pose(still)` sends a `pose` request to the capture worker (beside any
+  running capture; own job id and listener) → `PoseDetection` incl. the 33 landmarks (never
+  stored; cached per still storage key for the page's lifetime). `crop/overlay.ts` maps landmarks
+  and the box into the displayed crop (tested); `PoseOverlay.svelte` draws skeleton, dots (dimmed
+  below visibility 0.3), dashed body box; the posture class is a chip. Null cropper → "Pose model off".
+- ReviewCard: a tap on the thumbnail selects the hold and opens a small anchored menu (Choose
+  frame, Edit crop when a still exists, Full-resolution frame when the file is attached); entries
+  come from optional callback props.
 - MediaPipe wasm loader/binary are emitted by the `mediapipe-wasm` Vite plugin at
   `<base>mediapipe/`, the model is `public/models/pose_landmarker_lite.task` (Apache-2.0).
   Debug switch: `localStorage['asana.debug.capture'] = '{"cropper":"none"}'` (used by e2e).
@@ -140,8 +163,14 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
 `#/asana/<id>` (`screens/AsanaProgression.svelte`): feed (newest first, date, side, note) or grid
 (2–4 columns, pinch or ctrl+wheel; tiles share the median crop aspect), side filter, rep filter
 (All reps / First / Last, when the asana has runs of reps), viewer
-(`HoldViewer`: swipe through all holds oldest → newest, tap plays the looping clip, pin a hold →
-split slider or crossfade, edit crop, jump to session), flipbook (`Flipbook`: stills in date order,
+(`HoldViewer`: swipe through all holds oldest → newest; a tap on the image toggles a translucent
+action bar — Edit crop, Choose frame, Play clip, Pose, Compare — that hides after 4 s; nothing
+opens directly from a tap; a tap beside the image, a pull down or Escape closes; axis decided after
+10 px in `viewer-gestures.ts`, tested). Compare (formerly "pin", same localStorage key
+`asana.pinned.<id>`) marks a reference hold: swiping to another day shows split slider or
+crossfade with both dates and a Stop button; the feed marks the reference. Choose frame opens
+`FrameScrubber` above the viewer and `hold-actions.chooseBestFrame` updates candidate + hold and
+re-captures the still (no file → re-attach row in the viewer). Flipbook (`Flipbook`: stills in date order,
 0.5–12 per second, preloads ahead). Holds without a still fall back to the tiny analysis frame.
 
 ### Backup (milestone 5)
@@ -285,12 +314,49 @@ accent, system font, hairlines, no heavy shadows, touch targets ≥ 44 px.
 
 Sheets (`components/Sheet.svelte`) are pinned to `visualViewport` (iOS keyboard: the layout
 viewport extends behind it); search sheets pass `fill` to keep their height while results shrink.
+Every bottom surface is a `Sheet`, including `dialog.ask` questions and the review ••• menu
+(`Dialog.svelte`; `layer="dialog"` stacks above sheets and overlays). One anatomy: grabber, then a
+header row — dismiss **top-left** (a round ✕ "Close"; "Cancel" when the sheet has a confirming
+`action`, which sits top-right, e.g. Save / Split here, `action.form` submits a form), title
+centred. Never a close/cancel button at the bottom; full-screen overlays follow the same rule (✕ or
+Cancel top-left). Dismiss = cancel (drafts are dropped, never saved silently): ✕/Cancel, a tap on
+the backdrop, Escape, or swiping down. A dialog's `cancel` option becomes the ✕ (`dismissOf`: a
+single-option notice dismisses with that option; otherwise it is not dismissible).
+Swipe (`sheet-gesture.ts`, unit-tested): grabber/header always drag (`touch-action: none`); the
+content drags only from scroll top, downwards (pointer events + a non-passive `touchmove` that
+stops native scrolling once the sheet drags); sliders and `[data-sheet-no-drag]` never; mouse only
+on the header. Slop 6 px, vertical only; the sheet follows the finger (rubber band upwards),
+dismisses past 30 % of its height or on a flick ≥ 0.5 px/ms (upward flick keeps it), otherwise
+springs back; the backdrop fades with the offset. `prefers-reduced-motion`: no slide animations.
+Focus moves into the sheet, Tab is trapped, focus returns on close.
+
+Asanas list (Home): the preview is the newest hold that has a captured image (thumb, else still),
+filling a square via `progression.fillCrop` around the display crop; the gray analysis frame only
+when nothing is captured. The line reads "N holds", plus "· M days" when they span several days.
 
 Timeline graph (`src/ui/components/TimelineGraph.svelte`, maths in `timeline.ts`): canvas,
 min/max envelope per pixel when zoomed out, pinch zoom, inertial horizontal pan
 (`touch-action: pan-y` keeps vertical page scroll native), tap a span to select, selection from
-the list scrolls the graph. Labeled spans = accent tint + name (horizontal or rotated), open =
-neutral grey, dismissed = hatched.
+the list scrolls the graph. Labeled spans = accent tint + name (horizontal if it fits, otherwise
+rotated wherever it keeps 12 px from the previous rotated label), open = neutral grey, dismissed =
+hatched. Optional `range` (show a window instead of the whole video; a new object moves there,
+animated unless `animate: false`) and `onview` (visible range on every view change).
+
+Session review timeline (`SessionReview.svelte`, maths in `session-timeline.ts`): per video a
+sticky header (`top: var(--safe-top)`, solid background, hairline once stuck; the status-bar area is
+covered by a fixed strip) with
+1. the overview (`TimelineOverview.svelte`, DOM, 36 px): the whole video, runs of consecutive
+   labeled holds with the same catalog `group` as labeled segments (`groupSegments`; open and
+   dismissed cards do not break a run; short names "Sun", "Backbends"), open candidates as grey
+   ticks, and a rectangle for the range the detail graph shows. Tap or drag moves the window; the
+   end of the gesture scrolls the list to the first card ending after that time.
+2. the detail graph (136 px, collapsible with the chevron; collapsed = only the overview stays
+   sticky): a 20 min window (`DETAIL_WINDOW_S`; videos ≤ 25 min are shown whole).
+The window follows the list: on scroll (rAF-throttled, layout reads only) the card right below
+the header (binary search over the card rects, `firstBelow`) defines the current time; the window
+re-centres on it only when it leaves the middle 50 % (`followWindow`), so it moves in calm steps.
+Programmatic smooth scrolls (graph tap, overview tap) pause following until the scrolling stops.
+Card scrolling (`scrollToCard`) keeps cards below the sticky header.
 
 ## Measured iOS limits
 

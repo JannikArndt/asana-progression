@@ -1,5 +1,6 @@
 <script lang="ts">
   import TinyFrame from '../components/TinyFrame.svelte';
+  import LazyAsset from '../components/LazyAsset.svelte';
   import { app } from '../state/app.svelte';
   import { router } from '../state/router.svelte';
   import { importFiles } from '../import.svelte';
@@ -7,6 +8,8 @@
   import { formatDuration, formatTime } from '../components/timeline';
   import { formatDay } from '../format';
   import { asanaStats, summarizeSession } from '../state/session-data';
+  import { displayCrop, fillCrop } from '../../progression';
+  import type { Asset, Hold } from '../../model';
 
   interface Props {
     tab?: 'asanas' | 'sessions';
@@ -29,7 +32,13 @@
   }
 
   const interrupted = $derived(app.jobs.filter((j) => !(pipeline.running && pipeline.videoId === j.videoId)));
-  const stats = $derived(asanaStats(app.sessions, app.holds));
+  /** Captured colour image per hold for the list: the small thumbnail, else the still. */
+  const images = $derived.by(() => {
+    const m = new Map<string, Asset>();
+    for (const a of app.assets) if (a.kind === 'thumb' || (a.kind === 'still' && m.get(a.holdId)?.kind !== 'thumb')) m.set(a.holdId, a);
+    return m;
+  });
+  const stats = $derived(asanaStats(app.sessions, app.holds, new Set(images.keys())));
   const groups = $derived.by(() => {
     const out: Array<{ group: string; asanas: typeof app.asanas }> = [];
     for (const a of app.asanas) {
@@ -41,6 +50,13 @@
     return out;
   });
 </script>
+
+{#snippet tiny(hold: Hold)}
+  {@const sum = app.summaries[hold.videoId]}
+  {#if sum}
+    <TinyFrame videoId={hold.videoId} frameWidth={sum.frameWidth} frameHeight={sum.frameHeight} index={Math.round(hold.bestS * sum.sampleHz)} alt="" />
+  {/if}
+{/snippet}
 
 <main class="home">
   <header class="top">
@@ -114,22 +130,25 @@
         <h2 class="section-title group">{g.group}</h2>
         {#each g.asanas as a (a.id)}
           {@const st = stats.get(a.id)}
-          {@const sum = st?.latest ? app.summaries[st.latest.videoId] : undefined}
           <button class="row asana" class:empty-asana={!st} type="button" onclick={() => router.go({ name: 'asana', id: a.id })}>
             <div class="thumb">
-              {#if st?.latest && sum}
-                <TinyFrame
-                  videoId={st.latest.videoId}
-                  frameWidth={sum.frameWidth}
-                  frameHeight={sum.frameHeight}
-                  index={Math.round(st.latest.bestS * sum.sampleHz)}
-                  alt=""
-                />
+              {#if st?.preview}
+                {@const hold = st.preview}
+                {@const img = images.get(hold.id)}
+                {#if img}
+                  <LazyAsset asset={img} crop={fillCrop(displayCrop(hold), img.width, img.height, 1)} alt="">
+                    {#snippet fallback()}{@render tiny(hold)}{/snippet}
+                  </LazyAsset>
+                {:else}
+                  {@render tiny(hold)}
+                {/if}
               {/if}
             </div>
             <div class="row-main">
               <span class="name">{a.name}</span>
-              <span class="muted small tabular">{st ? `${st.count} ${st.count === 1 ? 'hold' : 'holds'} · ${formatDay(st.latestDate)}` : 'No holds yet'}</span>
+              <span class="muted small tabular">
+                {st ? `${st.count} ${st.count === 1 ? 'hold' : 'holds'}${st.days > 1 ? ` · ${st.days} days` : ''}` : 'No holds yet'}
+              </span>
             </div>
           </button>
         {/each}
@@ -239,7 +258,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    min-height: 60px;
+    min-height: 64px;
     padding: var(--space-2) 0;
     border: 0;
     border-bottom: 1px solid var(--color-hairline);
@@ -266,15 +285,25 @@
     font-size: var(--text-xl);
   }
 
+  /* Square preview: the colour still fills it (fillCrop); the gray analysis frame is cropped to fit. */
   .thumb {
     flex: none;
-    width: 72px;
-    aspect-ratio: 16 / 9;
+    width: 56px;
+    aspect-ratio: 1;
     border-radius: var(--radius-s);
     overflow: hidden;
     background: var(--color-neutral-tint);
-    display: flex;
-    align-items: center;
+  }
+
+  .thumb :global(.lazy),
+  .thumb :global(.frame),
+  .thumb :global(.tiny) {
+    height: 100%;
+    border-radius: 0;
+  }
+
+  .thumb :global(.tiny canvas) {
+    object-fit: cover;
   }
 
   .empty-asana {

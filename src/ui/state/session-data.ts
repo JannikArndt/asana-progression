@@ -78,23 +78,44 @@ export function historyFrom(sessions: Session[], holds: Hold[], excludeSessionId
 
 export interface AsanaStats {
   count: number;
+  /** Distinct practice days (session dates). */
+  days: number;
   latest: Hold | null;
   latestDate: string | null;
+  /** Newest hold with a captured image (`captured`), else the newest hold: the list's preview. */
+  preview: Hold | null;
 }
 
-/** Hold count and newest hold per asana (newest by session date, then best time). */
-export function asanaStats(sessions: Session[], holds: Hold[]): Map<string, AsanaStats> {
+/**
+ * Hold count, practice days and newest hold per asana (newest by session date, then best time).
+ * `captured` = ids of holds with a captured still or thumbnail.
+ */
+export function asanaStats(sessions: Session[], holds: Hold[], captured: ReadonlySet<string> = new Set()): Map<string, AsanaStats> {
   const dateOf = new Map(sessions.map((s) => [s.id, s.date]));
+  const newer = (h: Hold, d: string, than: Hold | null, thanDate: string) => !than || d > thanDate || (d === thanDate && h.bestS > than.bestS);
   const out = new Map<string, AsanaStats>();
+  const days = new Map<string, Set<string>>();
+  const previewDate = new Map<string, string>();
   for (const h of holds) {
     const d = dateOf.get(h.sessionId) ?? '';
-    const cur = out.get(h.asanaId) ?? { count: 0, latest: null, latestDate: null };
+    const cur = out.get(h.asanaId) ?? { count: 0, days: 0, latest: null, latestDate: null, preview: null };
     cur.count++;
-    if (!cur.latest || d > (cur.latestDate ?? '') || (d === cur.latestDate && h.bestS > cur.latest.bestS)) {
+    if (newer(h, d, cur.latest, cur.latestDate ?? '')) {
       cur.latest = h;
       cur.latestDate = d;
     }
+    if (captured.has(h.id) && newer(h, d, cur.preview, previewDate.get(h.asanaId) ?? '')) {
+      cur.preview = h;
+      previewDate.set(h.asanaId, d);
+    }
+    const set = days.get(h.asanaId) ?? new Set<string>();
+    set.add(dayOf(d));
+    days.set(h.asanaId, set);
     out.set(h.asanaId, cur);
+  }
+  for (const [id, st] of out) {
+    st.days = days.get(id)!.size;
+    st.preview ??= st.latest;
   }
   return out;
 }
@@ -174,4 +195,53 @@ export function combineSessions(
     holds: holds.filter((h) => otherIds.has(h.sessionId)).map((h) => ({ ...h, sessionId: target.id })),
     deleteIds: [...otherIds],
   };
+}
+
+/**
+ * Which uncovered stretches get a row between the review cards. A gap always counts from
+ * `GAP_ALWAYS_S`; shorter ones (down to `GAP_MIN_S`) only when they are clearly longer than the
+ * usual way from one hold to the next in this video (`GAP_TYPICAL_FACTOR` × the median gap).
+ * In the labeled 67 min primary series the median gap is 19 s (vinyasas), so 10 s would show a
+ * row after most cards; a missed hold leaves a gap of two transitions plus the hold (≥ ~40 s).
+ */
+export const GAP_MIN_S = 10;
+export const GAP_ALWAYS_S = 30;
+export const GAP_TYPICAL_FACTOR = 1.5;
+
+/** Minimum length of a noteworthy gap for these spans (start order), see `GAP_MIN_S`. */
+export function gapThreshold(spans: ReadonlyArray<{ startS: number; endS: number }>): number {
+  const gaps: number[] = [];
+  let covered = -Infinity;
+  for (const s of spans) {
+    if (s.startS > covered && covered > -Infinity) gaps.push(s.startS - covered);
+    covered = Math.max(covered, s.endS);
+  }
+  if (gaps.length < 5) return GAP_MIN_S;
+  gaps.sort((a, b) => a - b);
+  const median = gaps[Math.floor(gaps.length / 2)]!;
+  return Math.min(GAP_ALWAYS_S, Math.max(GAP_MIN_S, GAP_TYPICAL_FACTOR * median));
+}
+
+export interface CoverageGap {
+  startS: number;
+  endS: number;
+  /** Index of the span that follows the gap (`spans.length` after the last one). */
+  beforeIndex: number;
+}
+
+/**
+ * Stretches of a video (0…durationS) covered by no span, at least `minS` long (default:
+ * `gapThreshold`). `spans` are in
+ * start order (as `sessionEntries`). Callers pass every candidate, dismissed ones included: the
+ * user has looked at those, so they count as covered.
+ */
+export function coverageGaps(spans: ReadonlyArray<{ startS: number; endS: number }>, durationS: number, minS = gapThreshold(spans)): CoverageGap[] {
+  const out: CoverageGap[] = [];
+  let covered = 0;
+  spans.forEach((s, i) => {
+    if (s.startS - covered >= minS) out.push({ startS: covered, endS: s.startS, beforeIndex: i });
+    covered = Math.max(covered, s.endS);
+  });
+  if (durationS - covered >= minS) out.push({ startS: covered, endS: durationS, beforeIndex: spans.length });
+  return out;
 }

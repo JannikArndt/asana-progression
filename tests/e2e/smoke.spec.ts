@@ -54,6 +54,14 @@ test('import → review → asana', async ({ page }) => {
   await third.getByRole('button', { name: 'Restore' }).click();
   await expect(third).toHaveAttribute('data-status', 'open');
 
+  // A tap on a thumbnail selects the hold and offers frame actions.
+  await first.getByRole('button', { name: 'Frame actions for hold 1' }).click();
+  const menu = page.getByRole('menu', { name: 'Hold 1' });
+  await expect(menu.getByRole('menuitem', { name: 'Choose frame…' })).toBeVisible();
+  await expect(first).toHaveClass(/selected/);
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+
   // Choose another best frame from the stored samples.
   await third.getByRole('button', { name: /More actions/ }).click();
   await page.getByRole('button', { name: 'Choose frame…' }).click();
@@ -82,6 +90,8 @@ test('import → review → asana', async ({ page }) => {
   await page.getByRole('tab', { name: 'Asanas' }).click();
   const row = page.getByRole('button', { name: /Utthita Trikonasana\s+1 hold/ });
   await expect(row).toBeVisible();
+  // The row previews the captured colour still, not the gray analysis frame.
+  await expect(row.locator('.thumb img')).toBeVisible({ timeout: 60_000 });
   await row.click();
   await expect(page.getByRole('heading', { name: 'Utthita Trikonasana' })).toBeVisible();
   // Progression: the captured still in the feed, the viewer, grid and side filter.
@@ -90,9 +100,64 @@ test('import → review → asana', async ({ page }) => {
   await page.locator('.feed .item').click();
   const viewer = page.getByRole('dialog', { name: 'Utthita Trikonasana holds' });
   await expect(viewer.locator('img')).toBeVisible();
-  await viewer.getByRole('button', { name: 'Pin' }).click();
-  await expect(viewer.getByRole('button', { name: 'Pinned' })).toBeVisible();
-  await viewer.getByRole('button', { name: 'Close' }).click();
+  // A tap on the image shows the action bar (nothing opens directly).
+  const bar = viewer.getByRole('toolbar', { name: 'Hold actions' });
+  await expect(bar).toBeHidden();
+  await viewer.locator('.slide.current .media').click();
+  await expect(bar).toBeVisible();
+  /** The bar hides itself after a few seconds: tap the image again if needed. */
+  const action = async (name: string) => {
+    if (!(await bar.isVisible())) await viewer.locator('.slide.current .media').click();
+    await bar.getByRole('button', { name, exact: true }).click();
+  };
+  // Choose frame opens the frame picker above the viewer; the page has no video file since the reload.
+  await action('Choose frame');
+  await expect(bar).toBeHidden();
+  await page.getByRole('button', { name: '+1 s' }).click();
+  await page.getByRole('button', { name: 'Use this frame' }).click();
+  await expect(viewer.getByText(/Select synthetic-practice-vp9\.mp4 to save the still/)).toBeVisible();
+  await viewer.locator('input[type=file]').setInputFiles(video);
+  await expect(viewer.getByText(/to save the still|Saving the still/)).toBeHidden({ timeout: 60_000 });
+  // Compare, pose (no model in this test) and the crop editor with portrait presets.
+  await action('Compare');
+  await expect(bar.getByRole('button', { name: 'Compare' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(viewer.getByText('Compare needs a second hold of this asana.')).toBeVisible();
+  await viewer.getByRole('button', { name: 'Stop', exact: true }).click();
+  await action('Pose');
+  await expect(viewer.getByRole('status')).toHaveText('Pose model off');
+  await action('Edit crop');
+  const editor = page.getByRole('dialog', { name: /^Crop/ });
+  await editor.getByRole('radio', { name: '2:3' }).click();
+  await expect(editor.getByRole('radio', { name: '2:3' })).toHaveAttribute('aria-checked', 'true');
+  const mask = editor.locator('.mask');
+  const maskAspect = async () => {
+    const b = (await mask.boundingBox())!;
+    return Math.round((b.width / b.height) * 100) / 100;
+  };
+  await expect.poll(maskAspect).toBe(0.67);
+  // Free: the frame's handles change its shape.
+  await editor.getByRole('radio', { name: 'Free' }).click();
+  const handle = (await editor.locator('[data-handle=s]').boundingBox())!;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2 - 120, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(maskAspect).toBeGreaterThan(0.8);
+  await editor.getByRole('button', { name: 'Save' }).click();
+  await expect(editor).toBeHidden();
+  // A tap beside the image closes the viewer; so do a pull down and Escape.
+  await viewer.locator('.stage').click({ position: { x: 4, y: 4 } });
+  await expect(viewer).toBeHidden();
+  await page.locator('.feed .item').click();
+  const center = (await viewer.locator('.slide.current .media').boundingBox())!;
+  await page.mouse.move(center.x + center.width / 2, center.y + center.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(center.x + center.width / 2, center.y + center.height / 2 + 260, { steps: 8 });
+  await page.mouse.up();
+  await expect(viewer).toBeHidden();
+  await page.locator('.feed .item').click();
+  await page.keyboard.press('Escape');
+  await expect(viewer).toBeHidden();
   await page.getByRole('radio', { name: 'Grid' }).click();
   await expect(page.locator('.tile')).toHaveCount(1);
   await page.getByRole('radio', { name: 'Left' }).click();
@@ -102,7 +167,9 @@ test('import → review → asana', async ({ page }) => {
   await page.getByRole('button', { name: '‹ Asanas' }).click();
   await page.locator('input[type=file]').first().setInputFiles(video);
   await expect(page.getByText('This video was imported before')).toBeVisible();
-  await page.getByRole('button', { name: /Cancel/ }).click();
+  // "Cancel" of a question is the sheet's ✕ in the header.
+  await page.getByRole('dialog').locator('header').getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByRole('dialog')).toBeHidden();
 
   expect(errors).toEqual([]);
 });
@@ -159,6 +226,18 @@ test('a pinned luma-plane conversion is used and finds the three holds', async (
   await page.evaluate(() => localStorage.setItem('asana.debug.pipeline', JSON.stringify({ grayMethod: 'luma' })));
   await importVideo(page, 'None');
   await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
+
+  // The last ~10 s are covered by no candidate: a row after the last card adds a hold there.
+  const gap = page.getByRole('button', { name: /not covered at 00:5\d: add a hold/ });
+  await expect(gap).toHaveCount(1);
+  await gap.click();
+  await expect(page.getByRole('heading', { name: /^Add hold · 00:5\d–01:00$/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Add hold here' }).click();
+  await expect(cards(page)).toHaveCount(4);
+  await expect(gap).toHaveCount(0);
+  // The new hold stays inside the gap (after the third card's end).
+  await expect(cards(page).nth(3)).toContainText(/00:5\d–(00:5\d|01:00)/);
+
   await page.getByRole('button', { name: /^Debug/ }).click();
   // Pinned runs skip the benchmark, so the row ends with the method (and pixel format).
   await expect(page.locator('dt:has-text("Frame → gray") + dd')).toHaveText(/· luma( \([^)]*\))?$/);
@@ -177,7 +256,57 @@ test('capture works with the MediaPipe cropper (self-hosted wasm and model)', as
   await expect(first.locator('[data-capture=done]')).toHaveCount(1, { timeout: 90_000 });
   const cached = await page.evaluate(async () => (await (await caches.open('mediapipe-pose-v1')).keys()).map((r) => r.url.split('/').pop()));
   expect(cached).toEqual(expect.arrayContaining(['vision_wasm_module_internal.wasm', 'pose_landmarker_lite.task']));
+  // The pose overlay runs the model on the stored still (the synthetic figure is no person).
+  await page.goto('./#/asana/adho-mukha-svanasana');
+  await page.locator('.feed .item').click();
+  const viewer = page.getByRole('dialog', { name: 'Adho Mukha Svanasana holds' });
+  await viewer.locator('.slide.current .media').click();
+  await viewer.getByRole('toolbar', { name: 'Hold actions' }).getByRole('button', { name: 'Pose', exact: true }).click();
+  await expect(viewer.getByRole('status')).toHaveText(/^(No pose found|Pose · .+)$/, { timeout: 30_000 });
   expect(errors).toEqual([]);
+});
+
+test('sheets: close in the header, backdrop tap and swipe down dismiss', async ({ page }) => {
+  await page.goto('./#/catalog');
+  // An editor: Cancel top-left, Save top-right.
+  await page.getByRole('button', { name: 'Add asana' }).click();
+  const edit = page.getByRole('dialog', { name: 'Add asana' });
+  const header = edit.locator('header');
+  await expect(header.getByRole('button', { name: 'Cancel' })).toBeVisible();
+  await page.waitForTimeout(400); // opening animation
+  await expect(header.getByRole('button', { name: 'Save' })).toBeVisible();
+  const cancelBox = (await header.getByRole('button', { name: 'Cancel' }).boundingBox())!;
+  const saveBox = (await header.getByRole('button', { name: 'Save' }).boundingBox())!;
+  const bodyBox = (await edit.locator('.body').boundingBox())!;
+  expect(cancelBox.x).toBeLessThan(saveBox.x);
+  expect(cancelBox.y + cancelBox.height).toBeLessThanOrEqual(bodyBox.y + 1);
+  await expect(edit.getByRole('button', { name: /Cancel|Close/ })).toHaveCount(1);
+  await page.touchscreen.tap(195, 40);
+  await expect(edit).toBeHidden();
+
+  await page.getByRole('button', { name: 'Add asana' }).click();
+  await expect(edit).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(edit).toBeHidden();
+
+  // Dragging the grabber: a short pull snaps back, a long one dismisses.
+  const drag = async (dy: number) => {
+    const g = (await edit.locator('.grabber').boundingBox())!;
+    const x = g.x + g.width / 2;
+    const y = g.y + g.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    for (let i = 1; i <= 10; i++) await page.mouse.move(x, y + (dy * i) / 10);
+    await page.mouse.up();
+  };
+  await page.getByRole('button', { name: 'Add asana' }).click();
+  await expect(edit).toBeVisible();
+  await page.waitForTimeout(400);
+  await drag(30);
+  await page.waitForTimeout(400);
+  await expect(edit).toBeVisible();
+  await drag(400);
+  await expect(edit).toBeHidden();
 });
 
 test('catalog and template editor', async ({ page }) => {
@@ -194,7 +323,9 @@ test('catalog and template editor', async ({ page }) => {
   await page.getByRole('button', { name: 'Add asanas' }).click();
   await page.getByPlaceholder('Search asanas').fill('pb');
   await page.getByRole('button', { name: /^Parsva Bakasana/ }).click();
-  await page.getByRole('button', { name: 'Close' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Add asanas' });
+  await sheet.locator('header').getByRole('button', { name: 'Close' }).click();
+  await expect(sheet).toBeHidden();
   await expect(page.locator('.entries li')).toHaveText([/1\s*Parsva Bakasana R/, /2\s*Parsva Bakasana L/]);
   await page.reload();
   await expect(page.locator('.entries li')).toHaveCount(2);
