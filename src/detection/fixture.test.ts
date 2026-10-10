@@ -41,8 +41,9 @@ describe('analysis export', () => {
 /**
  * Real-signal fixtures exported from the app (debug panel → "Export analysis JSON") go into
  * src/detection/__fixtures__/real/. Each must replay to the exported candidates; if a `truth`
- * array was added by hand, every true hold ≥ minHoldS must be found with the current default
- * parameters, as its own candidate (and its best frame must be near the confirmed `bestS`, if given).
+ * array was added, every true hold ≥ minHoldS must be found with the current default parameters,
+ * as its own candidate (or, with `truthMinOwn`, at least that many), and the best frame of an own
+ * candidate must be near the confirmed `bestS`, if given.
  */
 const dir = join(import.meta.dirname, '__fixtures__', 'real');
 let files: string[] = [];
@@ -62,16 +63,30 @@ describe.skipIf(files.length === 0)('real-signal fixtures', () => {
       expect(r.candidates.map((c) => [c.startS, c.endS, c.bestS])).toEqual(x.candidates.map((c) => [c.startS, c.endS, c.bestS]));
       // Truth is checked with the current defaults: that is what a new import gets.
       const d = await findCandidates(signals, frames, { ...DEFAULT_PARAMS });
-      const owner = new Map<string, string>();
+      const hits: Array<{ t: NonNullable<AnalysisExport['truth']>[number]; name: string; id: string; bestS: number }> = [];
       for (const t of x.truth ?? []) {
         if (t.endS - t.startS < DEFAULT_PARAMS.minHoldS) continue;
         const name = t.name ?? `${t.startS}–${t.endS}`;
-        const hit = d.candidates.find((c) => c.bestS >= t.startS && c.bestS <= t.endS) ?? d.candidates.find((c) => c.startS <= t.endS && c.endS >= t.startS);
+        // A hold split into fragments: the fragment whose best frame is nearest the confirmed one.
+        const inside = d.candidates.filter((c) => c.bestS >= t.startS && c.bestS <= t.endS);
+        const ref = t.bestS ?? (t.startS + t.endS) / 2;
+        inside.sort((a, b) => Math.abs(a.bestS - ref) - Math.abs(b.bestS - ref));
+        const hit = inside[0] ?? d.candidates.find((c) => c.startS <= t.endS && c.endS >= t.startS);
         expect(hit, `hold ${name}`).toBeDefined();
+        hits.push({ t, name, id: hit!.id, bestS: hit!.bestS });
+      }
+      const uses = new Map<string, string[]>();
+      for (const h of hits) uses.set(h.id, [...(uses.get(h.id) ?? []), h.name]);
+      const own = hits.filter((h) => uses.get(h.id)!.length === 1);
+      if (x.truthMinOwn === undefined) {
         // Every true hold is its own candidate (no merge of different poses).
-        expect(owner.get(hit!.id), `${name} merged with`).toBeUndefined();
-        owner.set(hit!.id, name);
-        if (t.bestS !== undefined) expect(Math.abs(hit!.bestS - t.bestS), `best frame of ${name}`).toBeLessThanOrEqual(t.bestTolS ?? 1.5);
+        for (const h of hits) expect(uses.get(h.id), `${h.name} merged`).toEqual([h.name]);
+      } else {
+        const shared = [...uses.values()].filter((n) => n.length > 1).map((n) => n.join(' + '));
+        expect(own.length, `own candidates; shared: ${shared.join('; ')}`).toBeGreaterThanOrEqual(x.truthMinOwn);
+      }
+      for (const h of own) {
+        if (h.t.bestS !== undefined) expect(Math.abs(h.bestS - h.t.bestS), `best frame of ${h.name}`).toBeLessThanOrEqual(h.t.bestTolS ?? 1.5);
       }
     });
   }

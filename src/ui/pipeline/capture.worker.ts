@@ -2,8 +2,9 @@
  * Capture worker: wires source → capture → crop → asset store. For each hold it renders the
  * still + thumbnail (and the clip), finds the body box on a small preview, writes the files to
  * OPFS and reports asset records back; the main thread stores records and crops in IndexedDB.
+ * `recrop` runs pose detection again on stored stills (after the crop algorithm changed).
  */
-import { captureHold, type CapturedAsset } from '../../capture';
+import { captureHold, previewFromStill, type CapturedAsset } from '../../capture';
 import { createMediaPipeCropper, nullCropper, type Cropper } from '../../crop';
 import { newId, type Asset } from '../../model';
 import { openVideo } from '../../source';
@@ -117,8 +118,41 @@ async function capture(req: Extract<CaptureRequest, { type: 'capture' }>) {
   }
 }
 
+async function recrop(req: Extract<CaptureRequest, { type: 'recrop' }>) {
+  const { jobId } = req;
+  const abort = new AbortController();
+  current = abort;
+  let cropperName = 'none';
+  try {
+    const cropper = await getCropper(req.cropper, req.baseUrl);
+    cropperName = cropper.name;
+    for (const h of req.holds) {
+      if (abort.signal.aborted) break;
+      try {
+        const still = await store.get(h.stillKey);
+        if (!still) throw new Error('Still file missing');
+        const preview = await previewFromStill(still);
+        try {
+          const detection = await cropper.detect(preview);
+          post({ type: 'recrop-done', jobId, holdId: h.id, crop: detection?.box ?? null, cropper: cropper.name });
+        } finally {
+          preview.close();
+        }
+      } catch (e) {
+        post({ type: 'hold-error', jobId, holdId: h.id, message: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    post({ type: 'done', jobId, cropper: cropperName });
+  } catch (e) {
+    post({ type: 'error', jobId, message: e instanceof Error ? e.message : String(e) });
+  } finally {
+    current = null;
+  }
+}
+
 scope.onmessage = (e) => {
   const req = e.data;
   if (req.type === 'capture') void capture(req);
+  else if (req.type === 'recrop') void recrop(req);
   else current?.abort();
 };

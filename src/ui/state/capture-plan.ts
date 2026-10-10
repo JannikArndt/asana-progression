@@ -21,6 +21,22 @@ export function needsCapture(hold: Hold, assets: Asset[]): { still: boolean; cli
   return { still: stillStale, clip: clipStale };
 }
 
+/**
+ * Still to crop again: the hold's automatic crop was made by an older crop version (or none ran)
+ * and it has a still. Manual crops are kept anyway; the automatic one is still updated.
+ */
+export function recropStill(hold: Hold, assets: Asset[], version: number): Asset | null {
+  if (hold.crop.autoVersion === version) return null;
+  return assets.find((a) => a.holdId === hold.id && a.kind === 'still') ?? null;
+}
+
+/** Crop after pose detection: the new box (or the old one if none was found) tagged with `version`. */
+export function withAutoCrop(crop: Hold['crop'], box: Box | null, version: number | null): Hold['crop'] {
+  const { auto, autoVersion: _, ...rest } = crop;
+  const next = box ? { x: box.x, y: box.y, w: box.w, h: box.h } : auto;
+  return { ...rest, ...(next ? { auto: next } : {}), ...(version !== null ? { autoVersion: version } : {}) };
+}
+
 /** Assets of a hold that a fresh capture replaces (same kinds as the new ones). */
 export function replacedAssets(holdId: string, existing: Asset[], newKinds: Asset['kind'][]): Asset[] {
   return existing.filter((a) => a.holdId === holdId && newKinds.includes(a.kind));

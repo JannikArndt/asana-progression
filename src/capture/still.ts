@@ -10,6 +10,20 @@ const THUMB_QUALITY = 0.85;
 const THUMB_LONG_SIDE = 512;
 const PREVIEW_LONG_SIDE = 640;
 
+/** Small bitmap (long side ≤ 640, like the capture preview) of a stored still, for pose detection again. */
+export async function previewFromStill(still: Blob): Promise<ImageBitmap> {
+  const full = await createImageBitmap(still);
+  const c = canvas2d(full.width, full.height);
+  c.ctx.drawImage(full, 0, 0);
+  full.close();
+  const preview = downscale(c.canvas, thumbSize(c.canvas.width, c.canvas.height, PREVIEW_LONG_SIDE));
+  try {
+    return await createImageBitmap(preview);
+  } finally {
+    release(c.canvas, preview);
+  }
+}
+
 /** Full-resolution JPEG of the hold's best frame (display orientation) plus a thumbnail. */
 export class StillStrategy implements CaptureStrategy {
   readonly kind = 'still' as const;

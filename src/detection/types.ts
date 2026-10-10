@@ -48,6 +48,12 @@ export interface DetectionParams {
   /** Only candidates separated by at most this gap (seconds) are considered for merging. */
   similarMergeMaxGapS: number;
   /**
+   * Only merge fragments: the highest m between the two candidates must be at most this × the
+   * 90th percentile of m inside them. Moving out of a pose and back in (reps, e.g. Navasana ×5)
+   * moves more than the sway inside a hold; noise-split holds do not.
+   */
+  similarMergeMotion: number;
+  /**
    * If p99(C) ≤ singleStillMaxSpread × p50(C), the video has no clear posture changes and is
    * treated as one single hold (single-asana clip). Only for videos up to `singleStillMaxS`.
    */
