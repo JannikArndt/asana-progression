@@ -159,6 +159,18 @@ test('a pinned luma-plane conversion is used and finds the three holds', async (
   await page.evaluate(() => localStorage.setItem('asana.debug.pipeline', JSON.stringify({ grayMethod: 'luma' })));
   await importVideo(page, 'None');
   await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
+
+  // The last ~10 s are covered by no candidate: a row after the last card adds a hold there.
+  const gap = page.getByRole('button', { name: /not covered at 00:5\d: add a hold/ });
+  await expect(gap).toHaveCount(1);
+  await gap.click();
+  await expect(page.getByRole('heading', { name: /^Add hold · 00:5\d–01:00$/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Add hold here' }).click();
+  await expect(cards(page)).toHaveCount(4);
+  await expect(gap).toHaveCount(0);
+  // The new hold stays inside the gap (after the third card's end).
+  await expect(cards(page).nth(3)).toContainText(/00:5\d–(00:5\d|01:00)/);
+
   await page.getByRole('button', { name: /^Debug/ }).click();
   // Pinned runs skip the benchmark, so the row ends with the method (and pixel format).
   await expect(page.locator('dt:has-text("Frame → gray") + dd')).toHaveText(/· luma( \([^)]*\))?$/);

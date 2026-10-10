@@ -1,6 +1,6 @@
 import { bestFrameIndex, lowestSumWindow, percentile } from '../detection';
 import type { Hold, ReviewCandidate } from '../model/types';
-import type { SignalView } from './types';
+import type { SignalView, TimeRange } from './types';
 
 /** Best frame and clip window of a span, from the motion signal. */
 export function fitSpan(startS: number, endS: number, sig: SignalView): { bestS: number; clipStartS: number; clipEndS: number } {
@@ -154,26 +154,46 @@ export function valleyProminence(value: (i: number) => number, a: number, b: num
 
 /**
  * A candidate for a hold the detector missed, around `atS`: expands over the surrounding samples
- * whose posture change is at or below the 75th percentile (at least ±2 s, at most ±60 s).
+ * whose posture change is at or below the 75th percentile (at least ±2 s, at most ±60 s), never
+ * beyond `bounds`.
  */
-export function missedCandidate(atS: number, sig: SignalView): ReviewCandidate {
+export function missedCandidate(atS: number, sig: SignalView, bounds?: TimeRange): ReviewCandidate {
   const hz = sig.sampleHz;
   const n = sig.C.length;
+  // Bounds (the uncovered gap the user picked from) keep the new span off its neighbours.
+  let lo = bounds ? Math.max(0, Math.ceil(bounds.fromS * hz)) : 0;
+  let hi = bounds ? Math.min(n, Math.floor(bounds.toS * hz)) : n;
+  if (hi - lo < 1) [lo, hi] = [0, n];
   const loose = percentile(sig.C, 75);
   const still = (i: number) => {
     const v = sig.C[i];
     return v !== undefined && Number.isFinite(v) && v <= loose;
   };
-  const center = Math.min(n - 1, Math.max(0, Math.round(atS * hz)));
+  const center = Math.min(hi - 1, Math.max(lo, Math.round(atS * hz)));
   const minHalf = Math.round(2 * hz);
   const maxHalf = Math.round(60 * hz);
   let a = center;
   let b = center + 1;
-  while (a > 0 && center - a < maxHalf && (center - a < minHalf || still(a - 1))) a--;
-  while (b < n && b - center < maxHalf && (b - center < minHalf || still(b))) b++;
+  while (a > lo && center - a < maxHalf && (center - a < minHalf || still(a - 1))) a--;
+  while (b < hi && b - center < maxHalf && (b - center < minHalf || still(b))) b++;
   const startS = a / hz;
   const endS = Math.min(sig.durationS, b / hz);
   return { id: editedId('manual'), startS, endS, ...fitSpan(startS, endS, sig), alternatesS: [], status: 'open', origin: 'manual' };
+}
+
+/**
+ * The uncovered stretch around `atS` between the neighbouring candidates (any status), or null if
+ * `atS` lies inside a candidate. `toS` is Infinity after the last candidate.
+ */
+export function freeSpanAround(candidates: readonly ReviewCandidate[], atS: number): TimeRange | null {
+  let fromS = 0;
+  let toS = Infinity;
+  for (const c of candidates) {
+    if (c.startS <= atS && atS <= c.endS) return null;
+    if (c.endS < atS) fromS = Math.max(fromS, c.endS);
+    else toS = Math.min(toS, c.startS);
+  }
+  return { fromS, toS };
 }
 
 /** Moves the best frame; the previous best becomes an alternate. */

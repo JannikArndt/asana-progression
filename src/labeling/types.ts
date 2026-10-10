@@ -48,6 +48,12 @@ export interface SuggestionOptions {
 }
 
 /** Signals needed to (re)compute best frame and clip window of edited spans. */
+/** A time range in seconds (`toS` may be Infinity: open end). */
+export interface TimeRange {
+  fromS: number;
+  toS: number;
+}
+
 export interface SignalView {
   sampleHz: number;
   m: ArrayLike<number>;

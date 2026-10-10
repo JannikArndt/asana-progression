@@ -175,3 +175,52 @@ export function combineSessions(
     deleteIds: [...otherIds],
   };
 }
+
+/**
+ * Which uncovered stretches get a row between the review cards. A gap always counts from
+ * `GAP_ALWAYS_S`; shorter ones (down to `GAP_MIN_S`) only when they are clearly longer than the
+ * usual way from one hold to the next in this video (`GAP_TYPICAL_FACTOR` × the median gap).
+ * In the labeled 67 min primary series the median gap is 19 s (vinyasas), so 10 s would show a
+ * row after most cards; a missed hold leaves a gap of two transitions plus the hold (≥ ~40 s).
+ */
+export const GAP_MIN_S = 10;
+export const GAP_ALWAYS_S = 30;
+export const GAP_TYPICAL_FACTOR = 1.5;
+
+/** Minimum length of a noteworthy gap for these spans (start order), see `GAP_MIN_S`. */
+export function gapThreshold(spans: ReadonlyArray<{ startS: number; endS: number }>): number {
+  const gaps: number[] = [];
+  let covered = -Infinity;
+  for (const s of spans) {
+    if (s.startS > covered && covered > -Infinity) gaps.push(s.startS - covered);
+    covered = Math.max(covered, s.endS);
+  }
+  if (gaps.length < 5) return GAP_MIN_S;
+  gaps.sort((a, b) => a - b);
+  const median = gaps[Math.floor(gaps.length / 2)]!;
+  return Math.min(GAP_ALWAYS_S, Math.max(GAP_MIN_S, GAP_TYPICAL_FACTOR * median));
+}
+
+export interface CoverageGap {
+  startS: number;
+  endS: number;
+  /** Index of the span that follows the gap (`spans.length` after the last one). */
+  beforeIndex: number;
+}
+
+/**
+ * Stretches of a video (0…durationS) covered by no span, at least `minS` long (default:
+ * `gapThreshold`). `spans` are in
+ * start order (as `sessionEntries`). Callers pass every candidate, dismissed ones included: the
+ * user has looked at those, so they count as covered.
+ */
+export function coverageGaps(spans: ReadonlyArray<{ startS: number; endS: number }>, durationS: number, minS = gapThreshold(spans)): CoverageGap[] {
+  const out: CoverageGap[] = [];
+  let covered = 0;
+  spans.forEach((s, i) => {
+    if (s.startS - covered >= minS) out.push({ startS: covered, endS: s.startS, beforeIndex: i });
+    covered = Math.max(covered, s.endS);
+  });
+  if (durationS - covered >= minS) out.push({ startS: covered, endS: durationS, beforeIndex: spans.length });
+  return out;
+}

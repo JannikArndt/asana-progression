@@ -21,7 +21,8 @@ npm run icons        # regenerate public/icons/*.png
 ```
 
 In the cloud container, Playwright must use the preinstalled browser:
-`PW_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e`.
+`PW_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e`
+(`PW_PORT=<port>` runs the preview server on another port than 4173, e.g. for parallel checkouts).
 Playwright's Chromium decodes VP9/AV1 but not H.264/HEVC, so e2e fixtures are VP9.
 
 ## Architecture
@@ -109,6 +110,15 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   split into several, merge with previous, not a pose, full-resolution frame, add missed hold),
   asana progression
   (`#/asana/<id>`). `#/video/<id>` redirects to the session.
+- Uncovered gaps (`session-data.coverageGaps`): between the cards of a video (and before the first /
+  after the last) a quiet row "1 min 7 s not covered · + Add hold" marks stretches covered by no
+  candidate. Dismissed candidates count as covered (the user has looked at them). Threshold
+  `gapThreshold`: always from 30 s, down to 10 s when the gap is ≥ 1.5 × the video's median gap
+  between candidates (the outdoor primary series has a 19 s median from vinyasas; 10 s would put a
+  row after most cards, while a missed hold leaves two transitions plus the hold). Tapping opens the
+  frame scrubber limited to the gap (starting in its middle); `missedCandidate(atS, sig, bounds)`
+  keeps the new span inside the gap. "+ Add missed hold" (whole video) clamps to the free stretch
+  between the neighbours (`freeSpanAround`) unless the time lies inside a candidate.
 - Labeled holds keep `templateEntryIndex`; `alignToTemplate` re-maps it whenever the session's
   template was switched or edited, so suggestions never follow stale indices.
 
@@ -289,8 +299,26 @@ viewport extends behind it); search sheets pass `fill` to keep their height whil
 Timeline graph (`src/ui/components/TimelineGraph.svelte`, maths in `timeline.ts`): canvas,
 min/max envelope per pixel when zoomed out, pinch zoom, inertial horizontal pan
 (`touch-action: pan-y` keeps vertical page scroll native), tap a span to select, selection from
-the list scrolls the graph. Labeled spans = accent tint + name (horizontal or rotated), open =
-neutral grey, dismissed = hatched.
+the list scrolls the graph. Labeled spans = accent tint + name (horizontal if it fits, otherwise
+rotated wherever it keeps 12 px from the previous rotated label), open = neutral grey, dismissed =
+hatched. Optional `range` (show a window instead of the whole video; a new object moves there,
+animated unless `animate: false`) and `onview` (visible range on every view change).
+
+Session review timeline (`SessionReview.svelte`, maths in `session-timeline.ts`): per video a
+sticky header (`top: var(--safe-top)`, solid background, hairline once stuck; the status-bar area is
+covered by a fixed strip) with
+1. the overview (`TimelineOverview.svelte`, DOM, 36 px): the whole video, runs of consecutive
+   labeled holds with the same catalog `group` as labeled segments (`groupSegments`; open and
+   dismissed cards do not break a run; short names "Sun", "Backbends"), open candidates as grey
+   ticks, and a rectangle for the range the detail graph shows. Tap or drag moves the window; the
+   end of the gesture scrolls the list to the first card ending after that time.
+2. the detail graph (136 px, collapsible with the chevron; collapsed = only the overview stays
+   sticky): a 20 min window (`DETAIL_WINDOW_S`; videos ≤ 25 min are shown whole).
+The window follows the list: on scroll (rAF-throttled, layout reads only) the card right below
+the header (binary search over the card rects, `firstBelow`) defines the current time; the window
+re-centres on it only when it leaves the middle 50 % (`followWindow`), so it moves in calm steps.
+Programmatic smooth scrolls (graph tap, overview tap) pause following until the scrolling stops.
+Card scrolling (`scrollToCard`) keeps cards below the sticky header.
 
 ## Measured iOS limits
 
