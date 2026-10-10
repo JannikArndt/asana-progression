@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampView, cropFromView, cropGeometry, effectiveCrop, needsCapture, normalizeCrop, replacedAssets, viewForCrop } from './capture-plan';
+import { clampView, cropFromView, cropGeometry, effectiveCrop, needsCapture, normalizeCrop, recropStill, replacedAssets, viewForCrop, withAutoCrop } from './capture-plan';
 import type { Asset, Hold } from '../../model';
 
 const hold: Hold = {
@@ -29,6 +29,24 @@ describe('replacedAssets', () => {
   it('selects assets of the same hold and kinds', () => {
     const list = [asset('still'), asset('clip'), asset('thumb', { holdId: 'x' })];
     expect(replacedAssets('h', list, ['still', 'thumb']).map((a) => a.kind)).toEqual(['still']);
+  });
+});
+
+describe('re-crop', () => {
+  const box = { x: 0.1, y: 0.2, w: 0.3, h: 0.4 };
+  it('picks stills cropped by another version', () => {
+    const still = asset('still');
+    expect(recropStill(hold, [asset('thumb'), still], 2)).toBe(still);
+    expect(recropStill({ ...hold, crop: { auto: box, autoVersion: 1 } }, [still], 2)).toBe(still);
+    expect(recropStill({ ...hold, crop: { auto: box, autoVersion: 2 } }, [still], 2)).toBeNull();
+    expect(recropStill(hold, [asset('thumb')], 2)).toBeNull();
+  });
+  it('records the new box and version, keeps manual crops and an old box when none was found', () => {
+    const manual = { x: 0, y: 0, w: 0.5, h: 0.5 };
+    expect(withAutoCrop({ manual, auto: manual }, { ...box, score: 0.9 } as typeof box, 2)).toEqual({ manual, auto: box, autoVersion: 2 });
+    expect(withAutoCrop({ auto: box, autoVersion: 1 }, null, 2)).toEqual({ auto: box, autoVersion: 2 });
+    expect(withAutoCrop({}, null, 2)).toEqual({ autoVersion: 2 });
+    expect(withAutoCrop({ autoVersion: 1 }, box, null)).toEqual({ auto: box });
   });
 });
 

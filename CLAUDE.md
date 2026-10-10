@@ -121,8 +121,15 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   fingerprint).
 - Files live in OPFS under `assets/<assetId>.<ext>` (`OpfsAssetStore`, written in the worker with
   sync access handles); records in the `assets` store. Replaced assets are deleted.
-- The cropper runs on the 640 px preview; `crop.auto` = body box + padding. Crops are display
-  metadata only (`manual ?? auto ?? full frame`); `CropEditor` writes `crop.manual`.
+- The cropper runs on the 640 px preview; `crop.auto` = body box + padding. BlazePose has no
+  crown or fingertip landmarks, so the box is grown by a head circle (1.6 × the face-landmark
+  spread, at least 0.35 torso lengths) and by the hand landmarks extended 0.6 × from the wrist,
+  then padded 0.15 × its longer side in pixels (at least 2 % of the image height); see
+  `BOX_DEFAULTS`. Crops are display metadata only (`manual ?? auto ?? full frame`); `CropEditor`
+  writes `crop.manual`. `crop.autoVersion` = `CROP_VERSION` of the box; holds with an older
+  version are cropped again from their stored still in the capture worker (`recrop`, no video
+  file needed) on startup and whenever capture is requested. Bump `CROP_VERSION` when the box
+  changes.
 - MediaPipe wasm loader/binary are emitted by the `mediapipe-wasm` Vite plugin at
   `<base>mediapipe/`, the model is `public/models/pose_landmarker_lite.task` (Apache-2.0).
   Debug switch: `localStorage['asana.debug.capture'] = '{"cropper":"none"}'` (used by e2e).
@@ -183,6 +190,11 @@ share sheet ("Save to Files"). "Keep separate" for same-day sessions is `Session
    `similarMergeFactor` (2) × max(threshold, m(bestA), m(bestB)), gap ≤ `similarMergeMaxGapS`
    (60 s). The m terms are the single-frame noise floor (C is a 4 s mean and much less noisy).
    The stiller best frame wins; merged-away best frames become `alternatesS`.
+   Only fragments merge: the highest m between the two must be ≤ `similarMergeMotion` (1.1) ×
+   p90 of m inside them. Leaving a pose and coming back (reps: Navasana ×5, Urdhva Dhanurasana ×3)
+   moves more than the sway inside a hold, but the reps look alike — in the labeled outdoor
+   practice every similar-merge (6) joined reps or Padmasana/Utpluthih, while in the finishing clip
+   the two merges joined a noise-split Sirsasana A (gap motion 0.95 and 0.6 × p90).
    Cap: the merge distance is at most `similarMergeRelative` (0.45) × the median best-frame
    distance of adjacent candidates with a clear change between them (C peak ≥ 1.5 × threshold;
    needs ≥ 5 such pairs). That median says how different two poses look in this video. Without the
@@ -196,10 +208,13 @@ similar-merge; variants with near-identical silhouettes (e.g. Paschimottanasana 
 merged — the review step (M2) needs split.
 
 Real data: `src/detection/__fixtures__/real/ashtanga-primary-outdoor.json` is a 67.6 min outdoor
-primary series (1080×1120 HEVC HLG); its truth = 28 distinct poses identified by eye on the tiny
-frames (sun-salutation down dogs, standing sequence, UHP, Virabhadrasana, Sirsasana A/B) that must
-stay separate candidates; params/candidates were recomputed with the defaults (the export used
-the single-still workaround). `sarvangasana-finishing.json` is the user's 7.6 min
+primary series (1080×1120 HEVC HLG), fully labeled by the user: truth = the 91 labeled holds (two
+names corrected by eye), params/candidates recomputed with the defaults. Nothing is missed;
+holds with near-identical silhouettes and little movement between them (Padangusthasana +
+Padahastasana, UHP B + C, Paschimottanasana A/B/C, Baddha Konasana A/B, Sarvangasana + Halasana)
+form one still run and need Split; some asanas are two candidates because the posture changes
+inside them (Supta Padangusthasana leg up / to the side, Kurmasana, Bhujapidasana, …) and need
+Merge. Hence `truthMinOwn` (78 of 91 own candidates) is the regression floor there. `sarvangasana-finishing.json` is the user's 7.6 min
 finishing-sequence clip (the validation video). All 9 holds are found; their best frames were checked
 by eye on full-resolution frames (the long Sirsasana A is split in 3 and merged back). The truth
 spans are the detector's own spans (named, not hand-segmented); the fixture test checks that each
@@ -215,8 +230,10 @@ Debug → "Export analysis JSON" writes `AnalysisExport` (signals, params, candi
 candidates and the tiny frames at every best frame). Drop files into
 `src/detection/__fixtures__/real/`; `fixture.test.ts` replays them and, if a hand-written
 `truth: [{startS, endS, name, bestS?}]` array is added, checks with the **current defaults** that
-every true hold ≥ minHoldS is found as its own candidate. Exports carry the labeled holds in
-`meta.labels` (name incl. side, start/end/best) as a starting point for `truth`.
+every true hold ≥ minHoldS is found as its own candidate (with `truthMinOwn`: none missed and at
+least that many own). Exports carry the labeled holds in `meta.labels` (name incl. side,
+start/end/best) as a starting point for `truth`; their `candidates` are the review state, so
+recompute candidates/preMerge with the defaults before committing a fixture.
 
 ## Source specifics
 
@@ -313,5 +330,4 @@ Open (needs the user):
   untested); MediaPipe load/per-still time and crop quality; gestures (grid pinch, viewer swipe,
   split/crossfade slider, crop pinch); memory with long clips and big flipbooks; backup Save,
   Share → Save to Files and importing a multi-GB backup. Record results in "Measured iOS limits".
-- Outdoor primary series: a fully labeled re-export to replace the by-eye truth in
-  `ashtanga-primary-outdoor.json` (Padangusthasana + Padahastasana come out as one 49 s run).
+- Check the new automatic crops on the iPhone (re-cropped from the stills after the update).

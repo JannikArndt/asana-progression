@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BLAZEPOSE, BLAZEPOSE_COUNT, POSTURE_THRESHOLDS, boxFromLandmarks, clampBox, postureFromLandmarks, unionBox } from './landmarks';
+import { BLAZEPOSE, BLAZEPOSE_COUNT, BOX_DEFAULTS, POSTURE_THRESHOLDS, boxFromLandmarks, clampBox, postureFromLandmarks, unionBox } from './landmarks';
 import type { Landmark } from './types';
 
 type P = [number, number];
@@ -291,7 +291,7 @@ describe('boxFromLandmarks', () => {
 
   it('pads the bounds by pad × the longer side', () => {
     const b = boxFromLandmarks(pts([[0.4, 0.2, 1], [0.6, 0.2, 0.5], [0.5, 0.6, 1], [0.45, 0.4, 1], [0.55, 0.4, 0.5]]))!;
-    const p = 0.12 * 0.4;
+    const p = 0.15 * 0.4;
     expect(b.x).toBeCloseTo(0.4 - p);
     expect(b.y).toBeCloseTo(0.2 - p);
     expect(b.w).toBeCloseTo(0.2 + 2 * p);
@@ -326,6 +326,45 @@ describe('boxFromLandmarks', () => {
     const b = boxFromLandmarks(landmarks(standing))!;
     expect(b.h).toBeGreaterThan(b.w);
     expect(b.score).toBeCloseTo(0.9);
+  });
+
+  it('keeps the top of the head: a head circle around the face landmarks', () => {
+    // Standing figure (0.4 image heights per metre): the nose is the highest landmark at 1.58 m;
+    // the crown is ≈ 0.17 m higher and must be inside the box before any padding.
+    const lm = landmarks(standing);
+    const crownY = 0.9 - 1.75 * 0.4;
+    const b = boxFromLandmarks(lm, { pad: 0 })!;
+    expect(b.y).toBeLessThanOrEqual(crownY);
+    // Face landmarks spread out: the radius follows their spread.
+    const face = lm.map((l) => ({ ...l }));
+    const nose = face[BLAZEPOSE.nose]!;
+    face[7] = { x: nose.x - 0.03, y: nose.y, visibility: 0.9 };
+    face[8] = { x: nose.x + 0.03, y: nose.y, visibility: 0.9 };
+    const wide = boxFromLandmarks(face, { pad: 0 })!;
+    const c = { x: nose.x, y: nose.y };
+    const r = Math.max(BOX_DEFAULTS.headSpread * 0.02, BOX_DEFAULTS.headTorso * 0.5 * 0.4);
+    expect(wide.y).toBeCloseTo(c.y - r);
+  });
+
+  it('reaches past the hand landmarks to the fingertips', () => {
+    const lm = landmarks(standing);
+    // Arm stretched forward: wrist and index far in front of the body.
+    lm[BLAZEPOSE.leftWrist] = { x: 0.8, y: 0.3, visibility: 0.9 };
+    lm[19] = { x: 0.84, y: 0.3, visibility: 0.9 };
+    const b = boxFromLandmarks(lm, { pad: 0 })!;
+    expect(b.x + b.w).toBeCloseTo(0.84 + BOX_DEFAULTS.handReach * 0.04);
+  });
+
+  it('pads in pixels on wide images', () => {
+    const lm = pts([[0.4, 0.2], [0.6, 0.2], [0.5, 0.6], [0.45, 0.4], [0.55, 0.4]]);
+    const b = boxFromLandmarks(lm, { aspect: 2 })!;
+    // Longer side in pixel units: 0.4 image heights (x extent 0.2 × 2 = 0.4 as well).
+    const p = 0.15 * 0.4;
+    expect(b.y).toBeCloseTo(0.2 - p);
+    expect(b.x).toBeCloseTo(0.4 - p / 2);
+    // A tiny figure still gets the minimum padding.
+    const tiny = boxFromLandmarks(pts([[0.5, 0.5], [0.501, 0.5], [0.5, 0.502], [0.501, 0.501], [0.5005, 0.5005]]))!;
+    expect(tiny.y).toBeCloseTo(0.5 - BOX_DEFAULTS.minPad);
   });
 
   it('null with fewer than 5 usable landmarks or a degenerate box', () => {

@@ -3,6 +3,8 @@ export {
   BLAZEPOSE,
   BLAZEPOSE_COUNT,
   POSTURE_THRESHOLDS,
+  BOX_DEFAULTS,
+  CROP_VERSION,
   boxFromLandmarks,
   postureFromLandmarks,
   clampBox,

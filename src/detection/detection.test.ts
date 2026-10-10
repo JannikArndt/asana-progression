@@ -21,7 +21,7 @@ const PRACTICE: Segment[] = [
   // balancing hold: sways as much as a slow transition frame-to-frame
   { kind: 'hold', seconds: 30, pose: POSES.headstand, sway: 1.2, swayPeriodS: 3 },
   { kind: 'move', seconds: 6, to: POSES.seated },
-  // long hold with a brief adjustment in the middle (move away and back)
+  // the same pose twice: out of it and back in (like reps), a separate hold each
   { kind: 'hold', seconds: 25, pose: POSES.seated, sway: 0.2 },
   { kind: 'move', seconds: 1.5, to: POSES.forwardFold, wobble: 0.5 },
   { kind: 'move', seconds: 1.5, to: POSES.seated, wobble: 0.5 },
@@ -37,8 +37,7 @@ describe('detection on a synthetic practice', () => {
     const { result, signals } = await analyzeFrames(video.frames, P);
     expect(signals.m.length).toBe(video.frames.length);
     expect(result.singleStill).toBe(false);
-    // The split seated hold (pieces 4 and 5) must be merged into one candidate.
-    const truth = [video.holds[0]!, video.holds[1]!, video.holds[2]!, { startS: video.holds[3]!.startS, endS: video.holds[4]!.endS }, video.holds[5]!];
+    const truth = video.holds;
     expect(result.candidates.length).toBe(truth.length);
     result.candidates.forEach((c, i) => {
       const h = truth[i]!;
@@ -50,9 +49,13 @@ describe('detection on a synthetic practice', () => {
       expect(c.clipEndS).toBeLessThanOrEqual(c.endS);
       expect(c.status).toBe('open');
     });
-    const merged = result.candidates[3]!;
+    // Without the gap-motion condition the two look-alike seated holds become one.
+    const loose = await analyzeFrames(video.frames, { ...P, similarMergeMotion: Infinity });
+    expect(loose.result.candidates.length).toBe(truth.length - 1);
+    const merged = loose.result.candidates[3]!;
+    expect(merged.startS).toBe(result.candidates[3]!.startS);
+    expect(merged.endS).toBe(result.candidates[4]!.endS);
     expect(merged.alternatesS.length).toBeGreaterThanOrEqual(1);
-    expect(result.preMerge.length).toBeGreaterThan(result.candidates.length);
   });
 
   it('does not merge adjacent holds of different poses', async () => {
@@ -77,11 +80,14 @@ describe('detection on a synthetic practice', () => {
       { kind: 'move', seconds: 3, to: POSES.triangle },
       { kind: 'hold', seconds: 15, pose: POSES.triangle },
     ]);
-    const on = await analyzeFrames(video.frames, P);
+    // Out of the pose and back in moves more than the hold sways: kept apart by default.
+    expect((await analyzeFrames(video.frames, P)).result.candidates.length).toBe(3);
+    const any = { ...P, similarMergeMotion: Infinity };
+    const on = await analyzeFrames(video.frames, any);
     expect(on.result.candidates.length).toBe(2);
-    const off = await analyzeFrames(video.frames, { ...P, similarMergeFactor: 0 });
+    const off = await analyzeFrames(video.frames, { ...any, similarMergeFactor: 0 });
     expect(off.result.candidates.length).toBe(3);
-    const noGap = await analyzeFrames(video.frames, { ...P, similarMergeMaxGapS: 1 });
+    const noGap = await analyzeFrames(video.frames, { ...any, similarMergeMaxGapS: 1 });
     expect(noGap.result.candidates.length).toBe(3);
   });
 
@@ -94,9 +100,10 @@ describe('detection on a synthetic practice', () => {
       { kind: 'move', seconds: 4, to: POSES.triangle },
       { kind: 'hold', seconds: 10, pose: POSES.triangle },
     ]);
-    const { result, signals } = await analyzeFrames(video.frames, P);
+    const { result, signals } = await analyzeFrames(video.frames, { ...P, similarMergeMotion: Infinity });
     const c = result.candidates[0]!;
     const hz = P.sampleHz;
+    expect(c.alternatesS.length).toBeGreaterThan(0);
     for (const alt of c.alternatesS) {
       expect(signals.m[Math.round(c.bestS * hz)]!).toBeLessThanOrEqual(signals.m[Math.round(alt * hz)]!);
     }
@@ -164,6 +171,7 @@ describe('detection on a synthetic practice', () => {
 });
 
 describe('long inputs', () => {
+  // Almost all hold: p55 of C cuts through noise and splits the holds; the noise fragments merge.
   it('handles videos longer than the initial buffers', async () => {
     const video = synthesize(POSES.standing, [
       { kind: 'hold', seconds: 160, pose: POSES.standing },

@@ -123,7 +123,8 @@ export interface Hold {
   clipStartS: number;
   clipEndS: number;
   templateEntryIndex?: number;
-  crop: { auto?: Box; manual?: Box };
+  /** Display crop: `manual` wins over `auto`; `autoVersion` = crop module version that made `auto`. */
+  crop: { auto?: Box; manual?: Box; autoVersion?: number };
 }
 
 export interface Asset {

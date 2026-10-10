@@ -30,9 +30,40 @@ export const BLAZEPOSE = {
 export const BLAZEPOSE_COUNT = 33;
 
 const DEFAULT_MIN_VISIBILITY = 0.3;
-const DEFAULT_PAD = 0.12;
 /** A body box needs at least this many usable landmarks. */
 const MIN_BOX_LANDMARKS = 5;
+
+/**
+ * Body-box geometry. BlazePose has no landmark on the top of the head or the fingertips, so the
+ * box is grown there before padding. Lengths are in the pixel-proportional units of the image
+ * height.
+ */
+export const BOX_DEFAULTS = {
+  /** Padding on every side as a fraction of the longer side of the grown bounds. */
+  pad: 0.15,
+  /** Padding at least this fraction of the image height (small figures, imprecise landmarks). */
+  minPad: 0.02,
+  /** Head radius = this × the largest distance of a face landmark from their centre… */
+  headSpread: 1.6,
+  /** …but at least this × the torso length (shoulder midpoint to hip midpoint). */
+  headTorso: 0.35,
+  /** Fingertips: the hand landmarks extended by this × their distance from the wrist. */
+  handReach: 0.6,
+} as const;
+
+/**
+ * Version of `boxFromLandmarks`. Holds whose automatic crop has an older version are cropped again
+ * from their stored still (2: head and fingertips, aspect-aware padding of 0.15 instead of 0.12).
+ */
+export const CROP_VERSION = 2;
+
+/** Face landmarks (nose, eyes, ears, mouth). */
+const FACE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
+/** Wrist, then pinky, index and thumb of each hand. */
+const HANDS = [
+  [15, 17, 19, 21],
+  [16, 18, 20, 22],
+] as const;
 
 function usable(l: Landmark | undefined, minVisibility: number): l is Landmark {
   return !!l && Number.isFinite(l.x) && Number.isFinite(l.y) && (l.visibility === undefined || l.visibility >= minVisibility);
@@ -65,33 +96,65 @@ export function unionBox(first: Box, ...rest: Box[]): Box {
 export interface BoxOptions {
   /** Landmarks with a lower visibility are ignored (default 0.3; a missing visibility counts as 1). */
   minVisibility?: number;
-  /** Padding on every side as a fraction of the longer side of the landmark bounds (default 0.12). */
+  /** Padding on every side as a fraction of the longer side of the grown bounds (default 0.15). */
   pad?: number;
+  /** Image width / height; padding and head size are measured in pixels (default 1). */
+  aspect?: number;
 }
 
 /**
- * Padded bounds of the usable landmarks, clamped to the image. Score = mean visibility of the
- * landmarks used. Null with fewer than 5 usable landmarks or when the box has no area.
+ * Padded body box, clamped to the image. With a full BlazePose set the bounds of the usable
+ * landmarks are first grown by a head circle (the face landmarks stop at the eyes) and by the
+ * fingertips (the hand landmarks stop at the knuckles); see BOX_DEFAULTS. Score = mean visibility
+ * of the landmarks used. Null with fewer than 5 usable landmarks or when the box has no area.
  */
 export function boxFromLandmarks(landmarks: Landmark[], opts: BoxOptions = {}): BodyBox | null {
   const minVisibility = opts.minVisibility ?? DEFAULT_MIN_VISIBILITY;
-  const pad = opts.pad ?? DEFAULT_PAD;
+  const pad = opts.pad ?? BOX_DEFAULTS.pad;
+  const aspect = opts.aspect ?? 1;
   const used = landmarks.filter((l) => usable(l, minVisibility));
   if (used.length < MIN_BOX_LANDMARKS) return null;
+  // Work in pixel-proportional units: x scaled by the aspect, y in image heights.
+  const pts: Pt[] = used.map((l) => ({ x: l.x * aspect, y: l.y }));
+  if (landmarks.length >= BLAZEPOSE_COUNT) {
+    const pt = (i: number): Pt | null => {
+      const l = landmarks[i];
+      return usable(l, minVisibility) ? { x: l.x * aspect, y: l.y } : null;
+    };
+    const face = FACE.map(pt).filter((p): p is Pt => p !== null);
+    if (face.length) {
+      const c = { x: face.reduce((s, p) => s + p.x, 0) / face.length, y: face.reduce((s, p) => s + p.y, 0) / face.length };
+      const spread = Math.max(...face.map((p) => Math.hypot(p.x - c.x, p.y - c.y)));
+      const S = mid(pt(BLAZEPOSE.leftShoulder), pt(BLAZEPOSE.rightShoulder));
+      const H = mid(pt(BLAZEPOSE.leftHip), pt(BLAZEPOSE.rightHip));
+      const torso = S && H ? Math.hypot(S.x - H.x, S.y - H.y) : 0;
+      const r = Math.max(BOX_DEFAULTS.headSpread * spread, BOX_DEFAULTS.headTorso * torso);
+      pts.push({ x: c.x - r, y: c.y - r }, { x: c.x + r, y: c.y + r });
+    }
+    for (const [wrist, ...tips] of HANDS) {
+      const w = pt(wrist);
+      if (!w) continue;
+      for (const i of tips) {
+        const t = pt(i);
+        if (t) pts.push({ x: t.x + BOX_DEFAULTS.handReach * (t.x - w.x), y: t.y + BOX_DEFAULTS.handReach * (t.y - w.y) });
+      }
+    }
+  }
   let x0 = Infinity;
   let y0 = Infinity;
   let x1 = -Infinity;
   let y1 = -Infinity;
-  let visibility = 0;
-  for (const l of used) {
-    x0 = Math.min(x0, l.x);
-    y0 = Math.min(y0, l.y);
-    x1 = Math.max(x1, l.x);
-    y1 = Math.max(y1, l.y);
-    visibility += l.visibility ?? 1;
+  for (const p of pts) {
+    x0 = Math.min(x0, p.x);
+    y0 = Math.min(y0, p.y);
+    x1 = Math.max(x1, p.x);
+    y1 = Math.max(y1, p.y);
   }
-  const p = pad * Math.max(x1 - x0, y1 - y0);
-  const box = clampBox({ x: x0 - p, y: y0 - p, w: x1 - x0 + 2 * p, h: y1 - y0 + 2 * p });
+  // All landmarks on one spot: no body to frame.
+  if (x1 - x0 <= 0 && y1 - y0 <= 0) return null;
+  const visibility = used.reduce((s, l) => s + (l.visibility ?? 1), 0);
+  const p = Math.max(pad * Math.max(x1 - x0, y1 - y0), pad > 0 ? BOX_DEFAULTS.minPad : 0);
+  const box = clampBox({ x: (x0 - p) / aspect, y: y0 - p, w: (x1 - x0 + 2 * p) / aspect, h: y1 - y0 + 2 * p });
   if (box.w <= 0 || box.h <= 0) return null;
   return { ...box, score: visibility / used.length };
 }

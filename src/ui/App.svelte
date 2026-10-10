@@ -26,7 +26,8 @@
   });
 
   onMount(() => {
-    void app.init();
+    // Stills cropped by an older crop version get a new automatic crop in the background.
+    void app.init().then(() => app.ready && capture.recropStale(app.holds));
     updates.addQuietCheck(() => !pipeline.running);
     updates.addQuietCheck(() => !capture.busy);
     // A prepared backup file would be lost, e.g. while the share sheet hides the page.

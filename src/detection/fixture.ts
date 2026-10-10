@@ -22,12 +22,17 @@ export interface AnalysisExport {
   preMerge: Candidate[];
   /** Sample index → base64 of the pooled gray frame. */
   frames: Record<string, string>;
-  /** Optional ground truth added by hand: true hold spans in seconds. */
   /**
-   * Hand-checked holds. `bestS` (optional) is a frame confirmed by eye as a good representative;
-   * the candidate found for the hold must pick a best frame within `bestTolS` (default 1.5 s).
+   * Hand-checked holds (spans in seconds). `bestS` (optional) is a frame confirmed by eye as a good
+   * representative; the candidate found for the hold must pick a best frame within `bestTolS`
+   * (default 1.5 s).
    */
   truth?: Array<{ startS: number; endS: number; name?: string; bestS?: number; bestTolS?: number }>;
+  /**
+   * Without it every truth hold must be its own candidate. With it (fully labeled practices, where
+   * look-alike neighbours can share a candidate) at least this many must be; none may be missed.
+   */
+  truthMinOwn?: number;
   meta?: Record<string, unknown>;
 }
 

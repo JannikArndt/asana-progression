@@ -1,4 +1,11 @@
 import { argminRange, lowestWindow, meanAbsDiff, percentileSorted, sortedFinite } from './stats';
+
+/** Largest finite value of `v` in [from, to), -Infinity if none. */
+function maxRange(v: ArrayLike<number>, from: number, to: number): number {
+  let x = -Infinity;
+  for (let i = from; i < to; i++) if (v[i]! > x) x = v[i]!;
+  return x;
+}
 import type { Candidate, CandidateResult, DetectionParams, FrameAccess, Signals } from './types';
 
 /** Half-open sample range [start, end) with derived points. */
@@ -80,7 +87,8 @@ function toCandidate(r: Run, p: DetectionParams): Candidate {
  *  2. join gaps < gapMergeS, drop runs < minHoldS
  *  3. best frame = argmin m in the middle `bestFrameMiddle` of the run
  *  4. clip window = lowest summed m over clipWindowS
- *  5. merge adjacent candidates whose best frames look alike (alternates keep the merged-away bests)
+ *  5. merge adjacent candidates whose best frames look alike and with no movement between them
+ *     beyond the sway inside them (alternates keep the merged-away bests)
  */
 export async function findCandidates(
   signals: Signals,
@@ -126,7 +134,7 @@ export async function findCandidates(
     // at the two best frames (single frames are noisier than 4 s means).
     const scale = last ? Math.max(threshold, m[last.best] ?? 0, m[r.best] ?? 0) : 0;
     const maxDiff = Math.min(cap, p.similarMergeFactor * (Number.isFinite(scale) ? scale : 0));
-    if (last && r.start - last.end <= maxGap && maxDiff > 0) {
+    if (last && r.start - last.end <= maxGap && maxDiff > 0 && quietGap(m, last, r, p.similarMergeMotion)) {
       const d = meanAbsDiff(await frame(last.best), await frame(r.best));
       if (d < maxDiff) {
         const keepLast = !(m[r.best]! < m[last.best]!);
@@ -144,6 +152,15 @@ export async function findCandidates(
   }
 
   return { threshold, singleStill, candidates: merged.map((r) => toCandidate(r, p)), preMerge };
+}
+
+/**
+ * True when nothing between two runs moved more than `factor` × the 90th percentile of m inside
+ * them, i.e. the gap is noise inside one hold rather than leaving the pose and coming back.
+ */
+function quietGap(m: Float32Array, a: Run, b: Run, factor: number): boolean {
+  const inside = sortedFinite(Float32Array.from([...m.subarray(a.start, a.end), ...m.subarray(b.start, b.end)]));
+  return maxRange(m, a.end, b.start) <= factor * percentileSorted(inside, 90);
 }
 
 /**
