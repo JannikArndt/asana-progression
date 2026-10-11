@@ -88,9 +88,20 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   labeled neighbours, incl. reps, minus other open cards); the card shows "Template expects k
   holds here · Split", the menu has "Split into several…".
 - Sessions: created at import (one per video; files of one batch recorded on the same day share
-  a session). The template is chosen per session at import (default Primary series, "None"
-  preselected for clips < 5 min) and can be switched on the review screen. Milestone-1 videos
-  without a session get one on startup (`AppState.migrate`).
+  a session). The template is chosen per session at import from all templates + None (default
+  Primary series, else the first template; "None" for clips < 5 min) and can be switched on the
+  review screen (a "Template" row opening the same list). Milestone-1 videos without a session get
+  one on startup (`AppState.migrate`). Length = `sessionSpanS`: first video start to last video
+  end (pauses count), only when every `recordedAt` parses and the span is ≥ the sum of durations
+  − 1 s and ≤ sum + 4 h; otherwise the sum (export times, file dates).
+- Place: `Session.location = {name?, lat?, lon?}`. A new session takes the coordinates of its
+  first video that has some (`VideoMeta.location`), named after the nearest named session within
+  300 m (`placeNameNear`); a joining video fills in missing coordinates. Videos imported before
+  locations were read lack the `location` key in `meta`: `AppState.attachFile` reads it from the
+  attached file once (fire and forget) and places the session. The review header's location row
+  opens a sheet (name + chips from `placeNames`, nearest first); a name also goes to unnamed
+  sessions within 300 m that have coordinates (`unnamedNear`). Diagnostics and analysis exports
+  leave the coordinates out (`withoutLocation`, `videoForReport`).
 - Review state lives in `Analysis.candidates` (`ReviewCandidate`: status, `holdId`, `origin`);
   labels live in `Hold` records. Every action writes immediately — there is never unsaved
   labeling state.
@@ -270,6 +281,9 @@ recompute candidates/preMerge with the defaults before committing a fixture.
 - recordedAt: `com.apple.quicktime.creationdate` (keeps the UTC offset; parsed by hand because
   "+0200" is not portable for `Date`) → `mvhd` creation_time (can be the export time) →
   `file.lastModified`. Always editable later.
+- location: ISO 6709 (`parseIso6709`: decimal degrees or DDMM/DDMMSS, optional altitude and
+  `CRS…` suffix) from `com.apple.quicktime.location.ISO6709` (keys/ilst) → udta `©xyz`; null
+  when absent. Fixtures `location-keys.mov`, `location-udta.mov`.
 - Fingerprint: SHA-256(first 4 MiB ‖ last 4 MiB ‖ size ‖ duration ms).
 - Re-import of a known fingerprint always asks: "Reuse labels and re-capture assets" /
   "Import as a new session" / "Cancel" (an unfinished job asks Resume / Start over / Cancel).
@@ -333,6 +347,12 @@ Focus moves into the sheet, Tab is trapped, focus returns on close.
 Asanas list (Home): the preview is the newest hold that has a captured image (thumb, else still),
 filling a square via `progression.fillCrop` around the display crop; the gray analysis frame only
 when nothing is captured. The line reads "N holds", plus "· M days" when they span several days.
+
+Sessions list (Home): a 56 px square thumbnail of the captured image (thumb, else still) of the
+hold nearest the middle of the session (`sessionPreview`), the **whole frame** cover-cropped
+(`fillCrop(null, …)`: place and light identify a session, not the body); else the analysis frame
+in the middle of the longest analysed video (`sessionTinyFrame`). Lines: date; "span · N labeled
+· M open · template"; place (name, else coordinates) and note, when present.
 
 Timeline graph (`src/ui/components/TimelineGraph.svelte`, maths in `timeline.ts`): canvas,
 min/max envelope per pixel when zoomed out, pinch zoom, inertial horizontal pan

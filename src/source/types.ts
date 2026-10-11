@@ -4,6 +4,14 @@
  * asanas or storage.
  */
 
+/** A point on the earth (WGS 84) as stored in video metadata. */
+export interface GeoLocation {
+  lat: number;
+  lon: number;
+  /** Altitude in metres, null when the metadata has none. */
+  altM: number | null;
+}
+
 export type Rotation = 0 | 90 | 180 | 270;
 
 export interface ColorInfo {
@@ -51,6 +59,11 @@ export interface VideoMeta {
   make: string | null;
   model: string | null;
   software: string | null;
+  /**
+   * Where the video was recorded (ISO 6709 from `com.apple.quicktime.location.ISO6709` or `©xyz`),
+   * null when the file has none. Personal data: diagnostics and analysis exports leave it out.
+   */
+  location: GeoLocation | null;
 }
 
 export interface GraySample {

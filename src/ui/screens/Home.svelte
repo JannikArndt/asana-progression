@@ -8,8 +8,9 @@
   import { formatDuration, formatTime } from '../components/timeline';
   import { formatDay } from '../format';
   import { asanaStats, summarizeSession } from '../state/session-data';
+  import { placeLabel, sessionPreview, sessionTinyFrame } from '../state/session-data';
   import { displayCrop, fillCrop } from '../../progression';
-  import type { Asset, Hold } from '../../model';
+  import type { Asset, Hold, Session } from '../../model';
 
   interface Props {
     tab?: 'asanas' | 'sessions';
@@ -49,12 +50,22 @@
     }
     return out;
   });
+  /** Holds with a captured image (session thumbnails). */
+  const captured = $derived(new Set(images.keys()));
 </script>
 
 {#snippet tiny(hold: Hold)}
   {@const sum = app.summaries[hold.videoId]}
   {#if sum}
     <TinyFrame videoId={hold.videoId} frameWidth={sum.frameWidth} frameHeight={sum.frameHeight} index={Math.round(hold.bestS * sum.sampleHz)} alt="" />
+  {/if}
+{/snippet}
+
+{#snippet sessionTiny(s: Session)}
+  {@const at = sessionTinyFrame(s, app.summaries)}
+  {@const sum = at ? app.summaries[at.videoId] : undefined}
+  {#if at && sum}
+    <TinyFrame videoId={at.videoId} frameWidth={sum.frameWidth} frameHeight={sum.frameHeight} index={at.index} alt="" />
   {/if}
 {/snippet}
 
@@ -113,12 +124,27 @@
       {/if}
       {#each app.sessions as s (s.id)}
         {@const sum = summarizeSession(s, app.videos, app.summaries)}
-        <button class="row" type="button" onclick={() => router.go({ name: 'session', id: s.id })}>
+        {@const template = s.templateId ? app.templates.find((t) => t.id === s.templateId) : undefined}
+        {@const extra = [placeLabel(s), s.note].filter(Boolean).join(' · ')}
+        {@const preview = sessionPreview(s, app.holds, captured)}
+        {@const img = preview ? images.get(preview.id) : undefined}
+        <button class="row session" type="button" onclick={() => router.go({ name: 'session', id: s.id })}>
+          <!-- The whole frame, centred: place and light make a session recognizable, not the body crop. -->
+          <div class="thumb">
+            {#if img}
+              <LazyAsset asset={img} crop={fillCrop(null, img.width, img.height, 1)} alt="">
+                {#snippet fallback()}{@render sessionTiny(s)}{/snippet}
+              </LazyAsset>
+            {:else}
+              {@render sessionTiny(s)}
+            {/if}
+          </div>
           <div class="row-main">
             <span class="name">{formatDay(s.date, true)}</span>
-            <span class="muted small tabular">
-              {formatDuration(sum.durationS)} · {sum.labeled} labeled{sum.open ? ` · ${sum.open} open` : ''}{s.note ? ` · ${s.note}` : ''}
+            <span class="muted small tabular line">
+              {formatDuration(sum.durationS)} · {sum.labeled} labeled{sum.open ? ` · ${sum.open} open` : ''}{template ? ` · ${template.name}` : ''}
             </span>
+            {#if extra}<span class="muted small line">{extra}</span>{/if}
           </div>
           <span class="chev">›</span>
         </button>
@@ -275,6 +301,12 @@
 
   .name {
     font-weight: var(--weight-medium);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .line {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

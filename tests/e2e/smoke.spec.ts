@@ -86,7 +86,9 @@ test('import → review → asana', async ({ page }) => {
 
   // Sessions list and the asana page.
   await page.getByRole('button', { name: '‹ Sessions' }).click();
-  await expect(page.getByText(/2 labeled · 2 open/)).toBeVisible();
+  await expect(page.getByText(/2 labeled · 2 open · Primary series/)).toBeVisible();
+  // The session row shows a captured still (the whole frame) as its thumbnail.
+  await expect(page.locator('.row.session .thumb img')).toBeVisible({ timeout: 60_000 });
   await page.getByRole('tab', { name: 'Asanas' }).click();
   const row = page.getByRole('button', { name: /Utthita Trikonasana\s+1 hold/ });
   await expect(row).toBeVisible();
@@ -241,6 +243,27 @@ test('a pinned luma-plane conversion is used and finds the three holds', async (
   await page.getByRole('button', { name: /^Debug/ }).click();
   // Pinned runs skip the benchmark, so the row ends with the method (and pixel format).
   await expect(page.locator('dt:has-text("Frame → gray") + dd')).toHaveText(/· luma( \([^)]*\))?$/);
+  // The synthetic video carries no location.
+  await expect(page.locator('dt:has-text("Location") + dd')).toHaveText('–');
+
+  // Header: the template picker lists every template; the place is named in a sheet.
+  await page.getByRole('button', { name: 'Template: No template' }).click();
+  await page.getByRole('dialog', { name: 'Suggestions' }).getByRole('button', { name: /^Primary series/ }).click();
+  await expect(page.getByRole('button', { name: 'Template: Primary series' })).toBeVisible();
+  await page.getByRole('button', { name: 'Add location' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Location' });
+  await expect(sheet.getByText(/carry no location/)).toBeVisible();
+  await sheet.getByLabel('Place name').fill('Shala');
+  await sheet.locator('header').getByRole('button', { name: 'Save' }).click();
+  await expect(sheet).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Location: Shala. Edit' })).toBeVisible();
+
+  // The sessions list: thumbnail (tiny analysis frame, nothing captured), template and place.
+  await page.getByRole('button', { name: '‹ Sessions' }).click();
+  const row = page.locator('.row.session').first();
+  await expect(row).toContainText(/0 labeled · 4 open · Primary series/);
+  await expect(row).toContainText('Shala');
+  await expect(row.locator('.thumb .tiny')).not.toHaveClass(/missing/);
 });
 
 test('capture works with the MediaPipe cropper (self-hosted wasm and model)', async ({ page }) => {

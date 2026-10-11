@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessHandover, formatBytes } from './diagnostics';
+import { assessHandover, formatBytes, videoForReport, withoutLocation } from './diagnostics';
 import type { VideoMeta } from '../source';
 
 const base: VideoMeta = {
@@ -8,7 +8,7 @@ const base: VideoMeta = {
   displayWidth: 3840, displayHeight: 2160, rotation: 0, fps: 60, packetCount: null, averageBitrate: 60e6,
   durationS: 60, firstTimestampS: 0, color: { primaries: 'bt2020', transfer: 'hlg', matrix: 'bt2020-ncl', fullRange: false },
   hdr: true, hasAudio: true, recordedAt: null, recordedAtSource: null, quicktimeCreationDate: '2024-05-12T07:31:22+0200',
-  mvhdCreationTime: null, make: 'Apple', model: 'iPhone', software: null,
+  mvhdCreationTime: null, make: 'Apple', model: 'iPhone', software: null, location: null,
 };
 
 describe('assessHandover', () => {
@@ -36,5 +36,20 @@ describe('formatBytes', () => {
     expect(formatBytes(123_456_789)).toBe('123 MB');
     expect(formatBytes(64e9)).toBe('64.0 GB');
     expect(formatBytes(null)).toBe('–');
+  });
+});
+
+describe('withoutLocation', () => {
+  it('keeps only whether the video has a location', () => {
+    expect(withoutLocation({ ...base, location: { lat: 52.52, lon: 13.405, altM: 34 } }).location).toBe('present');
+    expect(withoutLocation(base).location).toBeNull();
+    expect(withoutLocation(base).model).toBe('iPhone');
+  });
+  it('redacts stored video snapshots', () => {
+    const v = { id: 'v', meta: { model: 'iPhone', location: { lat: 1, lon: 2, altM: null } } };
+    expect(videoForReport(v).meta).toEqual({ model: 'iPhone', location: 'present' });
+    expect(v.meta.location).toEqual({ lat: 1, lon: 2, altM: null });
+    const plain = { id: 'w', meta: { location: null } };
+    expect(videoForReport(plain)).toBe(plain);
   });
 });

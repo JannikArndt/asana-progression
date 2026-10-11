@@ -12,6 +12,7 @@ import {
 import { describeCodec } from './profile';
 import { blobReader, readMvhdCreationTime } from './isobmff';
 import { parseQuickTimeDate, toLocalIso } from './quicktime-date';
+import { locationFromTags } from './iso6709';
 import { resolveDecoderConfig, sampleTrack } from './sampler';
 import type {
   DecoderSupport,
@@ -127,6 +128,7 @@ export async function readMeta(file: Blob, input: Input, track: InputVideoTrack)
     make: str(raw['com.apple.quicktime.make']),
     model: str(raw['com.apple.quicktime.model']),
     software: str(raw['com.apple.quicktime.software']),
+    location: locationFromTags(raw),
   };
 }
 

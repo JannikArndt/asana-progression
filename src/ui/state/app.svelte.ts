@@ -18,9 +18,9 @@ import {
   type Session,
   type Video,
 } from '../../model';
-import { openVideo, type VideoSource } from '../../source';
+import { openVideo, type VideoMeta, type VideoSource } from '../../source';
 import { SvelteMap } from 'svelte/reactivity';
-import { dayOf, groupByDay, orderVideoIds, orphanVideos, SHORT_CLIP_S } from './session-data';
+import { dayOf, groupByDay, orderVideoIds, orphanVideos, SHORT_CLIP_S, videoLocation, withCoords } from './session-data';
 
 export interface AnalysisSummary {
   videoId: string;
@@ -89,7 +89,16 @@ class AppState {
       this.ready = true;
     } catch (e) {
       this.error = `Storage is not available: ${String(e)}`;
+    } finally {
+      for (const resolve of this.readyWaiters.splice(0)) resolve();
     }
+  }
+
+  private readyWaiters: Array<() => void> = [];
+
+  /** Resolves once the first load finished (catalog seeded, lists loaded), or failed. */
+  whenReady(): Promise<void> {
+    return this.ready || this.error ? Promise.resolve() : new Promise((resolve) => this.readyWaiters.push(resolve));
   }
 
   get db(): MetadataStore {
@@ -242,13 +251,43 @@ class AppState {
     this.sessions = [...this.sessions.filter((x) => x.id !== session.id), session].sort((a, b) => b.date.localeCompare(a.date));
   }
 
-  attachFile(videoId: string, file: File) {
+  /** Attaches a picked file to its video for this page session (`meta`: already read from it, if at hand). */
+  attachFile(videoId: string, file: File, meta?: VideoMeta) {
     if (this.files.get(videoId) !== file) {
       this.files.set(videoId, file);
       const old = this.sources.get(videoId);
       this.sources.delete(videoId);
       void old?.then((s) => s.close()).catch(() => {});
     }
+    // Fire and forget: never blocks capture, and a file that cannot be read just stays without a place.
+    void this.backfillLocation(videoId, meta).catch(() => {});
+  }
+
+  /**
+   * Videos imported before recording locations were read have no `location` in their metadata:
+   * read it from the attached file once, store it, and give the video's session its coordinates
+   * (and a nearby place name) when it has none.
+   */
+  private async backfillLocation(videoId: string, meta?: VideoMeta) {
+    const known = this.videos.find((v) => v.id === videoId);
+    if (!known || videoLocation(known) !== undefined) return;
+    const src = meta ? null : this.source(videoId);
+    const read = meta ?? (src ? (await src).meta : null);
+    if (!read) return;
+    const location = read.location ?? null;
+    const db = this.db;
+    const video = await db.videos.get(videoId);
+    if (!video || videoLocation(video) !== undefined) return;
+    const next: Video = { ...video, meta: { ...(video.meta ?? {}), location } };
+    await db.videos.put(next);
+    this.videos = this.videos.map((v) => (v.id === videoId ? next : v));
+    if (!location) return;
+    const session = (await db.sessions.findBy('videoIds', videoId))[0];
+    if (!session) return;
+    const located = withCoords(session, location, this.sessions);
+    if (located === session) return;
+    await db.sessions.put(located);
+    this.upsertSession(located);
   }
 }
 

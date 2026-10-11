@@ -19,6 +19,19 @@ import {
   sessionOfVideo,
   summarizeSession,
   toReviewItems,
+  sessionSpanS,
+  videoLocation,
+  distanceM,
+  placeNameNear,
+  unnamedNear,
+  withPlaceName,
+  withCoords,
+  placeNames,
+  formatCoords,
+  placeLabel,
+  sessionCoords,
+  sessionPreview,
+  sessionTinyFrame,
 } from './session-data';
 import type { Analysis, Hold, ReviewCandidate, Session, Video } from '../../model';
 import { DEFAULT_PARAMS } from '../../detection';
@@ -151,6 +164,15 @@ describe('same-day sessions', () => {
     expect(r.holds).toEqual([{ ...holds[0], sessionId: 't' }]);
     expect(r.deleteIds).toEqual(['o1', 'o2']);
   });
+
+  it('keeps a place when combining', () => {
+    const t: Session = { id: 't', date: '', note: '', videoIds: [] };
+    const o: Session = { id: 'o', date: '', note: '', videoIds: [], location: { name: 'Park', lat: 1, lon: 2 } };
+    expect(combineSessions(t, [o], [], []).session.location).toEqual({ name: 'Park', lat: 1, lon: 2 });
+    expect(combineSessions({ ...t, location: { lat: 3, lon: 4 } }, [o], [], []).session.location).toEqual({ lat: 3, lon: 4 });
+    expect(combineSessions({ ...t, location: { name: 'Home' } }, [{ ...o, location: { name: 'Park' } }], [], []).session.location).toEqual({ name: 'Home' });
+    expect('location' in combineSessions(t, [], [], []).session).toBe(false);
+  });
 });
 
 describe('orderVideoIds', () => {
@@ -194,5 +216,138 @@ describe('coverageGaps', () => {
   it('is the whole video without spans', () => {
     expect(coverageGaps([], 30)).toEqual([{ startS: 0, endS: 30, beforeIndex: 0 }]);
     expect(coverageGaps([], 5)).toEqual([]);
+  });
+});
+
+describe('sessionSpanS', () => {
+  const at = (id: string, durationS: number, recordedAt: string | null): Video => ({ ...video(id, durationS), recordedAt });
+  const ses = (...ids: string[]): Session => ({ id: 's', date: '', note: '', videoIds: ids });
+
+  it('is a single video’s duration, or 0 without videos', () => {
+    expect(sessionSpanS(ses('a'), [at('a', 90, '2026-10-01T07:00:00+02:00')])).toBe(90);
+    expect(sessionSpanS(ses('x'), [])).toBe(0);
+  });
+
+  it('runs from the first start to the last end (pauses count, offsets respected)', () => {
+    const vs = [at('a', 600, '2026-10-01T07:00:00+02:00'), at('b', 300, '2026-10-01T05:15:00Z')];
+    expect(sessionSpanS(ses('a', 'b'), vs)).toBe(20 * 60);
+    expect(summarizeSession(ses('a', 'b'), vs, {}).durationS).toBe(20 * 60);
+  });
+
+  it('falls back to the sum for missing or implausible recording times', () => {
+    expect(sessionSpanS(ses('a', 'b'), [at('a', 600, '2026-10-01T07:00:00Z'), at('b', 300, null)])).toBe(900);
+    expect(sessionSpanS(ses('a', 'b'), [at('a', 600, '2026-10-01T07:00:00Z'), at('b', 300, 'garbage')])).toBe(900);
+    // Overlapping (export times a few seconds apart): shorter than the videos.
+    expect(sessionSpanS(ses('a', 'b'), [at('a', 600, '2026-10-01T07:00:00Z'), at('b', 300, '2026-10-01T07:00:05Z')])).toBe(900);
+    // A file date days later.
+    expect(sessionSpanS(ses('a', 'b'), [at('a', 600, '2026-10-01T07:00:00Z'), at('b', 300, '2026-10-03T07:00:00Z')])).toBe(900);
+    // Back to back within a second is fine.
+    expect(sessionSpanS(ses('a', 'b'), [at('a', 600, '2026-10-01T07:00:00Z'), at('b', 300, '2026-10-01T07:09:59.500Z')])).toBe(899.5);
+  });
+});
+
+describe('places', () => {
+  const berlin = { lat: 52.52, lon: 13.405 };
+  const placed = (id: string, location?: Session['location']): Session => ({ id, date: '', note: '', videoIds: [], ...(location ? { location } : {}) });
+  // ≈ 111.2 km per degree of latitude.
+  const north = (m: number) => ({ lat: berlin.lat + m / 111_195, lon: berlin.lon });
+
+  it('reads video locations defensively', () => {
+    expect(videoLocation({})).toBeUndefined();
+    expect(videoLocation({ meta: { fileName: 'x' } })).toBeUndefined();
+    expect(videoLocation({ meta: { location: null } })).toBeNull();
+    expect(videoLocation({ meta: { location: { lat: '1', lon: 2 } } })).toBeNull();
+    expect(videoLocation({ meta: { location: 'present' } })).toBeNull();
+    expect(videoLocation({ meta: { location: { lat: 1, lon: 2 } } })).toEqual({ lat: 1, lon: 2, altM: null });
+    expect(videoLocation({ meta: { location: { lat: 1, lon: 2, altM: 30 } } })).toEqual({ lat: 1, lon: 2, altM: 30 });
+  });
+
+  it('measures distances', () => {
+    expect(distanceM(berlin, berlin)).toBe(0);
+    expect(distanceM(berlin, north(250))).toBeCloseTo(250, 0);
+    // Berlin → Paris ≈ 878 km
+    expect(distanceM(berlin, { lat: 48.8566, lon: 2.3522 }) / 1000).toBeCloseTo(878, -1);
+  });
+
+  it('finds the nearest named session within the radius', () => {
+    const sessions = [placed('a', { name: 'Park', ...north(200) }), placed('b', { name: 'Shala', ...north(50) }), placed('c', { ...north(10) }), placed('d', { name: 'No coords' })];
+    expect(placeNameNear(sessions, berlin.lat, berlin.lon)).toBe('Shala');
+    expect(placeNameNear(sessions, north(450).lat, berlin.lon)).toBe('Park');
+    expect(placeNameNear(sessions, north(800).lat, berlin.lon)).toBeUndefined();
+    expect(placeNameNear(sessions, north(800).lat, berlin.lon, 1000)).toBe('Park');
+  });
+
+  it('lists unnamed sessions nearby', () => {
+    const me = placed('me', { name: 'Park', ...berlin });
+    const sessions = [me, placed('a', north(100)), placed('b', { name: 'X', ...north(100) }), placed('c', north(500)), placed('d')];
+    expect(unnamedNear(sessions, me).map((s) => s.id)).toEqual(['a']);
+    expect(unnamedNear(sessions, placed('nowhere'))).toEqual([]);
+  });
+
+  it('sets and removes place names, keeping coordinates', () => {
+    const s = placed('s', { ...berlin });
+    expect(withPlaceName(s, '  Park ').location).toEqual({ ...berlin, name: 'Park' });
+    expect(withPlaceName(withPlaceName(s, 'Park'), '').location).toEqual(berlin);
+    expect('location' in withPlaceName(placed('n', { name: 'Old' }), ' ')).toBe(false);
+    expect(withPlaceName(placed('n'), 'New').location).toEqual({ name: 'New' });
+  });
+
+  it('adds coordinates once, with a nearby name', () => {
+    const named = placed('a', { name: 'Park', ...north(100) });
+    const s = placed('s');
+    const located = withCoords(s, berlin, [named]);
+    expect(located.location).toEqual({ name: 'Park', ...berlin });
+    expect(withCoords(located, north(5000), [named])).toBe(located);
+    expect(withCoords(placed('s', { name: 'Home' }), berlin, [named]).location).toEqual({ name: 'Home', ...berlin });
+    expect(withCoords(s, north(5000), [named]).location).toEqual(north(5000));
+  });
+
+  it('suggests place names: nearest first, else most used', () => {
+    const sessions = [
+      placed('a', { name: 'Park', ...north(2000) }),
+      placed('b', { name: 'Shala', ...north(100) }),
+      placed('c', { name: 'Park', ...north(3000) }),
+      placed('d', { name: 'Beach' }),
+      placed('e', north(10)),
+    ];
+    expect(placeNames(sessions)).toEqual(['Park', 'Beach', 'Shala']);
+    expect(placeNames(sessions, berlin)).toEqual(['Shala', 'Park', 'Beach']);
+    expect(placeNames([])).toEqual([]);
+  });
+
+  it('formats coordinates and labels', () => {
+    expect(formatCoords(52.52, 13.405)).toBe('52.5200° N, 13.4050° E');
+    expect(formatCoords(-33.8688, -70.1)).toBe('33.8688° S, 70.1000° W');
+    expect(placeLabel(placed('a', { name: 'Park', ...berlin }))).toBe('Park');
+    expect(placeLabel(placed('a', berlin))).toBe('52.5200° N, 13.4050° E');
+    expect(placeLabel(placed('a'))).toBeNull();
+    expect(sessionCoords(placed('a', { lat: 1 }))).toBeNull();
+  });
+});
+
+describe('session previews', () => {
+  const ses: Session = { id: 's', date: '', note: '', videoIds: ['v1', 'v2'] };
+  const holds = [
+    hold('h4', 's', 'v2', 'x', 50),
+    hold('h1', 's', 'v1', 'x', 10),
+    hold('h3', 's', 'v2', 'x', 5),
+    hold('h2', 's', 'v1', 'x', 300),
+    hold('h5', 's', 'v2', 'x', 90),
+    hold('other', 'o', 'v1', 'x', 100),
+  ];
+
+  it('picks the captured hold nearest the middle of the session', () => {
+    // Session order: h1 h2 h3 h4 h5 → middle h3.
+    expect(sessionPreview(ses, holds, new Set(['h1', 'h2', 'h3', 'h4', 'h5']))?.id).toBe('h3');
+    expect(sessionPreview(ses, holds, new Set(['h1', 'h4', 'h5']))?.id).toBe('h4');
+    expect(sessionPreview(ses, holds, new Set(['h1', 'h2', 'h4']))?.id).toBe('h2');
+    expect(sessionPreview(ses, holds, new Set(['other']))).toBeNull();
+    expect(sessionPreview(ses, [hold('x', 's', 'v9', 'x', 1), hold('y', 's', 'v2', 'x', 1)], new Set(['x']))?.id).toBe('x');
+  });
+
+  it('falls back to the middle frame of the longest analysed video', () => {
+    expect(sessionTinyFrame(ses, { v1: { sampleCount: 100 }, v2: { sampleCount: 401 } })).toEqual({ videoId: 'v2', index: 200 });
+    expect(sessionTinyFrame(ses, { v1: { sampleCount: 10 } })).toEqual({ videoId: 'v1', index: 5 });
+    expect(sessionTinyFrame(ses, {})).toBeNull();
   });
 });

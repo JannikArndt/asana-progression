@@ -95,4 +95,9 @@ ffmpeg([
   '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-bf', '3', '-b-pyramid', 'none', '-g', '30',
   '-x264-params', 'log-level=error', '-an', `${out}h264-bframes.mp4`,
 ]);
+
+// Recording locations: iPhone keys/ilst and the udta `©xyz` box (ffmpeg writes it in mov mode only).
+const tiny = ['-f', 'lavfi', '-i', 'color=c=gray:s=64x64:d=0.5:r=10', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-x264-params', 'log-level=error'];
+ffmpeg([...tiny, '-movflags', 'use_metadata_tags', '-metadata', 'com.apple.quicktime.location.ISO6709=+52.5200+013.4050+034.000/', `${out}location-keys.mov`]);
+ffmpeg([...tiny, '-metadata', 'location=-33.8688+151.2093/', '-f', 'mov', `${out}location-udta.mov`]);
 console.log('fixtures written to', out);

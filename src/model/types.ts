@@ -69,6 +69,17 @@ export interface Session {
   templateId?: string;
   /** The user chose not to combine this session with its same-day sessions. */
   keepSeparate?: boolean;
+  /**
+   * Where it was practised: coordinates from the first video that has them (WGS 84 degrees), and a
+   * place name the user gave (suggested from named sessions nearby). Both are optional.
+   */
+  location?: SessionLocation;
+}
+
+export interface SessionLocation {
+  name?: string;
+  lat?: number;
+  lon?: number;
 }
 
 export interface ProcessingStats {

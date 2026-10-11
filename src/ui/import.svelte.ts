@@ -1,7 +1,7 @@
 import { fingerprint, openVideo, targetSize, type VideoMeta } from '../source';
 import { estimateStorage, requestPersistence, wouldExceedQuota } from '../storage';
 import { newId, PRIMARY_SERIES_ID, type Session, type Video } from '../model';
-import { dayOf, orderVideoIds, sessionOfVideo, SHORT_CLIP_S } from './state/session-data';
+import { dayOf, orderVideoIds, sessionOfVideo, SHORT_CLIP_S, withCoords } from './state/session-data';
 import { app } from './state/app.svelte';
 import { dialog } from './state/dialog.svelte';
 import { router } from './state/router.svelte';
@@ -28,25 +28,36 @@ function dateLabel(iso: string | null): string {
   return iso.slice(0, 16).replace('T', ' ');
 }
 
-/** Asks which template drives suggestions for a new session. Null = cancelled. */
+/**
+ * Asks which template drives suggestions for a new session: every template, or none. The default
+ * (first, highlighted) is none for clips under 5 min, else the Primary series (or the first template).
+ * Returns the template id, undefined for none, null when cancelled.
+ */
 async function chooseTemplate(meta: VideoMeta): Promise<string | undefined | null> {
-  const short = meta.durationS < SHORT_CLIP_S;
-  const primary = { id: 'primary', label: 'Primary series', detail: 'Suggest labels in series order.' };
-  const none = { id: 'none', label: 'None', detail: 'Single pose or freeform practice: suggest by recent use.' };
+  const templates = app.templates;
+  const preferred = templates.find((t) => t.id === PRIMARY_SERIES_ID) ?? templates[0];
+  const def = meta.durationS < SHORT_CLIP_S ? undefined : preferred;
+  const option = (id: string, label: string, detail: string, isDefault: boolean) => ({ id, label, detail, ...(isDefault ? { kind: 'primary' as const } : {}) });
+  const none = option('none', 'None', 'Single pose or freeform practice: suggest by recent use.', !def);
+  const list = templates.map((t) => option(`t:${t.id}`, t.name, 'Suggest labels in this order.', t === def));
   const choice = await dialog.ask({
     title: 'Suggestions for this session',
     message: `${meta.fileName} · ${Math.round(meta.durationS / 60)} min`,
     options: [
-      ...(short ? [{ ...none, kind: 'primary' as const }, primary] : [{ ...primary, kind: 'primary' as const }, none]),
+      ...(def ? [list[templates.indexOf(def)]!] : [none]),
+      ...list.filter((_, i) => templates[i] !== def),
+      ...(def ? [none] : []),
       { id: 'cancel', label: 'Cancel', kind: 'quiet' },
     ],
   });
   if (choice === 'cancel') return null;
-  return choice === 'primary' ? PRIMARY_SERIES_ID : undefined;
+  return choice.startsWith('t:') ? choice.slice(2) : undefined;
 }
 
 /** Import flow: probe → fingerprint → duplicate/resume dialog → session → quota check → process. */
 export async function importFiles(files: File[]): Promise<void> {
+  // A file picked right after launch: templates and sessions must be loaded for the questions below.
+  await app.whenReady();
   const db = app.db;
   importQueue.total = files.length;
   let lastVideoId: string | null = null;
@@ -130,7 +141,7 @@ export async function importFiles(files: File[]): Promise<void> {
         if (choice === 'cancel') continue;
         if (choice === 'new') asNewSession = true;
         if (choice === 'reuse') {
-          app.attachFile(existing.id, file);
+          app.attachFile(existing.id, file, meta);
           capture.request(app.holds.filter((h) => h.videoId === existing.id));
           if (await db.analyses.get(existing.id)) {
             lastVideoId = existing.id;
@@ -217,17 +228,19 @@ export async function importFiles(files: File[]): Promise<void> {
       await db.videos.put(video);
       // Re-read the session: it may have been edited, combined or deleted while the previous file processed.
       const target = newSession ?? (await db.sessions.get(joinSession!.id)) ?? (await sessionContaining(batchVideos.get(day(meta)))) ?? null;
-      const session: Session = target
+      let session: Session = target
         ? { ...($state.snapshot(target) as Session) }
         : { id: newId('ses'), date: meta.recordedAt ?? new Date().toISOString(), note: '', videoIds: [], ...(joinSession?.templateId ? { templateId: joinSession.templateId } : {}) };
       session.videoIds = orderVideoIds([...session.videoIds.filter((v) => v !== videoId), videoId], [...app.videos, video]);
+      // The first video with coordinates places the session (named after a session nearby, if any).
+      if (meta.location) session = withCoords(session, meta.location, app.sessions);
       await db.sessions.put(session);
       if (day(meta)) {
         batchSessions.set(day(meta), session);
         batchVideos.set(day(meta), videoId);
       }
     }
-    app.attachFile(videoId, file);
+    app.attachFile(videoId, file, meta);
     await app.refresh();
     const running = pipeline.run({ file, videoId, fingerprint: fp, params, skipNonReference: skip, resume });
     router.go({ name: 'process' });
