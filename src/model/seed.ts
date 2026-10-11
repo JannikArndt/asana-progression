@@ -6,6 +6,8 @@ import type { Asana, PostureClass, SequenceTemplate, Side, TemplateEntry } from 
  */
 interface SeedRow {
   name: string;
+  /** Explicit id when the name changed after holds referenced the slug of an older name. */
+  id?: string;
   sided?: boolean;
   posture?: PostureClass;
 }
@@ -67,7 +69,9 @@ const GROUPS: Array<{ group: string; rows: SeedRow[] }> = [
       { name: 'Upavistha Konasana A', posture: 'seated' },
       { name: 'Upavistha Konasana B', posture: 'seated' },
       { name: 'Supta Konasana', posture: 'inverted' },
-      { name: 'Supta Padangusthasana', sided: true, posture: 'lying' },
+      // Leg up (A) and leg to the side (B); A keeps the id from when it was one asana (v1–3).
+      { name: 'Supta Padangusthasana A', id: 'supta-padangusthasana', sided: true, posture: 'lying' },
+      { name: 'Supta Padangusthasana B', sided: true, posture: 'lying' },
       { name: 'Ubhaya Padangusthasana', posture: 'seated' },
       { name: 'Urdhva Mukha Paschimottanasana', posture: 'seated' },
       { name: 'Setu Bandhasana', posture: 'lying' },
@@ -109,7 +113,7 @@ export function asanaId(name: string): string {
 }
 
 export const SEED_ASANAS: readonly Asana[] = GROUPS.flatMap(({ group, rows }) =>
-  rows.map((r) => ({ id: asanaId(r.name), name: r.name, sided: r.sided === true, group, ...(r.posture ? { posture: r.posture } : {}) })),
+  rows.map((r) => ({ id: r.id ?? asanaId(r.name), name: r.name, sided: r.sided === true, group, ...(r.posture ? { posture: r.posture } : {}) })),
 );
 
 /** Downward dog: held for 5 breaths once per sun salutation. */
@@ -122,8 +126,14 @@ export const PRIMARY_REPS: Readonly<Record<string, number>> = {
   'urdhva-dhanurasana': 3,
 };
 
+/** Supta Padangusthasana A (leg up) keeps the id of the former single asana; B (leg to the side) is new in v4. */
+export const SUPTA_PADANGUSTHASANA_ID = 'supta-padangusthasana';
+export const SUPTA_PADANGUSTHASANA_B_ID = 'supta-padangusthasana-b';
+/** Name of Supta Padangusthasana A before v4; a stored asana with exactly this name is renamed. */
+export const SUPTA_PADANGUSTHASANA_OLD_NAME = 'Supta Padangusthasana';
+
 /** Seed asanas added after the first catalog version, by version. Deleted asanas are not re-added. */
-export const SEED_ADDED: Readonly<Record<number, readonly string[]>> = { 2: [DOWNWARD_DOG_ID] };
+export const SEED_ADDED: Readonly<Record<number, readonly string[]>> = { 2: [DOWNWARD_DOG_ID], 4: [SUPTA_PADANGUSTHASANA_B_ID] };
 
 /** Catalog upgrade (v2) for an existing Primary series template: prepends the sun salutations once. */
 export function withSunSalutations(t: SequenceTemplate): SequenceTemplate {
@@ -151,13 +161,29 @@ export function withReps(t: SequenceTemplate): SequenceTemplate {
   return { ...t, entries };
 }
 
+/**
+ * Catalog upgrade (v4), for every template: Supta Padangusthasana R directly followed by L becomes
+ * A R, B R, A L, B L (other fields of the entries are kept). Templates that already contain B, or
+ * no such R/L pair, are returned unchanged.
+ */
+export function withSuptaPadangusthasanaB(t: SequenceTemplate): SequenceTemplate {
+  if (t.entries.some((e) => e.asanaId === SUPTA_PADANGUSTHASANA_B_ID)) return t;
+  const i = t.entries.findIndex(
+    (e, k) => e.asanaId === SUPTA_PADANGUSTHASANA_ID && e.side === 'R' && t.entries[k + 1]?.asanaId === SUPTA_PADANGUSTHASANA_ID && t.entries[k + 1]?.side === 'L',
+  );
+  if (i < 0) return t;
+  const [r, l] = [t.entries[i]!, t.entries[i + 1]!];
+  const b = (side: Side): TemplateEntry => ({ asanaId: SUPTA_PADANGUSTHASANA_B_ID, side });
+  return { ...t, entries: [...t.entries.slice(0, i), { ...r }, b('R'), { ...l }, b('L'), ...t.entries.slice(i + 2)] };
+}
+
 export const PRIMARY_SERIES_ID = 'primary-series';
 
 /**
  * Default "Primary series" template: catalog order, sided asanas right then left. Exceptions to
- * plain catalog order: Utthita Hasta Padangusthasana
- * runs A/B/C right, then A/B/C left, and Paschimottanasana (A) appears again after Urdhva
- * Dhanurasana as the closing forward bend. Repeated holds are one entry with `reps`
+ * plain catalog order: Utthita Hasta Padangusthasana runs A/B/C right, then A/B/C left (Supta
+ * Padangusthasana likewise A/B right, then A/B left), and Paschimottanasana (A) appears again
+ * after Urdhva Dhanurasana as the closing forward bend. Repeated holds are one entry with `reps`
  * (`PRIMARY_REPS`: sun-salutation down dogs, Navasana, Urdhva Dhanurasana).
  */
 export function primarySeriesTemplate(asanas: readonly Asana[] = SEED_ASANAS): SequenceTemplate {
@@ -169,12 +195,13 @@ export function primarySeriesTemplate(asanas: readonly Asana[] = SEED_ASANAS): S
     if (a.sided) entries.push({ asanaId: id, side: 'R' }, { asanaId: id, side: 'L' });
     else entries.push({ asanaId: id });
   };
-  const uhp = ['a', 'b', 'c'].map((v) => `utthita-hasta-padangusthasana-${v}`);
+  // Variants performed together on one side before switching sides.
+  const runs = [['a', 'b', 'c'].map((v) => `utthita-hasta-padangusthasana-${v}`), [SUPTA_PADANGUSTHASANA_ID, SUPTA_PADANGUSTHASANA_B_ID]];
   for (const a of asanas) {
-    if (uhp.includes(a.id)) {
-      if (a.id === uhp[0]) {
-        for (const side of ['R', 'L'] as const) for (const id of uhp) entries.push({ asanaId: id, side });
-      }
+    const run = runs.find((r) => r.includes(a.id));
+    if (run) {
+      const present = run.filter((id) => byId.has(id));
+      if (a.id === present[0]) for (const side of ['R', 'L'] as const) for (const id of present) entries.push({ asanaId: id, side });
       continue;
     }
     add(a.id);

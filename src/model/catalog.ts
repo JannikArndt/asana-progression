@@ -1,5 +1,5 @@
 import { asanaId, SEED_ASANAS } from './seed';
-import type { Asana, Hold, SequenceTemplate } from './types';
+import type { Asana, AsanaFamily, Hold, SequenceTemplate } from './types';
 
 /** Catalog order: seed groups first (in seed order), then other groups and ungrouped; seed order, then name. */
 export function sortCatalog(asanas: Asana[]): Asana[] {
@@ -57,6 +57,49 @@ export function moveItem<T>(list: T[], from: number, to: number): T[] {
   const out = [...list];
   const [x] = out.splice(from, 1);
   out.splice(to, 0, x!);
+  return out;
+}
+
+/** Lettered variant of a name: "Janu Sirsasana A" → { base: "Janu Sirsasana", letter: "A" }. */
+export function variantOf(name: string): { base: string; letter: string } | null {
+  const m = /^(.*\S)\s+([A-F])$/.exec(name.trim());
+  return m ? { base: m[1]!, letter: m[2]! } : null;
+}
+
+/** Letter of a member inside its family, or null for a single-member entry. */
+export function familyLetter(family: AsanaFamily, asana: Asana): string | null {
+  return family.members.length > 1 ? (variantOf(asana.name)?.letter ?? null) : null;
+}
+
+/**
+ * Groups lettered variants with the same base name (case-insensitive) and group into families
+ * (≥ 2 members); everything else is a single-member entry. Order follows each family's first
+ * member in `asanas` (pass the sorted catalog).
+ */
+export function asanaFamilies(asanas: readonly Asana[]): AsanaFamily[] {
+  const keyOf = (a: Asana): string | null => {
+    const v = variantOf(a.name);
+    return v ? `${a.group ?? ''}\u0000${v.base.toLowerCase()}` : null;
+  };
+  const byKey = new Map<string, Asana[]>();
+  for (const a of asanas) {
+    const k = keyOf(a);
+    if (k !== null) byKey.set(k, [...(byKey.get(k) ?? []), a]);
+  }
+  const out: AsanaFamily[] = [];
+  const done = new Set<string>();
+  for (const a of asanas) {
+    const k = keyOf(a);
+    const members = k === null ? [] : byKey.get(k)!;
+    if (members.length < 2) {
+      out.push({ base: a.name, group: a.group, members: [a] });
+      continue;
+    }
+    if (done.has(k!)) continue;
+    done.add(k!);
+    const letter = (x: Asana) => variantOf(x.name)!.letter;
+    out.push({ base: variantOf(a.name)!.base, group: a.group, members: [...members].sort((x, y) => letter(x).localeCompare(letter(y))) });
+  }
   return out;
 }
 

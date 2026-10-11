@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { asanaNameError, asanaUsage, copyName, entriesFor, moveItem, sortCatalog, uniqueAsanaId } from './catalog';
+import { asanaFamilies, asanaNameError, asanaUsage, copyName, entriesFor, familyLetter, moveItem, sortCatalog, uniqueAsanaId, variantOf } from './catalog';
 import { SEED_ASANAS } from './seed';
 import type { Asana, SequenceTemplate } from './types';
 
@@ -47,5 +47,53 @@ describe('catalog helpers', () => {
     expect(moveItem(l, 1, 1)).toBe(l);
     expect(copyName('P', [])).toBe('P (copy)');
     expect(copyName('P', ['P (copy)', 'P (copy 2)'])).toBe('P (copy 3)');
+  });
+
+  it('reads lettered variants from names', () => {
+    expect(variantOf('Janu Sirsasana A')).toEqual({ base: 'Janu Sirsasana', letter: 'A' });
+    expect(variantOf(' Supta Padangusthasana B ')).toEqual({ base: 'Supta Padangusthasana', letter: 'B' });
+    expect(variantOf('Marichyasana F')).toEqual({ base: 'Marichyasana', letter: 'F' });
+    expect(variantOf('Navasana')).toBeNull();
+    expect(variantOf('Foo G')).toBeNull();
+    expect(variantOf('Foo a')).toBeNull();
+    expect(variantOf('FooA')).toBeNull();
+    expect(variantOf('A')).toBeNull();
+  });
+
+  it('groups lettered variants with the same base and group into families', () => {
+    const list = [
+      a('n', 'Navasana', 'Seated'),
+      a('jb', 'Janu Sirsasana B', 'Seated', true),
+      a('ja', 'Janu Sirsasana A', 'Seated', true),
+      a('k', 'Kurmasana', 'Seated'),
+      a('jc', 'janu sirsasana C', 'Seated', true),
+      a('lone', 'Lone A', 'Seated'),
+      a('xa', 'Split A', 'Standing'),
+      a('xb', 'Split B', 'Seated'),
+      a('fa', 'Foo A'),
+      a('fb', 'Foo B'),
+    ];
+    const fams = asanaFamilies(list);
+    expect(fams.map((f) => [f.base, f.group, f.members.map((m) => m.id)])).toEqual([
+      ['Navasana', 'Seated', ['n']],
+      ['Janu Sirsasana', 'Seated', ['ja', 'jb', 'jc']],
+      ['Kurmasana', 'Seated', ['k']],
+      ['Lone A', 'Seated', ['lone']],
+      ['Split A', 'Standing', ['xa']],
+      ['Split B', 'Seated', ['xb']],
+      ['Foo', undefined, ['fa', 'fb']],
+    ]);
+    expect(familyLetter(fams[1]!, list[1]!)).toBe('B');
+    expect(familyLetter(fams[0]!, list[0]!)).toBeNull();
+    expect(familyLetter(fams[3]!, list[5]!)).toBeNull();
+  });
+
+  it('makes Supta Padangusthasana A/B a family in the seed catalog', () => {
+    const fams = asanaFamilies(sortCatalog([...SEED_ASANAS]));
+    const supta = fams.find((f) => f.base === 'Supta Padangusthasana');
+    expect(supta?.members.map((m) => m.id)).toEqual(['supta-padangusthasana', 'supta-padangusthasana-b']);
+    expect(fams.find((f) => f.base === 'Utthita Hasta Padangusthasana')?.members.length).toBe(3);
+    expect(fams.find((f) => f.base === 'Sirsasana')?.group).toBe('Finishing');
+    expect(fams.reduce((n, f) => n + f.members.length, 0)).toBe(SEED_ASANAS.length);
   });
 });
