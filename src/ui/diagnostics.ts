@@ -25,6 +25,17 @@ export function assessHandover(m: VideoMeta): HandoverAssessment {
   return { verdict, reasons };
 }
 
+/** Source metadata for reports and exports that get shared: the recording location only says whether there is one. */
+export function withoutLocation(m: VideoMeta): Omit<VideoMeta, 'location'> & { location: 'present' | null } {
+  return { ...m, location: m.location ? 'present' : null };
+}
+
+/** A stored video for a shared report: its metadata snapshot without the coordinates. */
+export function videoForReport<T extends { meta?: Record<string, unknown> }>(v: T): T {
+  if (!v.meta || !v.meta['location']) return v;
+  return { ...v, meta: { ...v.meta, location: 'present' } };
+}
+
 export interface DeviceInfo {
   userAgent: string;
   hardwareConcurrency: number | null;

@@ -1,3 +1,9 @@
+<script lang="ts" module>
+  import type { RepFilter as CarriedReps, SideFilter as CarriedSide } from '../../progression';
+  /** Side and rep filters carried over when switching between the letters of a family. */
+  let carried: { side: CarriedSide; reps: CarriedReps } | null = null;
+</script>
+
 <script lang="ts">
   import LazyAsset from '../components/LazyAsset.svelte';
   import TinyFrame from '../components/TinyFrame.svelte';
@@ -10,7 +16,7 @@
   import { router } from '../state/router.svelte';
   import { capture } from '../state/capture.svelte';
   import { chooseBestFrame, reattachVideo, setManualCrop } from '../state/hold-actions';
-  import type { Video } from '../../model';
+  import { asanaFamilies, familyLetter, type Video } from '../../model';
   import { formatDay } from '../format';
 
   interface Props {
@@ -39,9 +45,11 @@
     }
   });
 
-  let side = $state<SideFilter>('both');
+  const kept = carried;
+  carried = null;
+  let side = $state<SideFilter>(kept?.side ?? 'both');
   /** All reps, or only the first / last of each run (e.g. 1st vs 5th Navasana across days). */
-  let reps = $state<RepFilter>('all');
+  let reps = $state<RepFilter>(kept?.reps ?? 'all');
   let viewerIndex = $state<number | null>(null);
   let flipbook = $state(false);
   let editing = $state<ProgressionItem | null>(null);
@@ -68,6 +76,21 @@
   }
 
   const asana = $derived(app.asanas.find((a) => a.id === id));
+  /** Lettered variants of this asana (A | B | …); each letter is its own progression. */
+  const family = $derived(asanaFamilies(app.asanas).find((f) => f.members.some((m) => m.id === id)));
+  const letters = $derived(family && family.members.length > 1 ? family : null);
+  const memberCounts = $derived.by(() => {
+    const m = new Map<string, number>();
+    for (const h of app.holds) m.set(h.asanaId, (m.get(h.asanaId) ?? 0) + 1);
+    return m;
+  });
+
+  function chooseLetter(memberId: string) {
+    if (memberId === id) return;
+    const target = app.asanas.find((a) => a.id === memberId);
+    carried = { side: target?.sided ? side : 'both', reps };
+    router.go({ name: 'asana', id: memberId }, true);
+  }
   /** Oldest first (viewer and flipbook order). */
   const items = $derived(progressionItems(id, app.holds, app.sessions, app.assets, side, reps));
   const repeated = $derived(hasReps(id, app.holds, app.sessions));
@@ -175,9 +198,19 @@
   </header>
   {#if asana}
     <div class="title">
-      <h2>{asana.name}</h2>
+      <h2>{letters ? letters.base : asana.name}</h2>
       <p class="muted small">{asana.group ?? ''} · {items.length} {items.length === 1 ? 'hold' : 'holds'}</p>
     </div>
+    {#if letters}
+      <div class="segmented letters" role="radiogroup" aria-label="Variant">
+        {#each letters.members as m (m.id)}
+          {@const n = memberCounts.get(m.id) ?? 0}
+          <button type="button" role="radio" aria-checked={m.id === id} aria-label={m.name} class:on={m.id === id} onclick={() => chooseLetter(m.id)}>
+            {familyLetter(letters, m)}{#if n}<span class="count tabular">{n}</span>{/if}
+          </button>
+        {/each}
+      </div>
+    {/if}
     <div class="bar">
       {#if asana.sided}
         <div class="segmented" role="radiogroup" aria-label="Side">
@@ -408,6 +441,27 @@
   .segmented button.on {
     background: var(--color-surface);
     color: var(--color-text);
+  }
+
+  /* Letters of a family (A | B | …): directly under the title, each letter its own progression. */
+  .segmented.letters {
+    flex: none;
+    margin-top: calc(-1 * var(--space-2));
+  }
+
+  .segmented.letters button {
+    min-height: var(--touch);
+  }
+
+  .count {
+    margin-left: var(--space-1);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-regular);
+    color: var(--color-text-3);
+  }
+
+  .on .count {
+    color: var(--color-text-2);
   }
 
   .feed {

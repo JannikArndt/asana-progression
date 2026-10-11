@@ -1,6 +1,7 @@
 /** Pure helpers joining sessions, videos, analyses and holds (tested; no I/O). */
 import type { HistoryEntry, ReviewItem } from '../../labeling';
-import type { Analysis, Hold, ReviewCandidate, Session, Video } from '../../model';
+import type { Analysis, Hold, ReviewCandidate, Session, SessionLocation, Video } from '../../model';
+import type { GeoLocation } from '../../source';
 
 export function dayOf(iso: string | null | undefined): string {
   return iso ? iso.slice(0, 10) : '';
@@ -120,6 +121,42 @@ export function asanaStats(sessions: Session[], holds: Hold[], captured: Readonl
   return out;
 }
 
+export interface FamilyStats extends AsanaStats {
+  /** Holds per member asana id (members without holds are missing). */
+  perMember: Map<string, number>;
+}
+
+/**
+ * `asanaStats` across the members of each family (lettered variants listed as one row), keyed by
+ * the first member's id. `latest.asanaId` is the member with the newest hold.
+ */
+export function familyStats(
+  families: ReadonlyArray<{ members: ReadonlyArray<{ id: string }> }>,
+  sessions: Session[],
+  holds: Hold[],
+  captured: ReadonlySet<string> = new Set(),
+): Map<string, FamilyStats> {
+  const keyOf = new Map<string, string>();
+  for (const f of families) for (const m of f.members) keyOf.set(m.id, f.members[0]!.id);
+  const byId = new Map(holds.map((h) => [h.id, h]));
+  const perAsana = asanaStats(sessions, holds, captured);
+  const joined = asanaStats(
+    sessions,
+    holds.flatMap((h) => (keyOf.has(h.asanaId) ? [{ ...h, asanaId: keyOf.get(h.asanaId)! }] : [])),
+    captured,
+  );
+  const original = (h: Hold | null) => (h ? byId.get(h.id)! : null);
+  const out = new Map<string, FamilyStats>();
+  for (const f of families) {
+    const key = f.members[0]!.id;
+    const st = joined.get(key);
+    if (!st) continue;
+    const perMember = new Map(f.members.flatMap((m) => (perAsana.has(m.id) ? [[m.id, perAsana.get(m.id)!.count] as const] : [])));
+    out.set(key, { ...st, latest: original(st.latest), preview: original(st.preview), perMember });
+  }
+  return out;
+}
+
 export interface SessionSummary {
   durationS: number;
   labeled: number;
@@ -127,10 +164,10 @@ export interface SessionSummary {
   dismissed: number;
 }
 
+/** Length (`sessionSpanS`) and candidate counts of a session. */
 export function summarizeSession(session: Session, videos: Video[], analyses: Record<string, { candidates: ReviewCandidate[] } | undefined>): SessionSummary {
-  const out: SessionSummary = { durationS: 0, labeled: 0, open: 0, dismissed: 0 };
+  const out: SessionSummary = { durationS: sessionSpanS(session, videos), labeled: 0, open: 0, dismissed: 0 };
   for (const id of session.videoIds) {
-    out.durationS += videos.find((v) => v.id === id)?.durationS ?? 0;
     for (const c of analyses[id]?.candidates ?? []) out[c.status === 'labeled' ? 'labeled' : c.status === 'dismissed' ? 'dismissed' : 'open']++;
   }
   return out;
@@ -190,8 +227,9 @@ export function combineSessions(
   const missing = [...ids].filter((id) => !ordered.includes(id));
   const otherIds = new Set(others.map((s) => s.id));
   const notes = [target.note, ...others.map((s) => s.note)].filter(Boolean);
+  const location = sessionCoords(target) ? target.location : (others.find((o) => sessionCoords(o))?.location ?? target.location);
   return {
-    session: { ...target, videoIds: [...ordered, ...missing], note: [...new Set(notes)].join(' · ') },
+    session: { ...target, videoIds: [...ordered, ...missing], note: [...new Set(notes)].join(' · '), ...(location ? { location } : {}) },
     holds: holds.filter((h) => otherIds.has(h.sessionId)).map((h) => ({ ...h, sessionId: target.id })),
     deleteIds: [...otherIds],
   };
@@ -244,4 +282,171 @@ export function coverageGaps(spans: ReadonlyArray<{ startS: number; endS: number
   });
   if (durationS - covered >= minS) out.push({ startS: covered, endS: durationS, beforeIndex: spans.length });
   return out;
+}
+
+// ----- session length, place and preview -----
+
+/** Longest plausible pause between the clips of one practice (beyond it, a recording time is wrong). */
+export const SPAN_MAX_EXTRA_S = 4 * 3600;
+
+/**
+ * Length of a session from the start of its first video to the end of its last one (pauses
+ * between clips count). Falls back to the sum of the video durations when a recording time is
+ * missing or implausible (an export time or file date: the span is shorter than the videos, or
+ * more than `SPAN_MAX_EXTRA_S` longer).
+ */
+export function sessionSpanS(session: Session, videos: Video[]): number {
+  const byId = new Map(videos.map((v) => [v.id, v]));
+  const list = session.videoIds.map((id) => byId.get(id)).filter((v): v is Video => !!v);
+  const sum = list.reduce((s, v) => s + v.durationS, 0);
+  if (list.length < 2) return sum;
+  let start = Infinity;
+  let end = -Infinity;
+  for (const v of list) {
+    const t = v.recordedAt ? Date.parse(v.recordedAt) : NaN;
+    if (!Number.isFinite(t)) return sum;
+    start = Math.min(start, t / 1000);
+    end = Math.max(end, t / 1000 + v.durationS);
+  }
+  const span = end - start;
+  return span >= sum - 1 && span <= sum + SPAN_MAX_EXTRA_S ? span : sum;
+}
+
+export interface LatLon {
+  lat: number;
+  lon: number;
+}
+
+const isNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+
+/**
+ * Recording location from a video's metadata snapshot: `undefined` when it was never read (videos
+ * imported before locations were), `null` when the file has none.
+ */
+export function videoLocation(video: Pick<Video, 'meta'>): GeoLocation | null | undefined {
+  const meta = video.meta;
+  if (!meta || !('location' in meta)) return undefined;
+  const l = meta['location'] as Partial<Record<keyof GeoLocation, unknown>> | null;
+  if (!l || typeof l !== 'object' || !isNum(l.lat) || !isNum(l.lon)) return null;
+  return { lat: l.lat, lon: l.lon, altM: isNum(l.altM) ? l.altM : null };
+}
+
+/** Coordinates of a session, null when it has none. */
+export function sessionCoords(session: Session): LatLon | null {
+  const l = session.location;
+  return l && isNum(l.lat) && isNum(l.lon) ? { lat: l.lat, lon: l.lon } : null;
+}
+
+/** Great-circle distance in metres (haversine, mean earth radius). */
+export function distanceM(a: LatLon, b: LatLon): number {
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLon = (b.lon - a.lon) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6_371_000 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/** Sessions closer than this were practised at the same place (a park, a shala; GPS indoors drifts). */
+export const PLACE_RADIUS_M = 300;
+
+/** Name of the nearest session with a name within `radiusM`, if any. */
+export function placeNameNear(sessions: Session[], lat: number, lon: number, radiusM = PLACE_RADIUS_M): string | undefined {
+  let best: { name: string; d: number } | undefined;
+  for (const s of sessions) {
+    const c = sessionCoords(s);
+    const name = s.location?.name;
+    if (!c || !name) continue;
+    const d = distanceM(c, { lat, lon });
+    if (d <= radiusM && (!best || d < best.d)) best = { name, d };
+  }
+  return best?.name;
+}
+
+/** Other sessions within `radiusM` of `session` that have coordinates but no name (a name given here applies to them too). */
+export function unnamedNear(sessions: Session[], session: Session, radiusM = PLACE_RADIUS_M): Session[] {
+  const c = sessionCoords(session);
+  if (!c) return [];
+  return sessions.filter((s) => {
+    const o = sessionCoords(s);
+    return s.id !== session.id && !s.location?.name && !!o && distanceM(c, o) <= radiusM;
+  });
+}
+
+/** The session with this place name (trimmed; empty removes the name, coordinates stay). */
+export function withPlaceName(session: Session, name: string): Session {
+  const { location, ...rest } = session;
+  const { name: _, ...coords } = location ?? {};
+  const n = name.trim();
+  const next: SessionLocation = n ? { ...coords, name: n } : coords;
+  return Object.keys(next).length ? { ...rest, location: next } : rest;
+}
+
+/**
+ * The session with coordinates from one of its videos, when it has none yet; without a name it
+ * also gets the name of the nearest named session. Returns the same object when nothing changes.
+ */
+export function withCoords(session: Session, at: LatLon, sessions: Session[]): Session {
+  if (sessionCoords(session)) return session;
+  const name = session.location?.name ?? placeNameNear(sessions, at.lat, at.lon);
+  return { ...session, location: { ...(name ? { name } : {}), lat: at.lat, lon: at.lon } };
+}
+
+/** Distinct place names for suggestions: nearest first when coordinates are given, else most used first. */
+export function placeNames(sessions: Session[], near?: LatLon | null): string[] {
+  const stats = new Map<string, { count: number; d: number }>();
+  for (const s of sessions) {
+    const name = s.location?.name;
+    if (!name) continue;
+    const c = sessionCoords(s);
+    const cur = stats.get(name) ?? { count: 0, d: Infinity };
+    stats.set(name, { count: cur.count + 1, d: Math.min(cur.d, near && c ? distanceM(near, c) : Infinity) });
+  }
+  const byDistance = (a: { d: number }, b: { d: number }) => (a.d === b.d ? 0 : a.d - b.d);
+  return [...stats]
+    .sort(([an, a], [bn, b]) => (near ? byDistance(a, b) : 0) || b.count - a.count || an.localeCompare(bn))
+    .map(([name]) => name);
+}
+
+/** "52.5200° N, 13.4050° E" */
+export function formatCoords(lat: number, lon: number): string {
+  return `${Math.abs(lat).toFixed(4)}° ${lat < 0 ? 'S' : 'N'}, ${Math.abs(lon).toFixed(4)}° ${lon < 0 ? 'W' : 'E'}`;
+}
+
+/** How a session's place reads: its name, else its coordinates; null when unknown. */
+export function placeLabel(session: Session): string | null {
+  if (session.location?.name) return session.location.name;
+  const c = sessionCoords(session);
+  return c ? formatCoords(c.lat, c.lon) : null;
+}
+
+/**
+ * The session's picture in the list: of its holds with a captured image (`captured`), the one
+ * nearest the middle of the session (session order: video order, then best frame). Null if none.
+ */
+export function sessionPreview(session: Session, holds: Hold[], captured: ReadonlySet<string>): Hold | null {
+  const order = new Map(session.videoIds.map((id, i) => [id, i]));
+  const list = holds
+    .filter((h) => h.sessionId === session.id)
+    .sort((a, b) => (order.get(a.videoId) ?? order.size) - (order.get(b.videoId) ?? order.size) || a.bestS - b.bestS);
+  const middle = (list.length - 1) / 2;
+  let best: Hold | null = null;
+  let bestD = Infinity;
+  list.forEach((h, i) => {
+    const d = Math.abs(i - middle);
+    if (captured.has(h.id) && d < bestD) {
+      best = h;
+      bestD = d;
+    }
+  });
+  return best;
+}
+
+/** Fallback picture without captured images: the analysis frame in the middle of the session's longest analysed video. */
+export function sessionTinyFrame(session: Session, summaries: Record<string, { sampleCount: number } | undefined>): { videoId: string; index: number } | null {
+  let best: { videoId: string; count: number } | null = null;
+  for (const id of session.videoIds) {
+    const n = summaries[id]?.sampleCount ?? 0;
+    if (n > 0 && (!best || n > best.count)) best = { videoId: id, count: n };
+  }
+  return best ? { videoId: best.videoId, index: Math.floor(best.count / 2) } : null;
 }

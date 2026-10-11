@@ -1,7 +1,7 @@
 <script lang="ts">
   import Sheet from './Sheet.svelte';
   import { searchAsanas, nextSide, type Label, type Suggestion } from '../../labeling';
-  import type { Asana, SequenceTemplate } from '../../model';
+  import { asanaFamilies, familyLetter, type Asana, type SequenceTemplate } from '../../model';
 
   interface Props {
     catalog: Asana[];
@@ -19,6 +19,8 @@
   let query = $state('');
   const byId = $derived(new Map(catalog.map((a) => [a.id, a])));
   const results = $derived(searchAsanas(catalog, query));
+  /** Lettered variants among the results read as one asana with letters (like R/L). */
+  const families = $derived(asanaFamilies(results));
   const suggestedEntries = $derived(new Set(suggestions.map((s) => s.templateEntryIndex)));
   const nextOnly = $derived(next.filter((l) => !suggestedEntries.has(l.templateEntryIndex)));
 
@@ -30,6 +32,21 @@
     onpick({ asanaId: a.id, side });
   }
 </script>
+
+{#snippet sides(a: Asana, text: string)}
+  <span class="row static">{text}</span>
+  <span class="sides">
+    {#each ['R', 'L'] as const as side (side)}
+      <button
+        class="side"
+        class:suggested={nextSide(a, sessionLabels) === side}
+        type="button"
+        aria-label="{a.name} {side === 'R' ? 'right' : 'left'}"
+        onclick={() => pick(a, side)}>{side}</button
+      >
+    {/each}
+  </span>
+{/snippet}
 
 <Sheet title="Label" {onclose} fill>
   <input class="search" type="search" placeholder="Search asanas" bind:value={query} autocomplete="off" autocapitalize="off" spellcheck="false" />
@@ -55,25 +72,28 @@
   {/if}
 
   <ul class="rows">
-    {#each results as a (a.id)}
-      <li class="row-wrap">
-        {#if a.sided}
-          <span class="row static">{a.name}</span>
-          <span class="sides">
-            {#each ['R', 'L'] as const as side (side)}
-              <button
-                class="side"
-                class:suggested={nextSide(a, sessionLabels) === side}
-                type="button"
-                aria-label="{a.name} {side === 'R' ? 'right' : 'left'}"
-                onclick={() => pick(a, side)}>{side}</button
-              >
-            {/each}
-          </span>
-        {:else}
-          <button class="row" type="button" onclick={() => pick(a, null)}>{a.name}</button>
-        {/if}
-      </li>
+    {#each families as f (f.members[0]!.id)}
+      {#if f.members.length > 1}
+        <li class="row-wrap family"><span class="row static">{f.base}</span></li>
+        {#each f.members as a (a.id)}
+          <li class="row-wrap member">
+            {#if a.sided}
+              {@render sides(a, familyLetter(f, a) ?? a.name)}
+            {:else}
+              <button class="row" type="button" aria-label={a.name} onclick={() => pick(a, null)}>{familyLetter(f, a)}</button>
+            {/if}
+          </li>
+        {/each}
+      {:else}
+        {@const a = f.members[0]!}
+        <li class="row-wrap">
+          {#if a.sided}
+            {@render sides(a, a.name)}
+          {:else}
+            <button class="row" type="button" onclick={() => pick(a, null)}>{a.name}</button>
+          {/if}
+        </li>
+      {/if}
     {:else}
       <li class="muted empty">No asana matches “{query}”.</li>
     {/each}
@@ -137,6 +157,19 @@
   .static {
     display: flex;
     align-items: center;
+  }
+
+  /* A family: the base name, then one indented row per letter (no divider in between). */
+  .rows > li.family {
+    border-bottom: 0;
+  }
+
+  .member {
+    padding-left: var(--space-5);
+  }
+
+  .member .row {
+    font-weight: var(--weight-medium);
   }
 
   .sides {

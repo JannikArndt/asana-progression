@@ -27,6 +27,18 @@ export interface Asana {
   posture?: PostureClass;
 }
 
+/**
+ * Lettered variants of one asana shown together ("Supta Padangusthasana" A | B), derived from the
+ * names (`asanaFamilies`, never stored). Members stay separate asanas: A is only compared with A.
+ */
+export interface AsanaFamily {
+  /** Shared name without the letter; the asana's own name for a single-member entry. */
+  base: string;
+  group: string | undefined;
+  /** Sorted by letter; one asana for a plain (or lone lettered) asana. */
+  members: Asana[];
+}
+
 /** Suggestion data only. */
 /**
  * One step of a sequence. `reps` = how many holds in a row are usual (default 1, e.g. 5 × Navasana);
@@ -69,6 +81,17 @@ export interface Session {
   templateId?: string;
   /** The user chose not to combine this session with its same-day sessions. */
   keepSeparate?: boolean;
+  /**
+   * Where it was practised: coordinates from the first video that has them (WGS 84 degrees), and a
+   * place name the user gave (suggested from named sessions nearby). Both are optional.
+   */
+  location?: SessionLocation;
+}
+
+export interface SessionLocation {
+  name?: string;
+  lat?: number;
+  lon?: number;
 }
 
 export interface ProcessingStats {

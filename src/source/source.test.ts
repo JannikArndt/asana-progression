@@ -41,6 +41,7 @@ describe('openVideo (iPhone-like HEVC Main 10 HLG, rotated)', () => {
     expect(m.mvhdCreationTime).toBe('2024-06-01T10:00:00.000Z');
     expect(m.make).toBe('Apple');
     expect(m.model).toBe('iPhone 15 Pro');
+    expect(m.location).toBeNull();
     expect(m.fileName).toBe('hevc-hlg-rot90.mov');
     expect(m.mimeType).toMatch(/^video\/quicktime; codecs="h(vc|ev)1/);
     const support = await src.decoderSupport();
@@ -63,6 +64,15 @@ describe('openVideo (iPhone-like HEVC Main 10 HLG, rotated)', () => {
     // ffmpeg writes no creation time by default → file.lastModified
     expect(h264.meta.recordedAtSource === 'mvhd' || h264.meta.recordedAtSource === 'file').toBe(true);
     h264.close();
+  });
+
+  it('reads the recording location (QuickTime keys and the udta ©xyz box)', async () => {
+    const keys = await openVideo(fixture('location-keys.mov'));
+    expect(keys.meta.location).toEqual({ lat: 52.52, lon: 13.405, altM: 34 });
+    keys.close();
+    const udta = await openVideo(fixture('location-udta.mov'));
+    expect(udta.meta.location).toEqual({ lat: -33.8688, lon: 151.2093, altM: null });
+    udta.close();
   });
 
   it('rejects files without video', async () => {

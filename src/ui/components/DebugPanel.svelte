@@ -9,8 +9,9 @@
   import { invalidateSamples, sampleReader } from '../state/samples';
   import { pipeline } from '../pipeline/controller.svelte';
   import { capture, deleteAssets } from '../state/capture.svelte';
-  import { assessHandover, copyText, deviceInfo, formatBytes, shareOrDownload } from '../diagnostics';
+  import { assessHandover, copyText, deviceInfo, formatBytes, shareOrDownload, withoutLocation } from '../diagnostics';
   import { formatDuration } from './timeline';
+  import { formatCoords } from '../state/session-data';
 
   interface Props {
     video: Video;
@@ -84,7 +85,7 @@
         analysis.params,
         { width: analysis.frameWidth, height: analysis.frameHeight },
         { frame: (i) => reader.read(i) },
-        { video: { ...video, meta: undefined }, source: meta ?? null, stats, labels },
+        { video: { ...video, meta: undefined }, source: meta ? withoutLocation(meta) : null, stats, labels },
       );
       const name = `${video.fileName.replace(/\.[^.]+$/, '')}-analysis.json`;
       await shareOrDownload(name, new Blob([JSON.stringify(x)], { type: 'application/json' }));
@@ -131,7 +132,7 @@
       app: { version: __APP_VERSION__, builtAt: __BUILT_AT__ },
       device: deviceInfo(),
       video: { ...video, meta: undefined },
-      source: meta ?? null,
+      source: meta ? withoutLocation(meta) : null,
       handover,
       decoderSupport: support,
       processing: stats,
@@ -229,6 +230,7 @@
         <dt>mvhd creation</dt><dd>{meta.mvhdCreationTime ?? '–'}</dd>
         <dt>Recorded at</dt><dd>{meta.recordedAt ?? '–'} ({meta.recordedAtSource})</dd>
         <dt>Device</dt><dd>{[meta.make, meta.model, meta.software].filter(Boolean).join(' · ') || '–'}</dd>
+        <dt>Location</dt><dd>{meta.location ? formatCoords(meta.location.lat, meta.location.lon) : meta.location === null ? '–' : 'not read yet'}</dd>
         <dt>Handover</dt><dd>{handover?.verdict} — {handover?.reasons.join('; ')}</dd>
         <dt>Decoder</dt>
         <dd>

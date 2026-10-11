@@ -8,11 +8,12 @@
   import FrameProbe from '../components/FrameProbe.svelte';
   import CropEditor from '../components/CropEditor.svelte';
   import DebugPanel from '../components/DebugPanel.svelte';
+  import Sheet from '../components/Sheet.svelte';
   import { formatDuration, formatTime, previewTimes, type Span } from '../components/timeline';
   import { detailLength, firstBelow, followWindow, groupSegments, windowAround, type Range } from '../components/session-timeline';
   import { formatDay } from '../format';
   import { expectedHolds, nextEntries, type Label } from '../../labeling';
-  import { PRIMARY_SERIES_ID, type Video } from '../../model';
+  import type { Video } from '../../model';
   import { holdReps } from '../../progression';
   import { app } from '../state/app.svelte';
   import { pipeline } from '../pipeline/controller.svelte';
@@ -20,7 +21,7 @@
   import { router } from '../state/router.svelte';
   import { dialog } from '../state/dialog.svelte';
   import { SessionReview } from '../state/review.svelte';
-  import { coverageGaps, type CoverageGap, type SessionEntry } from '../state/session-data';
+  import { coverageGaps, formatCoords, placeLabel, placeNames, sessionCoords, sessionSpanS, type CoverageGap, type SessionEntry } from '../state/session-data';
   import { capture } from '../state/capture.svelte';
   import { reattachVideo, setManualCrop } from '../state/hold-actions';
 
@@ -53,7 +54,37 @@
     labeled: review.entries.filter((e) => e.candidate.status === 'labeled').length,
     open: review.entries.filter((e) => e.candidate.status === 'open').length,
   });
-  const duration = $derived(review.videos.reduce((s, v) => s + v.durationS, 0));
+  const duration = $derived(review.session ? sessionSpanS(review.session, review.videos) : 0);
+
+  // ----- template and place -----
+
+  async function chooseTemplate() {
+    const current = review.template?.id;
+    const choice = await dialog.ask({
+      title: 'Suggestions',
+      message: 'The sequence that label suggestions follow in this session.',
+      options: [
+        ...app.templates.map((t) => ({ id: `t:${t.id}`, label: t.name, ...(t.id === current ? { kind: 'primary' as const, detail: 'Current' } : {}) })),
+        { id: 'none', label: 'No template', detail: current ? 'Suggest by recent use.' : 'Current · suggest by recent use.', ...(current ? {} : { kind: 'primary' as const }) },
+        { id: 'cancel', label: 'Cancel', kind: 'quiet' },
+      ],
+    });
+    if (choice === 'none') await review.setTemplate(null);
+    else if (choice.startsWith('t:') && choice.slice(2) !== current) await review.setTemplate(choice.slice(2));
+  }
+
+  /** Place name being edited (null = sheet closed). */
+  let placeDraft = $state<string | null>(null);
+  const coords = $derived(review.session ? sessionCoords(review.session) : null);
+  const place = $derived(review.session ? placeLabel(review.session) : null);
+  const placeChips = $derived(placeDraft !== null && review.session ? placeNames(app.sessions.filter((s) => s.id !== review.session!.id), coords).slice(0, 8) : []);
+  const alsoNamed = $derived(placeDraft !== null && placeDraft.trim() ? review.unnamedNearby.length : 0);
+
+  async function savePlace() {
+    const name = placeDraft;
+    placeDraft = null;
+    if (name !== null) await review.setPlaceName(name);
+  }
 
   function spansFor(videoId: string): Span[] {
     return review.entries
@@ -372,6 +403,19 @@
       <p class="muted small tabular">
         {formatDuration(duration)} · {counts.labeled} labeled{counts.open ? ` · ${counts.open} open` : ''}
       </p>
+      <button class="place" class:unset={!place} type="button" aria-label={place ? `Location: ${place}. Edit` : 'Add location'} onclick={() => (placeDraft = session.location?.name ?? '')}>
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
+          ><path d="M12 21s-6.5-6.1-6.5-11.2a6.5 6.5 0 0 1 13 0C18.5 14.9 12 21 12 21Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /><circle
+            cx="12"
+            cy="9.8"
+            r="2.3"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+          /></svg
+        >
+        <span>{place ?? 'Add location'}</span>
+      </button>
     </div>
 
     {#if review.combinable.length && !pipeline.running && importQueue.total === 0}
@@ -384,10 +428,11 @@
     {/if}
 
     <div class="controls">
-      <div class="segmented" role="radiogroup" aria-label="Suggestions">
-        <button type="button" role="radio" aria-checked={session.templateId === PRIMARY_SERIES_ID} class:on={session.templateId === PRIMARY_SERIES_ID} onclick={() => review.setTemplate(PRIMARY_SERIES_ID)}>Primary series</button>
-        <button type="button" role="radio" aria-checked={!session.templateId} class:on={!session.templateId} onclick={() => review.setTemplate(null)}>No template</button>
-      </div>
+      <button class="picker" type="button" aria-haspopup="dialog" aria-label="Template: {review.template?.name ?? 'No template'}" onclick={chooseTemplate}>
+        <span class="picker-label">Template</span>
+        <span class="picker-value">{review.template?.name ?? 'No template'}</span>
+        <span class="picker-chev" aria-hidden="true">›</span>
+      </button>
       <input
         class="note"
         type="text"
@@ -564,6 +609,35 @@
   {/if}
 {/if}
 
+{#if placeDraft !== null && review.session}
+  <Sheet title="Location" onclose={() => (placeDraft = null)} action={{ label: 'Save', form: 'place-form' }}>
+    <form
+      id="place-form"
+      class="place-form"
+      onsubmit={(e) => {
+        e.preventDefault();
+        void savePlace();
+      }}
+    >
+      <label class="field">
+        <span>Place name</span>
+        <input type="text" bind:value={placeDraft} placeholder="e.g. Shala, Park" autocomplete="off" autocapitalize="words" enterkeyhint="done" />
+      </label>
+      {#if placeChips.length}
+        <div class="chips" role="group" aria-label="Places you named">
+          {#each placeChips as name (name)}
+            <button type="button" class="chip" class:on={name === placeDraft.trim()} aria-pressed={name === placeDraft.trim()} onclick={() => (placeDraft = name)}>{name}</button>
+          {/each}
+        </div>
+      {/if}
+      <p class="muted small">
+        {coords ? `${formatCoords(coords.lat, coords.lon)}, from the video.` : 'The videos carry no location. The name is all this session has.'}
+        {#if alsoNamed}<br />Also used for {alsoNamed} other {alsoNamed === 1 ? 'session' : 'sessions'} here.{/if}
+      </p>
+    </form>
+  </Sheet>
+{/if}
+
 {#if probe}
   <FrameProbe videoId={probe.videoId} timestampS={probe.t} onclose={() => (probe = null)} />
 {/if}
@@ -628,27 +702,120 @@
     gap: var(--space-2);
   }
 
-  .segmented {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 2px;
-    border-radius: var(--radius-m);
+  /* Where the session was practised: quiet, like the line above it. */
+  .place {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-height: var(--touch);
+    max-width: 100%;
+    margin: calc(-1 * var(--space-2)) 0 calc(-1 * var(--space-2)) calc(-1 * var(--space-1));
+    padding: 0 var(--space-1);
+    border: 0;
+    border-radius: var(--radius-s);
+    background: transparent;
+    color: var(--color-text-2);
+    font-size: var(--text-s);
+    text-align: left;
+  }
+
+  .place span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .place.unset {
+    color: var(--color-accent-strong);
+    font-weight: var(--weight-medium);
+  }
+
+  .place:active {
     background: var(--color-neutral-tint);
   }
 
-  .segmented button {
-    min-height: 40px;
-    border: 0;
-    border-radius: calc(var(--radius-m) - 2px);
-    background: transparent;
+  /* Template: a settings-style row that opens the list of templates. */
+  .picker {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: var(--touch);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius-m);
+    background: var(--color-surface);
+    text-align: left;
+  }
+
+  .picker-label {
+    color: var(--color-text-2);
     font-size: var(--text-s);
+  }
+
+  .picker-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: right;
     font-weight: var(--weight-medium);
+  }
+
+  .picker-chev {
+    color: var(--color-text-3);
+    font-size: var(--text-l);
+  }
+
+  .place-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .place-form p {
+    margin: 0;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--text-s);
     color: var(--color-text-2);
   }
 
-  .segmented button.on {
+  .field input {
+    min-height: var(--touch);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius-s);
     background: var(--color-surface);
+    font-size: var(--text-l);
     color: var(--color-text);
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .chip {
+    min-height: var(--touch);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius-pill);
+    background: var(--color-surface);
+    font-size: var(--text-s);
+    color: var(--color-text);
+  }
+
+  .chip.on {
+    border-color: var(--color-accent);
+    background: var(--color-accent-tint);
+    color: var(--color-accent-strong);
   }
 
   .note {
