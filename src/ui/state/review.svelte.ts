@@ -19,7 +19,17 @@ import type { DetectionParams } from '../../detection';
 import { newId, type Analysis, type Hold, type ReviewCandidate, type Session, type Video } from '../../model';
 import { app } from './app.svelte';
 import { dialog } from './dialog.svelte';
-import { combineSessions, historyFrom, parseItemKey, sameDaySessions, sessionEntries, toReviewItems, type SessionEntry } from './session-data';
+import {
+  combineSessions,
+  historyFrom,
+  parseItemKey,
+  sameDaySessions,
+  sessionEntries,
+  toReviewItems,
+  unnamedNear,
+  withPlaceName,
+  type SessionEntry,
+} from './session-data';
 import { suggestInWorker } from '../workers/suggest-client';
 import { pipeline } from '../pipeline/controller.svelte';
 import { invalidateSamples } from './samples';
@@ -30,7 +40,9 @@ import { capture, deleteAssets } from './capture.svelte';
  * (IndexedDB), so there is never unsaved labeling state.
  */
 export class SessionReview {
-  session = $state.raw<Session | null>(null);
+  private sessionId = $state<string | null>(null);
+  /** The session as the app state holds it: edits made elsewhere (e.g. coordinates read from a re-attached file) show up here. */
+  session = $derived<Session | null>(this.sessionId ? (app.sessions.find((s) => s.id === this.sessionId) ?? null) : null);
   videos = $state.raw<Video[]>([]);
   analyses = $state.raw<Record<string, Analysis>>({});
   /** Holds of this session — read from the app state, the single source of truth (captures update crops there). */
@@ -47,7 +59,8 @@ export class SessionReview {
   async load(sessionId: string) {
     const db = app.db;
     const session = (await db.sessions.get(sessionId)) ?? null;
-    this.session = session;
+    if (session) app.upsertSession(session);
+    this.sessionId = session ? sessionId : null;
     if (!session) {
       this.loaded = true;
       return;
@@ -248,7 +261,6 @@ export class SessionReview {
     if (!this.session) return;
     const { templateId: _, ...rest } = this.session;
     const s: Session = templateId ? { ...rest, templateId } : rest;
-    this.session = s;
     await app.db.sessions.put(s);
     app.upsertSession(s);
     await this.refreshSuggestions();
@@ -282,7 +294,6 @@ export class SessionReview {
       const marked = [session, ...others].filter((o) => !o.keepSeparate).map((o) => ({ ...o, keepSeparate: true }));
       await app.db.batch(marked.map((put) => ({ store: 'sessions', put })));
       for (const s of marked) app.upsertSession(s);
-      this.session = marked.find((s) => s.id === session.id) ?? this.session;
       return;
     }
     if (choice !== 'combine') return;
@@ -311,9 +322,24 @@ export class SessionReview {
   async setNote(note: string) {
     if (!this.session || this.session.note === note) return;
     const s = { ...this.session, note };
-    this.session = s;
     await app.db.sessions.put(s);
     app.upsertSession(s);
+  }
+
+  /** Other sessions here (within 300 m) without a name: a name given to this session applies to them too. */
+  get unnamedNearby(): Session[] {
+    return this.session ? unnamedNear(app.sessions, this.session) : [];
+  }
+
+  /** Names the place (empty removes the name; coordinates stay). Unnamed sessions nearby get the name too. */
+  async setPlaceName(name: string) {
+    const session = this.session;
+    if (!session) return;
+    const next = withPlaceName(session, name);
+    const others = next.location?.name ? this.unnamedNearby.map((o) => withPlaceName(o, name)) : [];
+    const all = [next, ...others];
+    await app.db.batch(all.map((put) => ({ store: 'sessions' as const, put })));
+    for (const s of all) app.upsertSession(s);
   }
 
   /** Re-runs detection from stored samples and keeps labels, manual holds and dismissals. */

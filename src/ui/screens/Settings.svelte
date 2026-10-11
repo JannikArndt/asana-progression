@@ -16,7 +16,7 @@
   import { dialog } from '../state/dialog.svelte';
   import { pipeline } from '../pipeline/controller.svelte';
   import { updates } from '../update.svelte';
-  import { copyText, deviceInfo, formatBytes, type DeviceInfo } from '../diagnostics';
+  import { copyText, deviceInfo, formatBytes, videoForReport, type DeviceInfo } from '../diagnostics';
   import { formatDay } from '../format';
   import { backup } from '../state/backup.svelte';
   import { capture } from '../state/capture.svelte';
@@ -163,7 +163,7 @@
       videos: await Promise.all(
         app.videos.map(async (v) => {
           const a = await app.db.analyses.get(v.id);
-          return { video: v, stats: a?.stats ?? null, candidates: a?.candidates.length ?? null };
+          return { video: videoForReport(v), stats: a?.stats ?? null, candidates: a?.candidates.length ?? null };
         }),
       ),
     };
