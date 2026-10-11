@@ -6,6 +6,9 @@ import {
   SEED_ADDED,
   withSunSalutations,
   withReps,
+  withSuptaPadangusthasanaB,
+  SUPTA_PADANGUSTHASANA_ID,
+  SUPTA_PADANGUSTHASANA_OLD_NAME,
   PRIMARY_SERIES_ID,
   SEED_ASANAS,
   sortCatalog,
@@ -32,7 +35,7 @@ export interface AnalysisSummary {
   createdAt: string;
 }
 
-const CATALOG_VERSION = 3;
+const CATALOG_VERSION = 4;
 
 const LEGACY_SEPARATE_KEY = 'asana.sessions.separate';
 
@@ -112,11 +115,23 @@ class AppState {
           if (a && !have.has(id)) await db.asanas.put({ ...a });
         }
       }
+      // v4: Supta Padangusthasana became A (leg up, same id) and B (leg to the side); user renames win.
+      const supta = asanas.find((a) => a.id === SUPTA_PADANGUSTHASANA_ID);
+      if (version < 4 && supta?.name === SUPTA_PADANGUSTHASANA_OLD_NAME) {
+        await db.asanas.put({ ...supta, name: SEED_ASANAS.find((a) => a.id === SUPTA_PADANGUSTHASANA_ID)!.name });
+      }
     }
     const primary = await db.templates.get(PRIMARY_SERIES_ID);
     // A template the user deleted stays deleted.
     if (!primary && version === 0) await db.templates.put(primarySeriesTemplate());
     else if (primary && version < 3) await db.templates.put(withReps(version < 2 ? withSunSalutations(primary) : primary));
+    if (version > 0 && version < 4) {
+      // Every template, not only the Primary series (labeled holds re-align via alignToTemplate).
+      for (const t of await db.templates.all()) {
+        const up = withSuptaPadangusthasanaB(t);
+        if (up !== t) await db.templates.put(up);
+      }
+    }
     await db.settings.set('catalogVersion', CATALOG_VERSION);
   }
 

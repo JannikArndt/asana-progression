@@ -243,6 +243,37 @@ test('a pinned luma-plane conversion is used and finds the three holds', async (
   await expect(page.locator('dt:has-text("Frame → gray") + dd')).toHaveText(/· luma( \([^)]*\))?$/);
 });
 
+test('lettered variants: one row with letters, separate progressions per letter', async ({ page }) => {
+  await page.goto('./');
+  await page.evaluate(() => localStorage.setItem('asana.debug.capture', JSON.stringify({ cropper: 'none' })));
+  await importVideo(page);
+  await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
+  const first = cards(page).nth(0);
+  await first.getByRole('button', { name: 'Adho Mukha Svanasana', exact: true }).click();
+  await page.getByPlaceholder('Search asanas').fill('sp');
+  // The family reads as one asana with letters; each letter has R/L like a sided asana.
+  const picker = page.getByRole('dialog', { name: 'Label' });
+  await expect(picker.getByText('Supta Padangusthasana', { exact: true })).toBeVisible();
+  await expect(picker.getByRole('button', { name: 'Supta Padangusthasana A right' })).toBeVisible();
+  await picker.getByRole('button', { name: 'Supta Padangusthasana B right' }).click();
+  await expect(first.getByText('Supta Padangusthasana B R')).toBeVisible();
+
+  await page.getByRole('button', { name: '‹ Sessions' }).click();
+  await page.getByRole('tab', { name: 'Asanas' }).click();
+  await page.getByRole('button', { name: /Supta Padangusthasana\s+1 hold\s+·\s+A\s*B/ }).click();
+  // The letter with the newest hold opens; the other letter is its own (empty) progression.
+  await expect(page).toHaveURL(/#\/asana\/supta-padangusthasana-b$/);
+  await expect(page.getByRole('heading', { name: 'Supta Padangusthasana' })).toBeVisible();
+  const variant = page.getByRole('radiogroup', { name: 'Variant' });
+  await expect(variant.getByRole('radio', { name: 'Supta Padangusthasana B' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('.feed .item')).toHaveCount(1);
+  await page.getByRole('radio', { name: 'Right' }).click();
+  await variant.getByRole('radio', { name: 'Supta Padangusthasana A' }).click();
+  await expect(page).toHaveURL(/#\/asana\/supta-padangusthasana$/);
+  await expect(page.getByText('No holds labeled yet.', { exact: false })).toBeVisible();
+  await expect(page.getByRole('radio', { name: 'Right' })).toHaveAttribute('aria-checked', 'true');
+});
+
 test('capture works with the MediaPipe cropper (self-hosted wasm and model)', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));

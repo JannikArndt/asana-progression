@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   asanaStats,
   combineSessions,
+  familyStats,
   compareVideos,
   coverageGaps,
   GAP_ALWAYS_S,
@@ -97,6 +98,26 @@ describe('session data', () => {
     expect(st.get('balasana')).toMatchObject({ count: 2, days: 1 });
     expect(st.get('balasana')!.preview!.id).toBe('f');
     expect(asanaStats([s1, s2, sameDay], holds, new Set(['a', 'b'])).get('navasana')!.preview!.id).toBe('b');
+  });
+
+  it('joins the stats of lettered variants per family', () => {
+    const families = [{ members: [{ id: 'spa' }, { id: 'spb' }, { id: 'spc' }] }, { members: [{ id: 'navasana' }] }];
+    const holds = [
+      hold('a1', 's1', 'v1', 'spa', 1, 'R'),
+      hold('b1', 's1', 'v1', 'spb', 20, 'R'),
+      hold('a2', 's2', 'v3', 'spa', 1, 'R'),
+      hold('n', 's2', 'v3', 'navasana', 40),
+      hold('x', 's2', 'v3', 'other', 50),
+    ];
+    const st = familyStats(families, [s1, s2], holds, new Set(['b1']));
+    expect(st.get('spa')).toMatchObject({ count: 3, days: 2 });
+    expect(st.get('spa')!.latest).toBe(holds[2]);
+    expect(st.get('spa')!.preview).toBe(holds[1]);
+    expect([...st.get('spa')!.perMember]).toEqual([['spa', 2], ['spb', 1]]);
+    expect(st.get('navasana')).toMatchObject({ count: 1, days: 1 });
+    expect(st.get('navasana')!.preview).toBe(holds[3]);
+    expect(st.has('other')).toBe(false);
+    expect(familyStats([], [s1], holds).size).toBe(0);
   });
 
   it('summarizes sessions and finds orphans', () => {

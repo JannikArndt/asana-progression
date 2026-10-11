@@ -64,15 +64,25 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
 ### Labeling (milestone 2)
 
 - Catalog-first: holds reference asanas; a `SequenceTemplate` only drives suggestions. Seeded on
-  first run (`catalogVersion` setting, now 3): 63 asanas (21 sided, each with a `group` and,
-  except Adho Mukha Svanasana, a coarse `posture` class) and "Primary series" (85 entries; reps:
+  first run (`catalogVersion` setting, now 4): 64 asanas (22 sided, each with a `group` and,
+  except Adho Mukha Svanasana, a coarse `posture` class) and "Primary series" (87 entries; reps:
   Adho Mukha Svanasana ×8 for the sun salutations, 5 A + 3 B, Navasana ×5, Urdhva Dhanurasana ×3;
-  sided asanas R then L; Utthita Hasta
-  Padangusthasana A/B/C R then A/B/C L; Paschimottanasana A again after Urdhva Dhanurasana;
+  sided asanas R then L; Utthita Hasta Padangusthasana A/B/C R then A/B/C L and Supta
+  Padangusthasana A/B R then A/B L; Paschimottanasana A again after Urdhva Dhanurasana;
   Virabhadrasana B is R then L like everything else — edit in M5 if the practice differs).
   Upgrades only add what a version introduced (`SEED_ADDED`, never re-adding deleted asanas),
-  prepend the sun salutations to an existing Primary series once (v2) and turn consecutive
-  identical entries into `reps` (v3); a deleted template stays deleted.
+  prepend the sun salutations to an existing Primary series once (v2), turn consecutive
+  identical entries into `reps` (v3) and split Supta Padangusthasana into A (leg up, keeps the id
+  `supta-padangusthasana`; renamed only while its name is unchanged) and B (leg to the side) in
+  every template whose R entry is directly followed by L (`withSuptaPadangusthasanaB`, v4; labeled
+  holds re-align via `alignToTemplate`); a deleted template stays deleted. Seed rows may carry an
+  explicit `id` for such renames.
+- **Variant families**: lettered variants ("Janu Sirsasana A/B/C", names ending in a space + A–F,
+  same base and `group`) stay separate asanas — A is only ever compared with A — but are shown as
+  one asana with letters, like R/L (`model.variantOf`, `asanaFamilies`, derived from the names, so
+  user-created "Foo A"/"Foo B" form a family and renames join/leave one): one row on Home, an
+  A | B segmented control on the progression page, base name + letter rows in the label picker.
+  Labels, suggestions, review cards and the viewer keep full names.
 - **Reps**: consecutive holds of the same asana and side in a session are reps 1…n of one run
   (`progression.holdReps`, derived, never stored), e.g. the 1st and the 5th Navasana differ a lot.
   A template entry's `reps` is the usual count (editable in the template editor), not a limit:
@@ -160,7 +170,9 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
 
 ### Progression (milestone 4)
 
-`#/asana/<id>` (`screens/AsanaProgression.svelte`): feed (newest first, date, side, note) or grid
+`#/asana/<id>` (`screens/AsanaProgression.svelte`): for a variant family the title is the base
+name with a letter control (A | B, hold counts) under it; a letter replaces the route with that
+member's page (side and rep filters carried over), so everything below is one letter only. Feed (newest first, date, side, note) or grid
 (2–4 columns, pinch or ctrl+wheel; tiles share the median crop aspect), side filter, rep filter
 (All reps / First / Last, when the asana has runs of reps), viewer
 (`HoldViewer`: swipe through all holds oldest → newest; a tap on the image toggles a translucent
@@ -237,13 +249,13 @@ similar-merge; variants with near-identical silhouettes (e.g. Paschimottanasana 
 merged — the review step (M2) needs split.
 
 Real data: `src/detection/__fixtures__/real/ashtanga-primary-outdoor.json` is a 67.6 min outdoor
-primary series (1080×1120 HEVC HLG), fully labeled by the user: truth = the 91 labeled holds (two
-names corrected by eye), params/candidates recomputed with the defaults. Nothing is missed;
+primary series (1080×1120 HEVC HLG), fully labeled by the user: truth = the 93 labeled holds (two
+names corrected by eye; Supta Padangusthasana split into A/B per side along the detector's spans), params/candidates recomputed with the defaults. Nothing is missed;
 holds with near-identical silhouettes and little movement between them (Padangusthasana +
 Padahastasana, UHP B + C, Paschimottanasana A/B/C, Baddha Konasana A/B, Sarvangasana + Halasana)
 form one still run and need Split; some asanas are two candidates because the posture changes
-inside them (Supta Padangusthasana leg up / to the side, Kurmasana, Bhujapidasana, …) and need
-Merge. Hence `truthMinOwn` (78 of 91 own candidates) is the regression floor there. `sarvangasana-finishing.json` is the user's 7.6 min
+inside them (Kurmasana, Bhujapidasana, …) and need
+Merge. Hence `truthMinOwn` (80 of 93 own candidates) is the regression floor there. `sarvangasana-finishing.json` is the user's 7.6 min
 finishing-sequence clip (the validation video). All 9 holds are found; their best frames were checked
 by eye on full-resolution frames (the long Sirsasana A is split in 3 and merged back). The truth
 spans are the detector's own spans (named, not hand-segmented); the fixture test checks that each
@@ -330,9 +342,12 @@ dismisses past 30 % of its height or on a flick ≥ 0.5 px/ms (upward flick keep
 springs back; the backdrop fades with the offset. `prefers-reduced-motion`: no slide animations.
 Focus moves into the sheet, Tab is trapped, focus returns on close.
 
-Asanas list (Home): the preview is the newest hold that has a captured image (thumb, else still),
+Asanas list (Home): one row per variant family (base name; `session-data.familyStats` joins the
+members). The preview is the newest hold that has a captured image (thumb, else still),
 filling a square via `progression.fillCrop` around the display crop; the gray analysis frame only
-when nothing is captured. The line reads "N holds", plus "· M days" when they span several days.
+when nothing is captured. The line reads "N holds", plus "· M days" when they span several days,
+plus the letters of a family ("· A B", letters without holds fainter). A tap opens the letter
+with the newest hold.
 
 Timeline graph (`src/ui/components/TimelineGraph.svelte`, maths in `timeline.ts`): canvas,
 min/max envelope per pixel when zoomed out, pinch zoom, inertial horizontal pan

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { alignToTemplate, entryUse, expectedHolds, matchTemplateEntry, nextEntries, nextSide, repsOf, suggest, usedEntries } from './suggest';
-import { DOWNWARD_DOG_ID, primarySeriesTemplate, SEED_ASANAS } from '../model/seed';
+import { DOWNWARD_DOG_ID, primarySeriesTemplate, SEED_ASANAS, withSuptaPadangusthasanaB } from '../model/seed';
 import type { Asana, SequenceTemplate } from '../model/types';
 import type { HistoryEntry, ReviewItem } from './types';
 
@@ -252,6 +252,21 @@ describe('alignToTemplate', () => {
     // a non-consecutive repeat takes the next free matching entry, then none
     const gap = alignToTemplate([labeled('x', 'a', null, 0), labeled('y', 'b', 'R', 1), labeled('z', 'a', null, 0), labeled('v', 'b', 'R', 1), labeled('u', 'a', null, 0)], t);
     expect(gap.map((i) => i.label?.templateEntryIndex)).toEqual([0, 1, 3, undefined, undefined]);
+  });
+
+  it('re-aligns holds labeled before the v4 Supta Padangusthasana A/B upgrade', () => {
+    const v3: SequenceTemplate = { ...full, entries: full.entries.filter((e) => e.asanaId !== 'supta-padangusthasana-b') };
+    const old = (asanaId: string, side?: 'R' | 'L') => v3.entries.findIndex((e) => e.asanaId === asanaId && e.side === side);
+    const now = (asanaId: string, side?: 'R' | 'L') => full.entries.findIndex((e) => e.asanaId === asanaId && e.side === side);
+    const items = [
+      labeled('r', 'supta-padangusthasana', 'R', old('supta-padangusthasana', 'R')),
+      labeled('l', 'supta-padangusthasana', 'L', old('supta-padangusthasana', 'L')),
+      labeled('u', 'ubhaya-padangusthasana', null, old('ubhaya-padangusthasana')),
+    ];
+    const out = alignToTemplate(items, withSuptaPadangusthasanaB(v3));
+    expect(withSuptaPadangusthasanaB(v3)).toEqual(full);
+    expect(out.map((i) => i.label?.templateEntryIndex)).toEqual([now('supta-padangusthasana', 'R'), now('supta-padangusthasana', 'L'), now('ubhaya-padangusthasana')]);
+    expect(now('supta-padangusthasana', 'L')).toBe(old('supta-padangusthasana', 'L') + 1);
   });
 
   it('assigns entries to labels that had none, and clears all without a template', () => {

@@ -120,6 +120,42 @@ export function asanaStats(sessions: Session[], holds: Hold[], captured: Readonl
   return out;
 }
 
+export interface FamilyStats extends AsanaStats {
+  /** Holds per member asana id (members without holds are missing). */
+  perMember: Map<string, number>;
+}
+
+/**
+ * `asanaStats` across the members of each family (lettered variants listed as one row), keyed by
+ * the first member's id. `latest.asanaId` is the member with the newest hold.
+ */
+export function familyStats(
+  families: ReadonlyArray<{ members: ReadonlyArray<{ id: string }> }>,
+  sessions: Session[],
+  holds: Hold[],
+  captured: ReadonlySet<string> = new Set(),
+): Map<string, FamilyStats> {
+  const keyOf = new Map<string, string>();
+  for (const f of families) for (const m of f.members) keyOf.set(m.id, f.members[0]!.id);
+  const byId = new Map(holds.map((h) => [h.id, h]));
+  const perAsana = asanaStats(sessions, holds, captured);
+  const joined = asanaStats(
+    sessions,
+    holds.flatMap((h) => (keyOf.has(h.asanaId) ? [{ ...h, asanaId: keyOf.get(h.asanaId)! }] : [])),
+    captured,
+  );
+  const original = (h: Hold | null) => (h ? byId.get(h.id)! : null);
+  const out = new Map<string, FamilyStats>();
+  for (const f of families) {
+    const key = f.members[0]!.id;
+    const st = joined.get(key);
+    if (!st) continue;
+    const perMember = new Map(f.members.flatMap((m) => (perAsana.has(m.id) ? [[m.id, perAsana.get(m.id)!.count] as const] : [])));
+    out.set(key, { ...st, latest: original(st.latest), preview: original(st.preview), perMember });
+  }
+  return out;
+}
+
 export interface SessionSummary {
   durationS: number;
   labeled: number;

@@ -7,9 +7,9 @@
   import { pipeline } from '../pipeline/controller.svelte';
   import { formatDuration, formatTime } from '../components/timeline';
   import { formatDay } from '../format';
-  import { asanaStats, summarizeSession } from '../state/session-data';
+  import { familyStats, summarizeSession } from '../state/session-data';
   import { displayCrop, fillCrop } from '../../progression';
-  import type { Asset, Hold } from '../../model';
+  import { asanaFamilies, familyLetter, type AsanaFamily, type Asset, type Hold } from '../../model';
 
   interface Props {
     tab?: 'asanas' | 'sessions';
@@ -38,17 +38,24 @@
     for (const a of app.assets) if (a.kind === 'thumb' || (a.kind === 'still' && m.get(a.holdId)?.kind !== 'thumb')) m.set(a.holdId, a);
     return m;
   });
-  const stats = $derived(asanaStats(app.sessions, app.holds, new Set(images.keys())));
+  /** Lettered variants (A, B, …) are one row; each letter keeps its own progression page. */
+  const families = $derived(asanaFamilies(app.asanas));
+  const stats = $derived(familyStats(families, app.sessions, app.holds, new Set(images.keys())));
   const groups = $derived.by(() => {
-    const out: Array<{ group: string; asanas: typeof app.asanas }> = [];
-    for (const a of app.asanas) {
-      const g = a.group ?? 'Other';
+    const out: Array<{ group: string; families: AsanaFamily[] }> = [];
+    for (const f of families) {
+      const g = f.group ?? 'Other';
       const last = out[out.length - 1];
-      if (last && last.group === g) last.asanas.push(a);
-      else out.push({ group: g, asanas: [a] });
+      if (last && last.group === g) last.families.push(f);
+      else out.push({ group: g, families: [f] });
     }
     return out;
   });
+
+  /** Opens the letter with the newest hold (else the first letter). */
+  function openFamily(f: AsanaFamily) {
+    router.go({ name: 'asana', id: stats.get(f.members[0]!.id)?.latest?.asanaId ?? f.members[0]!.id });
+  }
 </script>
 
 {#snippet tiny(hold: Hold)}
@@ -128,9 +135,9 @@
     <section class="list" role="tabpanel">
       {#each groups as g (g.group)}
         <h2 class="section-title group">{g.group}</h2>
-        {#each g.asanas as a (a.id)}
-          {@const st = stats.get(a.id)}
-          <button class="row asana" class:empty-asana={!st} type="button" onclick={() => router.go({ name: 'asana', id: a.id })}>
+        {#each g.families as f (f.members[0]!.id)}
+          {@const st = stats.get(f.members[0]!.id)}
+          <button class="row asana" class:empty-asana={!st} type="button" onclick={() => openFamily(f)}>
             <div class="thumb">
               {#if st?.preview}
                 {@const hold = st.preview}
@@ -145,9 +152,15 @@
               {/if}
             </div>
             <div class="row-main">
-              <span class="name">{a.name}</span>
+              <span class="name">{f.base}</span>
               <span class="muted small tabular">
                 {st ? `${st.count} ${st.count === 1 ? 'hold' : 'holds'}${st.days > 1 ? ` · ${st.days} days` : ''}` : 'No holds yet'}
+                {#if f.members.length > 1}
+                  ·
+                  <span class="letters">
+                    {#each f.members as m (m.id)}<span class:none={!st?.perMember.has(m.id)}>{familyLetter(f, m)}</span>{/each}
+                  </span>
+                {/if}
               </span>
             </div>
           </button>
@@ -308,6 +321,16 @@
 
   .empty-asana {
     opacity: 0.45;
+  }
+
+  /* Letters of the variants; those without holds yet are fainter. */
+  .letters {
+    display: inline-flex;
+    gap: 0.4em;
+  }
+
+  .letters .none {
+    color: var(--color-text-3);
   }
 
   .error {
