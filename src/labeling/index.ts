@@ -6,6 +6,7 @@ export {
   splitCandidate,
   splitInto,
   missedCandidate,
+  detectInRange,
   freeSpanAround,
   nudgeBest,
   reconcile,

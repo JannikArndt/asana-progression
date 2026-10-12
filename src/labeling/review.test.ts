@@ -47,6 +47,17 @@ describe('mergeCandidates', () => {
     const m3 = mergeCandidates(cand('x', 0, 5, 2), cand('y', 6, 9, 7), signals(10, []));
     expect(m3.holdId).toBeUndefined();
   });
+  it('keeps a label; "Not a pose" only survives when both were dismissed', () => {
+    const sig = signals(60, [[10, 40]]);
+    const labeled = cand('l', 10, 20, 15, { status: 'labeled', holdId: 'h' });
+    const dismissed = cand('d', 22, 30, 25, { status: 'dismissed' });
+    const open = cand('o', 32, 40, 35);
+    expect(mergeCandidates(labeled, dismissed, sig)).toMatchObject({ status: 'labeled', holdId: 'h' });
+    expect(mergeCandidates(dismissed, labeled, sig)).toMatchObject({ id: 'd', status: 'labeled', holdId: 'h' });
+    expect(mergeCandidates(dismissed, open, sig).status).toBe('open');
+    expect(mergeCandidates(open, dismissed, sig).status).toBe('open');
+    expect(mergeCandidates(dismissed, { ...dismissed, id: 'd2', startS: 31, endS: 35 }, sig).status).toBe('dismissed');
+  });
 });
 
 describe('splitCandidate', () => {

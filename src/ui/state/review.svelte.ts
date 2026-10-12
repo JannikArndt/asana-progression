@@ -1,5 +1,6 @@
 import {
   alignToTemplate,
+  detectInRange,
   freeSpanAround,
   holdFromCandidate,
   matchTemplateEntry,
@@ -22,6 +23,7 @@ import { dialog } from './dialog.svelte';
 import {
   combineSessions,
   historyFrom,
+  itemKey,
   parseItemKey,
   sameDaySessions,
   sessionEntries,
@@ -32,7 +34,7 @@ import {
 } from './session-data';
 import { suggestInWorker } from '../workers/suggest-client';
 import { pipeline } from '../pipeline/controller.svelte';
-import { invalidateSamples } from './samples';
+import { invalidateSamples, sampleReader } from './samples';
 import { capture, deleteAssets } from './capture.svelte';
 
 /**
@@ -180,13 +182,6 @@ export class SessionReview {
     await this.refreshSuggestions();
   }
 
-  async restore(key: string) {
-    const e = this.entry(key);
-    if (!e) return;
-    await this.replaceCandidate(e.videoId, e.candidate.id, [{ ...e.candidate, status: 'open' }]);
-    await this.refreshSuggestions();
-  }
-
   /** Previous candidate in the same video (any status except dismissed). */
   previousOf(key: string): SessionEntry | undefined {
     const i = this.entries.findIndex((e) => e.key === key);
@@ -199,6 +194,10 @@ export class SessionReview {
     return undefined;
   }
 
+  /**
+   * Merges a card into the previous visible one. A label always survives (either card's hold);
+   * "Not a pose" candidates between them are absorbed.
+   */
   async mergeWithPrevious(key: string) {
     const e = this.entry(key);
     const p = this.previousOf(key);
@@ -210,8 +209,9 @@ export class SessionReview {
     if (dropHold) await this.deleteHold(dropHold.id);
     const next: ReviewCandidate = { ...merged, ...(keepHold ? { holdId: keepHold.id, status: 'labeled' as const } : {}) };
     if (keepHold) await this.putHold(holdFromCandidate(keepHold, next));
+    const absorbed = (c: ReviewCandidate) => c.status === 'dismissed' && c.startS >= next.startS && c.endS <= next.endS;
     await this.saveCandidates(e.videoId, [
-      ...this.candidates(e.videoId).filter((c) => c.id !== e.candidate.id && c.id !== p.candidate.id),
+      ...this.candidates(e.videoId).filter((c) => c.id !== e.candidate.id && c.id !== p.candidate.id && !absorbed(c)),
       next,
     ]);
     await this.refreshSuggestions();
@@ -247,6 +247,37 @@ export class SessionReview {
     await this.saveCandidates(videoId, [...this.candidates(videoId), c]);
     await this.refreshSuggestions();
     return `${videoId}/${c.id}`;
+  }
+
+  /**
+   * Analyses one stretch of a video on its own (an uncovered gap; `labeling.detectInRange`) and
+   * adds the holds found there as open cards. Spans the user marked "Not a pose" are not offered
+   * again. Returns the keys of the new cards.
+   */
+  async findHolds(videoId: string, range: TimeRange): Promise<string[]> {
+    const a = this.analyses[videoId];
+    if (!a) return [];
+    const reader = await sampleReader(videoId, a.frameWidth * a.frameHeight);
+    const frames = reader && (await reader.count()) >= a.sampleCount ? { frame: (i: number) => reader.read(i) } : null;
+    const current = this.candidates(videoId);
+    const dismissed = current.filter((c) => c.status === 'dismissed');
+    const overlap = (x: ReviewCandidate, y: ReviewCandidate) => Math.max(0, Math.min(x.endS, y.endS) - Math.max(x.startS, y.startS));
+    const found = (await detectInRange(range, this.signals(videoId), a.params, frames)).filter(
+      (f) => !current.some((c) => c.status !== 'dismissed' && overlap(c, f) > 0) && !dismissed.some((d) => overlap(d, f) >= 0.5 * (f.endS - f.startS)),
+    );
+    if (!found.length) return [];
+    await this.saveCandidates(videoId, [...current, ...found]);
+    await this.refreshSuggestions();
+    return found.map((c) => itemKey(videoId, c.id));
+  }
+
+  /** Brings back the "Not a pose" candidates inside `range` as open cards. */
+  async restoreIn(videoId: string, range: TimeRange) {
+    const inside = (c: ReviewCandidate) => c.status === 'dismissed' && c.endS > range.fromS && c.startS < range.toS;
+    const current = this.candidates(videoId);
+    if (!current.some(inside)) return;
+    await this.saveCandidates(videoId, current.map((c) => (inside(c) ? { ...c, status: 'open' as const } : c)));
+    await this.refreshSuggestions();
   }
 
   async nudge(key: string, bestS: number) {

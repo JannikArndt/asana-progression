@@ -128,7 +128,9 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   one-tap confirm, picker with search incl. initials like "uhp", ••• menu with a scrollable strip of
   tiny frames across the hold (`previewTimes`: one per 6 s, 4–24) to spot a posture change, actions:
   choose frame, split,
-  split into several, merge with previous, not a pose, full-resolution frame, add missed hold),
+  split into several, merge with previous (a label always survives: `mergeCandidates` is labeled if
+  either side is, "Not a pose" only if both are; "Not a pose" candidates between the two are
+  absorbed), not a pose (the card disappears into its gap row), full-resolution frame, add missed hold),
   the session's video files (`#/session/<id>/videos`, `SessionVideos.svelte`, linked "N videos ›"
   top right of the review: order with ↑/↓ or "Sort by recording time" → `SessionReview.setVideoOrder`,
   recording time (`formatRecordedAt`, own UTC offset) and its source, place on the session timeline,
@@ -137,13 +139,20 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   (`#/asana/<id>`). `#/video/<id>` redirects to the session. Splitting a practice into several
   videos is a technical matter: the review shows asanas only, file details live on the videos page.
 - Uncovered gaps (`session-data.coverageGaps`): between the cards of a video (and before the first /
-  after the last) a quiet row "1 min 7 s not covered · + Add hold" marks stretches covered by no
-  candidate. Dismissed candidates count as covered (the user has looked at them). Threshold
+  after the last) a quiet row "1 min 7 s not covered · + Add holds" marks stretches covered by no
+  card. "Not a pose" (dismissed) candidates are never cards: they count as uncovered, and a gap
+  holding one is always listed, however short ("· 1 skipped"). Threshold
   `gapThreshold`: always from 30 s, down to 10 s when the gap is ≥ 1.5 × the video's median gap
   between candidates (the outdoor primary series has a 19 s median from vinyasas; 10 s would put a
-  row after most cards, while a missed hold leaves two transitions plus the hold). Tapping opens the
-  frame scrubber limited to the gap (starting in its middle); `missedCandidate(atS, sig, bounds)`
-  keeps the new span inside the gap. "+ Add missed hold" (whole video) clamps to the free stretch
+  row after most cards, while a missed hold leaves two transitions plus the hold). Tapping opens a
+  sheet with the gap's tiny frames and: **Find holds here** (`labeling.detectInRange`: the detector's
+  candidate step on the stored m/C of just that stretch, with the stretch's own p55 threshold,
+  single-still off, similar-merge with the stored analysis frames; new cards are `origin: 'manual'`
+  so a full re-run keeps them; spans mostly overlapping a "Not a pose" one are not offered again —
+  on both real fixtures it finds every labeled hold when the stretch between its labeled neighbours
+  is analysed, `detect-range.test.ts`), **Add a hold by hand…** (frame scrubber limited to the gap,
+  starting in its middle; `missedCandidate(atS, sig, bounds)` keeps the new span inside the gap) and
+  **Show the skipped hold(s)** (`restoreIn`). "+ Add missed hold" (whole video) clamps to the free stretch
   between the neighbours (`freeSpanAround`) unless the time lies inside a candidate.
 - Labeled holds keep `templateEntryIndex`; `alignToTemplate` re-maps it whenever the session's
   template was switched or edited, so suggestions never follow stale indices.

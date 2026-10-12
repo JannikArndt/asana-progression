@@ -275,22 +275,33 @@ export interface CoverageGap {
   endS: number;
   /** Index of the span that follows the gap (`spans.length` after the last one). */
   beforeIndex: number;
+  /** Candidates marked "Not a pose" inside the gap. */
+  skipped?: number;
 }
 
 /**
  * Stretches of a video (0…durationS) covered by no span, at least `minS` long (default:
- * `gapThreshold`). `spans` are in
- * start order (as `sessionEntries`). Callers pass every candidate, dismissed ones included: the
- * user has looked at those, so they count as covered.
+ * `gapThreshold`). `spans` are the visible candidates in start order (as `sessionEntries`);
+ * `skipped` are the candidates marked "Not a pose": they count as uncovered, and a gap that
+ * contains one is always listed, however short (the review shows them only through their gap).
  */
-export function coverageGaps(spans: ReadonlyArray<{ startS: number; endS: number }>, durationS: number, minS = gapThreshold(spans)): CoverageGap[] {
+export function coverageGaps(
+  spans: ReadonlyArray<{ startS: number; endS: number }>,
+  durationS: number,
+  minS = gapThreshold(spans),
+  skipped: ReadonlyArray<{ startS: number; endS: number }> = [],
+): CoverageGap[] {
   const out: CoverageGap[] = [];
+  const push = (startS: number, endS: number, beforeIndex: number) => {
+    const inside = skipped.filter((d) => d.endS > startS && d.startS < endS).length;
+    if (endS - startS >= minS || (inside && endS > startS)) out.push({ startS, endS, beforeIndex, ...(inside ? { skipped: inside } : {}) });
+  };
   let covered = 0;
   spans.forEach((s, i) => {
-    if (s.startS - covered >= minS) out.push({ startS: covered, endS: s.startS, beforeIndex: i });
+    push(covered, s.startS, i);
     covered = Math.max(covered, s.endS);
   });
-  if (durationS - covered >= minS) out.push({ startS: covered, endS: durationS, beforeIndex: spans.length });
+  push(covered, durationS, spans.length);
   return out;
 }
 
