@@ -3,7 +3,7 @@
  * streams them into the detector, stores the pooled frames in OPFS and checkpoints the detector
  * state to IndexedDB so processing resumes after the tab was killed.
  */
-import { Detector, poolGray, reanalyze, type DetectorSnapshot } from '../../detection';
+import { Detector, normalizeParams, poolGray, reanalyze, type DetectorSnapshot } from '../../detection';
 import { openVideo, targetSize, type SamplerStats } from '../../source';
 import {
   MemorySamples,
@@ -107,7 +107,8 @@ async function analyze(req: Extract<WorkerRequest, { type: 'analyze' }>) {
         snap &&
         opened.opfs &&
         job.fingerprint === req.fingerprint &&
-        JSON.stringify(job.params) === JSON.stringify(p) &&
+        // Jobs saved before a parameter was added lack it: compare complete parameter sets.
+        JSON.stringify(normalizeParams(job.params)) === JSON.stringify(normalizeParams(p)) &&
         writer.count() >= snap.count
       ) {
         detector.restore(snap);

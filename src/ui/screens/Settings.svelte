@@ -16,10 +16,11 @@
   import { dialog } from '../state/dialog.svelte';
   import { pipeline } from '../pipeline/controller.svelte';
   import { updates } from '../update.svelte';
-  import { copyText, deviceInfo, formatBytes, videoForReport, type DeviceInfo } from '../diagnostics';
+  import { copyText, deviceInfo, formatBytes, shareOrDownload, videoForReport, type DeviceInfo } from '../diagnostics';
   import { formatDay } from '../format';
   import { backup } from '../state/backup.svelte';
   import { capture } from '../state/capture.svelte';
+  import { research } from '../state/research.svelte';
 
   let est = $state<StorageEstimateInfo | null>(null);
   let opfs = $state<number | null>(null);
@@ -344,6 +345,38 @@
     </section>
   {/if}
 
+  <section class="group" aria-labelledby="diagnostics-title">
+    <h3 class="section-title" id="diagnostics-title">Diagnostics</h3>
+    <div class="actions">
+      <button class="btn" type="button" onclick={copyAll}>Copy diagnostics report</button>
+    </div>
+    {#if message}<p class="small muted">{message}</p>{/if}
+    <p class="small muted">
+      Research data: catalog, templates, sessions (day only), videos (length, frame size, codec, recording time), analysis signals,
+      review cards, labeled holds with crops and the pose found on each still. No file names, notes, places or coordinates, no
+      images or analysis frames.
+    </p>
+    <div class="actions">
+      <button class="btn" type="button" onclick={() => research.exportData()} disabled={research.busy || pipeline.running}>
+        {research.exporting
+          ? `${research.exporting.phase === 'analyses' ? 'Detection' : 'Poses'} ${research.exporting.done}/${research.exporting.total}…`
+          : 'Export research data'}
+      </button>
+      {#if research.exporting}<button class="btn quiet" type="button" onclick={() => research.cancel()}>Cancel</button>{/if}
+      <button class="btn" type="button" onclick={() => router.go({ name: 'lab' })}>Detection lab ›</button>
+    </div>
+    {#if research.ready?.kind === 'export'}
+      {@const r = research.ready}
+      <div class="ready" role="status">
+        <p class="small">Research data ready: {r.file.name}, {formatBytes(r.file.size)} ({r.note}).</p>
+        <div class="actions">
+          <button class="btn primary" type="button" onclick={() => shareOrDownload(r.file.name, r.file)}>Save</button>
+        </div>
+      </div>
+    {/if}
+    {#if research.error?.kind === 'export'}<p class="small error" role="alert">Export failed: {research.error.message}</p>{/if}
+  </section>
+
   <section class="group">
     <h3 class="section-title">App</h3>
     <dl class="kv">
@@ -353,9 +386,7 @@
     </dl>
     <div class="actions">
       <button class="btn" type="button" onclick={() => updates.check()}>Check for update</button>
-      <button class="btn" type="button" onclick={copyAll}>Copy diagnostics report</button>
     </div>
-    {#if message}<p class="small muted">{message}</p>{/if}
   </section>
 
   <section class="group">

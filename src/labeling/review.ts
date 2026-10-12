@@ -1,6 +1,9 @@
-import { bestFrameIndex, findCandidates, lowestSumWindow, percentile, type DetectionParams, type FrameAccess } from '../detection';
+import { bestFrameIndex, findCandidates, lowestSumWindow, percentile, valleyProminence, type DetectionParams, type FrameAccess } from '../detection';
 import type { Hold, ReviewCandidate } from '../model/types';
 import type { SignalView, TimeRange } from './types';
+
+/** Valley prominence lives in detection (also used to split still runs); re-exported for splitInto's callers. */
+export { valleyProminence };
 
 /** Best frame and clip window of a span, from the motion signal. */
 export function fitSpan(startS: number, endS: number, sig: SignalView): { bestS: number; clipStartS: number; clipEndS: number } {
@@ -126,31 +129,6 @@ export function splitInto(c: ReviewCandidate, k: number, sig: SignalView): Revie
       ? { ...c, startS, endS, ...fit, alternatesS }
       : { ...rest, id: editedId('split'), startS, endS, ...fit, alternatesS, status: 'open' as const, origin: 'manual' as const };
   });
-}
-
-/**
- * Local minima of `value` in [a, b) with their prominence: from the minimum, the highest value
- * passed on each side before reaching a lower point (or the span's end); the lower of the two
- * sides minus the minimum. A plateau counts once (its first sample). NaN samples are skipped.
- */
-export function valleyProminence(value: (i: number) => number, a: number, b: number): Array<{ at: number; prominence: number }> {
-  const idx: number[] = [];
-  for (let i = a; i < b; i++) if (!Number.isNaN(value(i))) idx.push(i);
-  const v = idx.map(value);
-  const out: Array<{ at: number; prominence: number }> = [];
-  for (let j = 0; j < v.length; j++) {
-    const x = v[j]!;
-    if (j > 0 && v[j - 1]! <= x) continue;
-    let r = j;
-    while (r + 1 < v.length && v[r + 1] === x) r++;
-    if (r + 1 < v.length && v[r + 1]! < x) continue;
-    let left = x;
-    for (let l = j - 1; l >= 0 && v[l]! >= x; l--) left = Math.max(left, v[l]!);
-    let right = x;
-    for (let q = r + 1; q < v.length && v[q]! >= x; q++) right = Math.max(right, v[q]!);
-    out.push({ at: idx[j]!, prominence: Math.min(left, right) - x });
-  }
-  return out;
 }
 
 /**

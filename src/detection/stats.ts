@@ -106,3 +106,72 @@ export function lowestWindow(values: ArrayLike<number>, from: number, to: number
   }
   return best;
 }
+
+/**
+ * Centred rolling percentile: out[i] = percentile `p` of the finite values in [i − half, i + half]
+ * (truncated at the edges), NaN where that window has none. Keeps the window sorted (binary search
+ * + shift), O(n · window).
+ */
+export function rollingPercentile(values: ArrayLike<number>, half: number, p: number): Float32Array {
+  const n = values.length;
+  const h = Math.max(0, Math.floor(half));
+  const out = new Float32Array(n);
+  const win = new Float64Array(Math.min(n, 2 * h + 1) + 1);
+  let k = 0;
+  // First index with win[idx] >= v.
+  const lowerBound = (v: number) => {
+    let lo = 0;
+    let hi = k;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (win[mid]! < v) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  const add = (v: number) => {
+    if (!Number.isFinite(v)) return;
+    const at = lowerBound(v);
+    win.copyWithin(at + 1, at, k);
+    win[at] = v;
+    k++;
+  };
+  const remove = (v: number) => {
+    if (!Number.isFinite(v)) return;
+    const at = lowerBound(v);
+    win.copyWithin(at, at + 1, k);
+    k--;
+  };
+  for (let j = 0; j < Math.min(n, h); j++) add(values[j]!);
+  for (let i = 0; i < n; i++) {
+    if (i + h < n) add(values[i + h]!);
+    if (i - h - 1 >= 0) remove(values[i - h - 1]!);
+    out[i] = percentileSorted(win.subarray(0, k), p);
+  }
+  return out;
+}
+
+/**
+ * Local minima of `value` in [a, b) with their prominence: from the minimum, the highest value
+ * passed on each side before reaching a lower point (or the span's end); the lower of the two
+ * sides minus the minimum. A plateau counts once (its first sample). NaN samples are skipped.
+ */
+export function valleyProminence(value: (i: number) => number, a: number, b: number): Array<{ at: number; prominence: number }> {
+  const idx: number[] = [];
+  for (let i = a; i < b; i++) if (!Number.isNaN(value(i))) idx.push(i);
+  const v = idx.map(value);
+  const out: Array<{ at: number; prominence: number }> = [];
+  for (let j = 0; j < v.length; j++) {
+    const x = v[j]!;
+    if (j > 0 && v[j - 1]! <= x) continue;
+    let r = j;
+    while (r + 1 < v.length && v[r + 1] === x) r++;
+    if (r + 1 < v.length && v[r + 1]! < x) continue;
+    let left = x;
+    for (let l = j - 1; l >= 0 && v[l]! >= x; l--) left = Math.max(left, v[l]!);
+    let right = x;
+    for (let q = r + 1; q < v.length && v[q]! >= x; q++) right = Math.max(right, v[q]!);
+    out.push({ at: idx[j]!, prominence: Math.min(left, right) - x });
+  }
+  return out;
+}

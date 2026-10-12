@@ -11,11 +11,11 @@ import type {
 } from './types';
 
 export type * from './types';
-export { DEFAULT_PARAMS, PARAM_SPECS, normalizeParams, needsResample, SAMPLING_PARAM_KEYS } from './params';
-export type { ParamSpec } from './params';
+export { DEFAULT_PARAMS, PARAM_SPECS, normalizeParams, needsResample, isChoiceSpec, SAMPLING_PARAM_KEYS, SIGNAL_PARAM_KEYS } from './params';
+export type { ParamSpec, NumberParamSpec, ChoiceParamSpec, NumericParamKey } from './params';
 export { poolGray } from './signals';
-export { findCandidates, bestIndex as bestFrameIndex } from './candidates';
-export { percentile, meanAbsDiff, lowestWindow as lowestSumWindow } from './stats';
+export { findCandidates, innerPeakCuts, bestIndex as bestFrameIndex } from './candidates';
+export { percentile, meanAbsDiff, lowestWindow as lowestSumWindow, rollingPercentile, valleyProminence } from './stats';
 
 export interface DetectionOutput {
   signals: Signals;

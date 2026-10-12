@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PARAMS, needsResample, normalizeParams, PARAM_SPECS } from './params';
+import { DEFAULT_PARAMS, isChoiceSpec, needsResample, normalizeParams, PARAM_SPECS } from './params';
 
 describe('params', () => {
   it('defaults match the validated algorithm', () => {
@@ -19,6 +19,10 @@ describe('params', () => {
     const keys = Object.keys(DEFAULT_PARAMS).sort();
     expect(PARAM_SPECS.map((s) => s.key).sort()).toEqual(keys);
     for (const s of PARAM_SPECS) {
+      if (isChoiceSpec(s)) {
+        expect(s.options).toContain(DEFAULT_PARAMS[s.key]);
+        continue;
+      }
       expect(DEFAULT_PARAMS[s.key]).toBeGreaterThanOrEqual(s.min);
       expect(DEFAULT_PARAMS[s.key]).toBeLessThanOrEqual(s.max);
     }

@@ -1,4 +1,4 @@
-/** Tiny hash router: #/, #/process, #/session/<id>, #/session/<id>/videos, #/settings, … */
+/** Tiny hash router: #/, #/process, #/session/<id>, #/session/<id>/videos, #/settings, #/lab, … */
 export type Route =
   | { name: 'home'; tab?: 'asanas' | 'sessions' }
   | { name: 'process' }
@@ -8,13 +8,15 @@ export type Route =
   | { name: 'asana'; id: string }
   | { name: 'settings' }
   | { name: 'catalog' }
-  | { name: 'template'; id: string };
+  | { name: 'template'; id: string }
+  | { name: 'lab' };
 
 export function parseHash(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
   if (parts[0] === 'process') return { name: 'process' };
   if (parts[0] === 'settings') return { name: 'settings' };
   if (parts[0] === 'catalog') return { name: 'catalog' };
+  if (parts[0] === 'lab') return { name: 'lab' };
   if (parts[0] === 'template' && parts[1]) return { name: 'template', id: parts[1] };
   if (parts[0] === 'video' && parts[1]) return { name: 'video', id: parts[1] };
   if (parts[0] === 'session' && parts[1] && parts[2] === 'videos') return { name: 'session-videos', id: parts[1] };
@@ -45,6 +47,8 @@ export function routeHash(r: Route): string {
       return '#/catalog';
     case 'template':
       return `#/template/${encodeURIComponent(r.id)}`;
+    case 'lab':
+      return '#/lab';
   }
 }
 

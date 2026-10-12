@@ -1,4 +1,4 @@
-import { argminRange, lowestWindow, meanAbsDiff, percentileSorted, sortedFinite } from './stats';
+import { argminRange, lowestWindow, meanAbsDiff, percentileSorted, rollingPercentile, sortedFinite, valleyProminence } from './stats';
 
 /** Largest finite value of `v` in [from, to), -Infinity if none. */
 function maxRange(v: ArrayLike<number>, from: number, to: number): number {
@@ -15,6 +15,8 @@ interface Run {
   best: number;
   alternates: number[];
   clipStart: number;
+  /** Cut off the previous run at an inner C peak (`splitPeakFactor`): never merged with it again. */
+  cutBefore?: boolean;
 }
 
 /** Maximal runs of indices where `still(i)` holds. Half-open ranges. */
@@ -81,14 +83,66 @@ function toCandidate(r: Run, p: DetectionParams): Candidate {
   };
 }
 
+/** Per-sample still thresholds: entering a hold (`stillPercentile`) and staying in it (`stillPercentileExit`). */
+interface Thresholds {
+  enter: (i: number) => number;
+  exit: (i: number) => number;
+}
+
+function thresholds(C: Float32Array, n: number, sorted: Float64Array, p: DetectionParams): Thresholds {
+  const exitP = Math.max(p.stillPercentile, p.stillPercentileExit);
+  if (p.thresholdMode === 'rolling') {
+    const half = Math.round((p.thresholdWindowS * p.sampleHz) / 2);
+    const values = C.subarray(0, n);
+    const enter = rollingPercentile(values, half, p.stillPercentile);
+    const exit = exitP === p.stillPercentile ? enter : rollingPercentile(values, half, exitP);
+    return { enter: (i) => enter[i]!, exit: (i) => exit[i]! };
+  }
+  const enter = percentileSorted(sorted, p.stillPercentile);
+  const exit = percentileSorted(sorted, exitP);
+  return { enter: () => enter, exit: () => exit };
+}
+
+/**
+ * Still runs with hysteresis: maximal runs of C ≤ exit threshold that contain at least one sample
+ * with C ≤ enter threshold (with exit = enter simply the runs of C ≤ threshold).
+ */
+function hysteresisRuns(C: Float32Array, n: number, t: Thresholds): Array<[number, number]> {
+  return stillRuns(n, (i) => C[i]! <= t.exit(i)).filter(([a, b]) => {
+    for (let i = a; i < b; i++) if (C[i]! <= t.enter(i)) return true;
+    return false;
+  });
+}
+
+/**
+ * Cut points (sample indices) inside the run [a, b): the inner peaks of C whose prominence (how far
+ * C falls on both sides before rising to a higher peak or reaching the run's end; `valleyProminence`
+ * on −C, as in labeling's split into k) is at least `factor` × the threshold there. Most prominent
+ * first, as long as every part keeps at least `minLen` samples.
+ */
+export function innerPeakCuts(C: ArrayLike<number>, a: number, b: number, threshold: (i: number) => number, factor: number, minLen: number): number[] {
+  if (!(factor > 0)) return [];
+  const peaks = valleyProminence((i) => (Number.isFinite(C[i]!) ? -C[i]! : NaN), a, b)
+    .filter((v) => v.prominence > 0 && v.prominence >= factor * threshold(v.at))
+    .sort((x, y) => y.prominence - x.prominence || x.at - y.at);
+  const cuts: number[] = [];
+  for (const pk of peaks) {
+    const bounds = [a, ...cuts, pk.at, b].sort((x, y) => x - y);
+    if (bounds.every((v, i) => i === 0 || v - bounds[i - 1]! >= minLen)) cuts.push(pk.at);
+  }
+  return cuts.sort((x, y) => x - y);
+}
+
 /**
  * Turns signals into hold candidates:
- *  1. still = C ≤ percentile(C, stillPercentile); special case: no clear posture change → one run
- *  2. join gaps < gapMergeS, drop runs < minHoldS
+ *  1. still = C ≤ percentile(C, stillPercentile) (global, or rolling over thresholdWindowS), with
+ *     hysteresis up to stillPercentileExit; special case: no clear posture change → one run
+ *  2. join gaps < gapMergeS, drop runs < minHoldS, split runs at prominent inner C peaks
+ *     (splitPeakFactor, off by default)
  *  3. best frame = argmin m in the middle `bestFrameMiddle` of the run
  *  4. clip window = lowest summed m over clipWindowS
  *  5. merge adjacent candidates whose best frames look alike and with no movement between them
- *     beyond the sway inside them (alternates keep the merged-away bests)
+ *     beyond the sway inside them (alternates keep the merged-away bests; split parts stay apart)
  */
 export async function findCandidates(
   signals: Signals,
@@ -106,15 +160,24 @@ export async function findCandidates(
   // Only short clips can be a single hold; long practices with much movement have a small spread too.
   const short = n / p.sampleHz <= p.singleStillMaxS + 1e-9;
   const singleStill = short && (sorted.length === 0 || p99 <= p.singleStillMaxSpread * p50 + 1e-9);
+  const t = thresholds(C, n, sorted, p);
 
   let runs: Run[];
   if (singleStill) {
     runs = [makeRun(m, 0, n, p)];
   } else {
-    const raw = stillRuns(n, (i) => C[i]! <= threshold);
-    const joined = joinGaps(raw, Math.round(p.gapMergeS * p.sampleHz));
+    const joined = joinGaps(hysteresisRuns(C, n, t), Math.round(p.gapMergeS * p.sampleHz));
     const minLen = p.minHoldS * p.sampleHz;
-    runs = joined.filter(([a, b]) => b - a >= minLen - 1e-9).map(([a, b]) => makeRun(m, a, b, p));
+    runs = [];
+    for (const [a, b] of joined.filter(([a, b]) => b - a >= minLen - 1e-9)) {
+      const cuts = innerPeakCuts(C, a, b, t.enter, p.splitPeakFactor, Math.ceil(minLen - 1e-9));
+      const edges = [a, ...cuts, b];
+      for (let k = 1; k < edges.length; k++) {
+        const r = makeRun(m, edges[k - 1]!, edges[k]!, p);
+        if (k > 1) r.cutBefore = true;
+        runs.push(r);
+      }
+    }
   }
   const preMerge = runs.map((r) => toCandidate(r, p));
 
@@ -125,16 +188,16 @@ export async function findCandidates(
     if (!f) cache.set(i, (f = await frames.frame(i)));
     return f;
   };
-  const cap = await neighbourCap(runs, C, threshold, frame, p);
+  const cap = await neighbourCap(runs, C, t.enter, frame, p);
   const merged: Run[] = [];
   const maxGap = p.similarMergeMaxGapS * p.sampleHz;
   for (const r of runs) {
     const last = merged[merged.length - 1];
     // Scale: the larger of the still threshold (4 s means) and the frame-to-frame noise floor
     // at the two best frames (single frames are noisier than 4 s means).
-    const scale = last ? Math.max(threshold, m[last.best] ?? 0, m[r.best] ?? 0) : 0;
+    const scale = last ? Math.max(t.enter(r.start), m[last.best] ?? 0, m[r.best] ?? 0) : 0;
     const maxDiff = Math.min(cap, p.similarMergeFactor * (Number.isFinite(scale) ? scale : 0));
-    if (last && r.start - last.end <= maxGap && maxDiff > 0 && quietGap(m, last, r, p.similarMergeMotion)) {
+    if (last && !r.cutBefore && r.start - last.end <= maxGap && maxDiff > 0 && quietGap(m, last, r, p.similarMergeMotion)) {
       const d = meanAbsDiff(await frame(last.best), await frame(r.best));
       if (d < maxDiff) {
         const keepLast = !(m[r.best]! < m[last.best]!);
@@ -174,7 +237,7 @@ function quietGap(m: Float32Array, a: Run, b: Run, factor: number): boolean {
 async function neighbourCap(
   runs: Run[],
   C: Float32Array,
-  threshold: number,
+  threshold: (i: number) => number,
   frame: (i: number) => Promise<Uint8Array>,
   p: DetectionParams,
 ): Promise<number> {
@@ -183,8 +246,9 @@ async function neighbourCap(
     const a = runs[i - 1]!;
     const b = runs[i]!;
     let peak = -Infinity;
-    for (let k = a.end; k < b.start; k++) if (C[k]! > peak) peak = C[k]!;
-    if (peak >= p.similarMergeRefPeak * threshold) d.push(meanAbsDiff(await frame(a.best), await frame(b.best)));
+    let at = a.end;
+    for (let k = a.end; k < b.start; k++) if (C[k]! > peak) ((peak = C[k]!), (at = k));
+    if (peak >= p.similarMergeRefPeak * threshold(at)) d.push(meanAbsDiff(await frame(a.best), await frame(b.best)));
   }
   if (d.length < p.similarMergeMinPairs) return Infinity;
   d.sort((x, y) => x - y);

@@ -36,11 +36,11 @@ API). `src/architecture.test.ts` enforces the allowed dependencies:
 | `source` | File → metadata, fingerprint, gray samples on a 4 Hz grid, exact frame at t, packets for a range, HDR helpers | nothing (+ Mediabunny) |
 | `model` | Shared data model (types), `newId`, catalog seed + Primary series template | `detection` types |
 | `storage` | `MetadataStore` (IndexedDB, one repository per entity), OPFS sample files, quota helpers | `model` |
-| `labeling` | Suggestion engine; review edits on candidates (merge, split, add missed, nudge, reconcile); catalog search | `model`, `detection` (best-frame helpers on signals) |
+| `labeling` | Suggestion engine; review edits on candidates (merge, split, add missed, nudge, reconcile); catalog search; scoring detection against labeled holds in review edits (`evaluate.ts`) | `model`, `detection` (best-frame helpers on signals, `findCandidates`) |
 | `capture` | Still (exact frame → JPEG q 0.9 + 512 px thumb + preview for the cropper) and clip (720p/1080p H.264 re-encode via WebCodecs, or `original` = stream copy snapped to key frames; falls back to `original` when AVC encoding is unavailable) | `source`, `model` |
-| `crop` | `Cropper` interface; MediaPipe Pose Landmarker (lite, CPU, lazy, Cache Storage `mediapipe-pose-v1` for offline) → body box + coarse posture class; `nullCropper` fallback | `model` |
+| `crop` | `Cropper` interface; MediaPipe Pose Landmarker (lite, CPU, lazy, Cache Storage `mediapipe-pose-v1` for offline) → body box + coarse posture class (+ image landmarks with z, world landmarks); `nullCropper` fallback | `model` |
 | `progression` | Views over holds + assets: items per asana (oldest first), display crop, tile aspect, grid density, swipe, flipbook timing | `model` |
-| `ui` | Screens, components, workers; the **only** place modules are wired together | public APIs of all modules |
+| `ui` | Screens, components, workers, research export + detection lab (`ui/research/`); the **only** place modules are wired together | public APIs of all modules |
 
 Imports into another module must go through its `index.ts` or `types.ts`.
 
@@ -251,7 +251,16 @@ share sheet ("Save to Files"). "Keep separate" for same-day sessions is `Session
    of 2K+1 frames (K = 16). Edges use truncated windows of at least `edgeWindowMinS` = 1 s; C is
    NaN in the first/last second (NaN never counts as still).
 4. still = C ≤ p55(C) (≤ instead of < so exact ties, e.g. noise-free synthetic video, work);
-   join gaps < 1 s; keep runs ≥ 6 s. Single-still special case: if the video is ≤ 300 s and
+   join gaps < 1 s; keep runs ≥ 6 s. Variants, all off by default (defaults = the behaviour above;
+   `variants.test.ts`): `thresholdMode: 'rolling'` = the percentile within ± `thresholdWindowS`/2
+   (300 s) around each sample (`stats.rollingPercentile`, sorted window; `CandidateResult.threshold`
+   stays the global value for display and scale); `stillPercentileExit` = hysteresis (a run starts at
+   C ≤ the `stillPercentile` threshold and extends while C ≤ the exit percentile's threshold; values
+   ≤ stillPercentile = none); `splitPeakFactor` > 0 cuts a still run at inner C peaks whose
+   prominence (`valleyProminence` on −C, shared with `labeling.splitInto`) is ≥ factor × threshold,
+   most prominent first while every part stays ≥ minHoldS (`innerPeakCuts`); split parts are never
+   merged again by step 7. `thresholdMode` is the only choice parameter (`ChoiceParamSpec`, a select
+   in the debug panel; `isChoiceSpec`). Single-still special case: if the video is ≤ 300 s and
    p99(C) ≤ 4 × p50(C) it has no clear posture change → one candidate covering the whole video.
    (p99 rather than p95: videos with very long holds have < 5 % transition samples. The length
    limit: a 67 min practice that is mostly movement had p99/p50 = 3.0 and became one candidate.)
@@ -295,6 +304,54 @@ Optimisation: `skipNonReference` drops packets that no other frame references (H
 non-reference NAL types 0,2,…,14; H.264 `nal_ref_idc == 0`) before decoding. Default on; toggle
 in Debug. Measured skip ratio is shown on the processing screen.
 
+### Research tooling (detection lab, research export)
+
+Settings → Diagnostics (with "Copy diagnostics report"). Both run in `ui/pipeline/research.worker.ts`
+(reads IndexedDB and OPFS, writes nothing; frames: chunked sequential reads + a per-frame cache for
+best frames, never a whole sample file in memory); the finished file waits for a fresh tap
+("Save" → `shareOrDownload`), state in `ui/state/research.svelte.ts`. Both workers get their pose
+model from `ui/pipeline/cropper.ts`. The repository is public: neither file holds file names,
+notes, places, coordinates, images or analysis frames (`research.test.ts` checks the export).
+
+- **Scoring** (`labeling/evaluate.ts`, pure, also on the committed fixtures in Node): truth = the
+  labeled holds of a fully labeled video (`isFullyLabeled`: no open candidate, ≥ 1 labeled; "Not a
+  pose" = false detection, uncovered time = no hold). A candidate *touches* a hold when they overlap
+  by ≥ 30 % of the shorter one. Own: one candidate covers ≥ 50 % of the hold and ≥ 50 % of it is the
+  hold. Missed: the touching candidates together cover < 30 % (fragments covering more are merges).
+  Each candidate belongs to the hold it overlaps most, each found hold to its largest touching
+  candidate: needSplit = Σ (holds sharing a candidate − 1), needMerge = Σ (candidates sharing a found
+  hold − 1; fragments of a missed hold go with the miss), falsePos = touches no hold. `EDIT_COST`:
+  editCost = 2·missed + needSplit + needMerge + falsePos. Medians of |Δstart|, |Δend|, |Δbest| over
+  own holds; `bestOverTol` = own holds with |Δbest| > 1.5 s. Floors with the defaults
+  (`evaluate.test.ts`): outdoor fixture 31 (missed 1: Prasarita Padottanasana B, a 7 s candidate in
+  a 28 s hold; 7 splits, 10 merges, 12 false), finishing clip 0.
+- **Detection lab** (`#/lab`, `screens/DetectionLab.svelte`, `ui/research/lab.ts`): a JSON grid
+  `{base?, vary: {param: values[]}}` (text kept in localStorage `asana.lab.grid`; `gridText`
+  formats it) → `expandGrid` (normalized; effective duplicates dropped via `effectiveParams`;
+  sampling parameters rejected; ≤ 2000 sets) → `runLab` on every fully labeled video, sessions
+  in date order (stored signals reused when the signal parameters match, else recomputed per
+  signal-parameter set) → top 10 by total edit cost (then missed, then grid order) plus the defaults
+  row, and leave-one-session-out (`leaveOneSessionOut`: per held-out session the set best on the
+  others, its cost there vs the defaults'). "Export results" = `LabReport`
+  (`asana-progression/lab` v1: grid, per set `diff` from the defaults, totals, per video, per
+  session, ranking, loso). `DEFAULT_LAB_GRID` (144 sets): stillPercentile 50/55/60 × global |
+  rolling 300/900 s × exit 55/65 × splitPeakFactor 0/0.5/0.75/1 × similarMergeFactor 1.5/2.
+- **Research export** (`ui/research/export.ts`, `asana-progression/research` v1, estimated ≈ 0.5 MB
+  per 70 min session; a github.com browser upload takes up to 25 MiB): catalog, templates, sessions (id, day,
+  template, video order, fullyLabeled), videos (id, durationS, size, fps, codec, recordedAt);
+  per analysis its (normalized) params, frame size, threshold, review candidates (status, origin,
+  holdId, spans, best, alternates, clip), stored preMerge, m and C with the default signal
+  parameters (float16 little-endian base64, `ui/research/float16.ts`; `from: stored | recomputed`),
+  and `fresh` = `findCandidates` with `DEFAULT_PARAMS` on the stored frames (candidates, preMerge,
+  `mergeInputs`: for pre-merge pairs ≤ 120 s apart the best-frame `meanAbsDiff` and the largest m
+  between them — everything the similar-merge needs besides the frames); per hold its spans, clip,
+  templateEntryIndex, rep/reps (`progression.holdReps`), crop {auto, manual, autoVersion}, still
+  size, and the pose re-run on the stored still like capture does (preview long side 640: 33 image
+  landmarks and 33 world landmarks as `[x, y, z, visibility]`, posture, `box`, `boxAll` =
+  `boxFromLandmarks` with every landmark regardless of visibility, 4 decimals; `poseStatus` ok |
+  no-still | no-body | no-model | error); `summary` = the scoring of `fresh` per video and over the
+  fully labeled ones.
+
 ### Real-signal fixtures
 
 Debug → "Export analysis JSON" writes `AnalysisExport` (signals, params, candidates, pre-merge
@@ -334,7 +391,7 @@ recompute candidates/preMerge with the defaults before committing a fixture.
 | `@mediapipe/tasks-vision` | Pose landmarks for the automatic crop (Apache-2.0). Loaded lazily in the capture worker only; wasm + model self-hosted and cached for offline use. |
 | dev: `vite`, `@sveltejs/vite-plugin-svelte` | Build. |
 | dev: `typescript` 6.x, `svelte-check` | Type checking (svelte-check does not support TS 7 yet). |
-| dev: `vitest`, `@vitest/coverage-v8` | Unit tests + coverage thresholds (detection, labeling ≥ 98 % lines; storage ≥ 95 %). |
+| dev: `vitest`, `@vitest/coverage-v8` | Unit tests + coverage thresholds (detection, labeling ≥ 98 % lines; storage ≥ 95 %; `ui/research` is measured too). |
 | dev: `fake-indexeddb` | IndexedDB in Node for storage tests. |
 | dev: `@playwright/test` | Smoke tests in Chromium. |
 
@@ -448,6 +505,13 @@ Fill in from the user's device reports (Settings → "Copy diagnostics report", 
    reuses labels and re-captures ✅. Backup export/import ✅. Design polish ✅ (shared overlay
    frame, one date formatter, clip quality badge, re-attach from the asana page). Still open:
    on-device verification.
+
+6. **Research** (improve hold finding, naming, auto-crop from the user's fully labeled sessions).
+   Stage A ✅: scoring, detection lab, detector variants, research export (see "Research tooling").
+   Stage B (after the user uploads the research export and a lab run to `research/data/` on branch
+   `research-data`): scripts in `research/` and `research/REPORT.md`; change defaults only if the
+   edit cost drops in every held-out session and both fixtures still pass; storage changes (a
+   per-hold pose) only after asking.
 
 Open (needs the user):
 
