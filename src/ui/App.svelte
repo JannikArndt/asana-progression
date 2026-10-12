@@ -3,6 +3,7 @@
   import Home from './screens/Home.svelte';
   import Processing from './screens/Processing.svelte';
   import SessionReview from './screens/SessionReview.svelte';
+  import SessionVideos from './screens/SessionVideos.svelte';
   import AsanaProgression from './screens/AsanaProgression.svelte';
   import Catalog from './screens/Catalog.svelte';
   import TemplateEditor from './screens/TemplateEditor.svelte';
@@ -44,6 +45,10 @@
 {:else if router.route.name === 'session'}
   {#key router.route.id}
     <SessionReview id={router.route.id} />
+  {/key}
+{:else if router.route.name === 'session-videos'}
+  {#key router.route.id}
+    <SessionVideos id={router.route.id} />
   {/key}
 {:else if router.route.name === 'asana'}
   {#key router.route.id}<AsanaProgression id={router.route.id} />{/key}

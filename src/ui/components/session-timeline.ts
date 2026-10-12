@@ -1,6 +1,7 @@
 /**
  * Pure maths of the sticky session timeline: the overview strip (labeled holds grouped by their
- * catalog group) and the detail window that follows the scroll position of the card list.
+ * catalog group) and the detail window that follows the scroll position of the card list. A
+ * session's videos are one timeline: placed back to back in session order (`videoOffsets`).
  */
 
 export interface Range {
@@ -8,14 +9,14 @@ export interface Range {
   endS: number;
 }
 
-/** Length of the detail window for long videos. */
-export const DETAIL_WINDOW_S = 20 * 60;
-/** Videos up to this long are shown whole in the detail graph. */
-export const WHOLE_VIDEO_MAX_S = 25 * 60;
+/** Length of the detail window for long sessions. */
+export const DETAIL_WINDOW_S = 10 * 60;
+/** Sessions up to this long are shown whole in the detail graph. */
+export const WHOLE_VIDEO_MAX_S = 12 * 60;
 /** The window only moves once the current time leaves this middle share of it (no jitter). */
 export const FOLLOW_BAND = 0.5;
 
-/** Visible length of the detail graph for a video. */
+/** Visible length of the detail graph for a session (or video) of `durationS`. */
 export function detailLength(durationS: number): number {
   return durationS <= WHOLE_VIDEO_MAX_S ? durationS : DETAIL_WINDOW_S;
 }
@@ -105,4 +106,51 @@ export function firstBelow(n: number, bottomOf: (i: number) => number, y: number
     else lo = mid + 1;
   }
   return lo;
+}
+
+// ----- one timeline for all videos of a session -----
+
+/**
+ * Start of each video on the session timeline: the videos back to back in session order. Pauses
+ * between clips are left out (recording times can be export times; the order is the user's).
+ */
+export function videoOffsets(videos: ReadonlyArray<{ id: string; durationS: number }>): Map<string, number> {
+  const out = new Map<string, number>();
+  let t = 0;
+  for (const v of videos) {
+    out.set(v.id, t);
+    t += Math.max(0, v.durationS);
+  }
+  return out;
+}
+
+export interface SignalPart {
+  offsetS: number;
+  durationS: number;
+  sampleHz: number;
+  /** C(t) of the video. */
+  values: Float32Array;
+  /** Still threshold of the video; C is divided by it so every part's threshold is 1. */
+  threshold: number;
+}
+
+/**
+ * C(t) of all videos on the session timeline at `sampleHz`: each part divided by its own threshold
+ * (videos differ in light and framing, so their raw C is not comparable), nearest sample. Time not
+ * covered by a part (and a part's first and last second, where C is NaN) stays NaN, so the line
+ * breaks between videos.
+ */
+export function combinedSignal(parts: readonly SignalPart[], totalS: number, sampleHz: number): Float32Array {
+  const out = new Float32Array(Math.max(0, Math.ceil(totalS * sampleHz))).fill(NaN);
+  for (const p of parts) {
+    const scale = p.threshold > 0 && Number.isFinite(p.threshold) ? 1 / p.threshold : 1;
+    const from = Math.max(0, Math.ceil(p.offsetS * sampleHz - 1e-6));
+    const to = Math.min(out.length, Math.ceil((p.offsetS + p.durationS) * sampleHz - 1e-6));
+    for (let i = from; i < to; i++) {
+      const j = Math.round((i / sampleHz - p.offsetS) * p.sampleHz);
+      const c = p.values[j];
+      if (c !== undefined) out[i] = c * scale;
+    }
+  }
+  return out;
 }

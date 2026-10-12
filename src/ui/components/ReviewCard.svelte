@@ -12,6 +12,8 @@
   interface Props {
     entry: SessionEntry;
     number: number;
+    /** Start of the card's video on the session timeline: times are shown in session time. */
+    offsetS?: number;
     suggestion: Suggestion | undefined;
     nameOf: (asanaId: string) => string;
     frame: { width: number; height: number; hz: number };
@@ -32,7 +34,7 @@
     onmore: () => void;
     onrestore: () => void;
   }
-  let { entry, number, suggestion, nameOf, frame, selected, thumb, captureStatus, rep, expected, onsplit, onframe, oncrop, onfullframe, onselect, onconfirm, onpick, onmore, onrestore }: Props = $props();
+  let { entry, number, offsetS = 0, suggestion, nameOf, frame, selected, thumb, captureStatus, rep, expected, onsplit, onframe, oncrop, onfullframe, onselect, onconfirm, onpick, onmore, onrestore }: Props = $props();
   const statusText: Record<CaptureStatus, string> = {
     queued: 'Waiting to save still…',
     capturing: 'Saving still and clip…',
@@ -119,7 +121,7 @@
   </div>
   <div class="info">
     <div class="meta tabular">
-      <span>{formatTime(c.startS)}–{formatTime(c.endS)}</span>
+      <span>{formatTime(offsetS + c.startS)}–{formatTime(offsetS + c.endS)}</span>
       <span class="faint">· {formatDuration(c.endS - c.startS)}</span>
       <button class="more" type="button" onclick={onmore} aria-label="More actions for hold {number}">•••</button>
     </div>

@@ -9,7 +9,7 @@
   import { invalidateSamples, sampleReader } from '../state/samples';
   import { pipeline } from '../pipeline/controller.svelte';
   import { capture, deleteAssets } from '../state/capture.svelte';
-  import { assessHandover, copyText, deviceInfo, formatBytes, shareOrDownload, withoutLocation } from '../diagnostics';
+  import { assessHandover, copyText, deviceInfo, formatBytes, shareOrDownload, videoDiagnostics, withoutLocation } from '../diagnostics';
   import { formatDuration } from './timeline';
   import { formatCoords } from '../state/session-data';
 
@@ -131,14 +131,7 @@
     const report = {
       app: { version: __APP_VERSION__, builtAt: __BUILT_AT__ },
       device: deviceInfo(),
-      video: { ...video, meta: undefined },
-      source: meta ? withoutLocation(meta) : null,
-      handover,
-      decoderSupport: support,
-      processing: stats,
-      analysis: analysis
-        ? { samples: analysis.sampleCount, frame: `${analysis.frameWidth}×${analysis.frameHeight}`, candidates: analysis.candidates.length, threshold: analysis.threshold, singleStill: analysis.singleStill }
-        : null,
+      ...videoDiagnostics(video, analysis, support),
       hdrProbe: await app.db.settings.get('diag.hdrProbe'),
       quotaProbe: await app.db.settings.get('diag.quotaProbe'),
     };

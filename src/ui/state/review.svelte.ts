@@ -266,6 +266,21 @@ export class SessionReview {
     await this.refreshSuggestions();
   }
 
+  /**
+   * New order of the session's videos (a permutation of `session.videoIds`): the session timeline,
+   * the card list and template suggestions follow it.
+   */
+  async setVideoOrder(videoIds: string[]) {
+    const session = this.session;
+    if (!session || videoIds.join('\n') === session.videoIds.join('\n')) return;
+    const s: Session = { ...session, videoIds };
+    await app.db.sessions.put(s);
+    app.upsertSession(s);
+    const byId = new Map(this.videos.map((v) => [v.id, v]));
+    this.videos = videoIds.map((id) => byId.get(id)).filter((v): v is Video => !!v);
+    await this.refreshSuggestions();
+  }
+
   /** Other sessions recorded on the same day (e.g. clips cut from one practice). */
   get sameDay(): Session[] {
     return this.session ? sameDaySessions(app.sessions, this.session) : [];

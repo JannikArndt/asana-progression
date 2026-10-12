@@ -7,10 +7,9 @@
   import FrameScrubber from '../components/FrameScrubber.svelte';
   import FrameProbe from '../components/FrameProbe.svelte';
   import CropEditor from '../components/CropEditor.svelte';
-  import DebugPanel from '../components/DebugPanel.svelte';
   import Sheet from '../components/Sheet.svelte';
   import { formatDuration, formatTime, previewTimes, type Span } from '../components/timeline';
-  import { detailLength, firstBelow, followWindow, groupSegments, windowAround, type Range } from '../components/session-timeline';
+  import { combinedSignal, detailLength, firstBelow, followWindow, groupSegments, videoOffsets, windowAround, type Range } from '../components/session-timeline';
   import { formatDay } from '../format';
   import { expectedHolds, nextEntries, type Label } from '../../labeling';
   import type { Video } from '../../model';
@@ -18,7 +17,7 @@
   import { app } from '../state/app.svelte';
   import { pipeline } from '../pipeline/controller.svelte';
   import { importQueue } from '../import.svelte';
-  import { router } from '../state/router.svelte';
+  import { routeHash, router } from '../state/router.svelte';
   import { dialog } from '../state/dialog.svelte';
   import { SessionReview } from '../state/review.svelte';
   import { coverageGaps, formatCoords, placeLabel, placeNames, sessionCoords, sessionSpanS, type CoverageGap, type SessionEntry } from '../state/session-data';
@@ -39,7 +38,6 @@
   const cropHold = $derived(cropHoldId ? app.holds.find((h) => h.id === cropHoldId) : undefined);
   const cropStill = $derived(cropHoldId ? app.assets.find((a) => a.holdId === cropHoldId && a.kind === 'still') : undefined);
   let graphOpen = $state(true);
-  let debugOpen = $state<Record<string, boolean>>({});
 
   $effect(() => {
     if (app.ready) void review.load(id);
@@ -86,88 +84,105 @@
     if (name !== null) await review.setPlaceName(name);
   }
 
-  function spansFor(videoId: string): Span[] {
-    return review.entries
-      .filter((e) => e.videoId === videoId)
-      .map((e) => ({
+  // ----- one timeline for the whole session: the videos back to back in session order -----
+
+  const offsets = $derived(videoOffsets(review.videos));
+  const timelineS = $derived(review.videos.reduce((sum, v) => sum + v.durationS, 0));
+  /** Where one video ends and the next begins. */
+  const boundaries = $derived(review.videos.slice(1).map((v) => offsets.get(v.id) ?? 0));
+  const offsetOf = (videoId: string) => offsets.get(videoId) ?? 0;
+  const analysed = $derived(review.videos.filter((v) => review.analyses[v.id]));
+  const unanalysed = $derived(review.videos.filter((v) => !review.analyses[v.id]));
+
+  /** C(t) of all videos on the session timeline, each divided by its threshold (threshold 1). */
+  let signalSeq = 0;
+  const signal = $derived.by(() => {
+    const parts = analysed.map((v) => {
+      const a = review.analyses[v.id]!;
+      return { offsetS: offsetOf(v.id), durationS: v.durationS, sampleHz: a.sampleHz, values: a.C, threshold: a.threshold };
+    });
+    const hz = Math.max(1, ...parts.map((p) => p.sampleHz));
+    return { values: combinedSignal(parts, timelineS, hz), sampleHz: hz, version: ++signalSeq };
+  });
+
+  const spans = $derived<Span[]>(
+    review.entries.map((e) => {
+      const o = offsetOf(e.videoId);
+      return {
         id: e.key,
-        startS: e.candidate.startS,
-        endS: e.candidate.endS,
-        bestS: e.candidate.bestS,
-        alternatesS: e.candidate.alternatesS,
+        startS: o + e.candidate.startS,
+        endS: o + e.candidate.endS,
+        bestS: o + e.candidate.bestS,
+        alternatesS: e.candidate.alternatesS.map((t) => o + t),
         status: e.candidate.status === 'labeled' && e.hold ? 'labeled' : e.candidate.status === 'dismissed' ? 'dismissed' : 'open',
         ...(e.hold ? { label: `${nameOf(e.hold.asanaId)}${e.hold.side ? ` ${e.hold.side}` : ''}` } : {}),
-      }));
-  }
+      };
+    }),
+  );
 
-  /** Entries of one video, in time order (as `review.entries`). */
-  const entriesByVideo = $derived.by(() => {
-    const out = new Map<string, SessionEntry[]>();
-    for (const e of review.entries) {
-      const list = out.get(e.videoId) ?? [];
-      list.push(e);
-      out.set(e.videoId, list);
+  const overview = $derived({
+    segments: groupSegments(
+      spans.map((sp, i) => ({
+        startS: sp.startS,
+        endS: sp.endS,
+        status: sp.status === 'labeled' ? ('labeled' as const) : ('open' as const),
+        group: review.entries[i]!.hold ? groups.get(review.entries[i]!.hold!.asanaId) : undefined,
+      })),
+    ),
+    open: spans.filter((sp) => sp.status === 'open').map((sp) => ({ startS: sp.startS, endS: sp.endS })),
+  });
+
+  type Row = { kind: 'card'; entry: SessionEntry; number: number } | { kind: 'gap'; gap: CoverageGap; video: Video };
+  /**
+   * The card list: every video's cards in session order, with a row for each uncovered stretch
+   * (per video; dismissed candidates count as covered).
+   */
+  const rows = $derived.by(() => {
+    const byVideo = new Map<string, SessionEntry[]>();
+    for (const e of review.entries) byVideo.set(e.videoId, [...(byVideo.get(e.videoId) ?? []), e]);
+    const out: Row[] = [];
+    let n = 0;
+    for (const video of analysed) {
+      const list = byVideo.get(video.id) ?? [];
+      const gaps = new Map(coverageGaps(list.map((e) => e.candidate), video.durationS).map((g) => [g.beforeIndex, g]));
+      list.forEach((entry, i) => {
+        const gap = gaps.get(i);
+        if (gap) out.push({ kind: 'gap', gap, video });
+        out.push({ kind: 'card', entry, number: ++n });
+      });
+      const last = gaps.get(list.length);
+      if (last && list.length) out.push({ kind: 'gap', gap: last, video });
     }
     return out;
   });
 
-  /** Uncovered stretches per video by the index of the card after them; dismissed candidates count as covered. */
-  function gapsFor(video: Video): Map<number, CoverageGap> {
-    const gaps = coverageGaps((entriesByVideo.get(video.id) ?? []).map((e) => e.candidate), video.durationS);
-    return new Map(gaps.map((g) => [g.beforeIndex, g]));
-  }
-
-  function overviewOf(videoId: string) {
-    const list = entriesByVideo.get(videoId) ?? [];
-    return {
-      segments: groupSegments(
-        list.map((e) => ({
-          startS: e.candidate.startS,
-          endS: e.candidate.endS,
-          status: e.candidate.status === 'labeled' && e.hold ? ('labeled' as const) : ('open' as const),
-          group: e.hold ? groups.get(e.hold.asanaId) : undefined,
-        })),
-      ),
-      open: list.filter((e) => e.candidate.status === 'open').map((e) => ({ startS: e.candidate.startS, endS: e.candidate.endS })),
-    };
-  }
-
-  // ----- sticky timeline: a detail window per video that follows the list -----
+  // ----- sticky timeline: a detail window that follows the list -----
 
   type Target = Range & { animate?: boolean };
-  /** Range requested for each video's detail graph (follow, overview taps). */
-  let targets = $state.raw<Record<string, Target>>({});
+  /** Range requested for the detail graph (follow, overview taps); null = the start. */
+  let target = $state.raw<Target | null>(null);
   /** Range the detail graph actually shows (it can be pinched and panned). */
-  let shown = $state.raw<Record<string, Range>>({});
-  let stuck = $state.raw<Record<string, boolean>>({});
-  const heads: Record<string, HTMLElement> = {};
-  const defaults = new Map<string, Target>();
+  let shown = $state.raw<Range | null>(null);
+  let stuck = $state(false);
+  let head = $state<HTMLElement>();
+  let defaultTarget: Target | null = null;
 
-  function targetOf(video: Video): Target {
-    const t = targets[video.id];
-    if (t) return t;
-    // Stable object per video: a new one would move the graph back.
-    let d = defaults.get(video.id);
-    if (!d || d.endS - d.startS !== detailLength(video.durationS)) {
-      d = windowAround(0, detailLength(video.durationS), video.durationS);
-      defaults.set(video.id, d);
-    }
-    return d;
+  function currentTarget(): Target {
+    if (target) return target;
+    // Stable object: a new one would move the graph back.
+    const len = detailLength(timelineS);
+    if (!defaultTarget || defaultTarget.endS - defaultTarget.startS !== len) defaultTarget = windowAround(0, len, timelineS);
+    return defaultTarget;
   }
 
   /** What the detail graph shows (or would show while collapsed). */
-  function windowOf(video: Video): Range {
-    return (graphOpen && shown[video.id]) || targetOf(video);
+  function currentWindow(): Range {
+    return (graphOpen && shown) || currentTarget();
   }
 
-  function setTarget(videoId: string, r: Target) {
-    targets = { ...targets, [videoId]: r };
-  }
-
-  function onView(videoId: string, startS: number, endS: number) {
-    const cur = shown[videoId];
-    if (cur && cur.startS === startS && cur.endS === endS) return;
-    shown = { ...shown, [videoId]: { startS, endS } };
+  function onView(startS: number, endS: number) {
+    if (shown && shown.startS === startS && shown.endS === endS) return;
+    shown = { startS, endS };
   }
 
   // Programmatic (smooth) scrolling passes many cards; the window must not follow it.
@@ -188,9 +203,8 @@
   }
 
   /** Scrolls the page so the card is visible below the sticky timeline (`top`: right below it). */
-  function scrollToCard(key: string, videoId: string, top = false) {
+  function scrollToCard(key: string, top = false) {
     const el = document.getElementById(`card-${key}`);
-    const head = heads[videoId];
     if (!el) return;
     const r = el.getBoundingClientRect();
     const stickyTop = head ? parseFloat(getComputedStyle(head).top) || 0 : 0;
@@ -206,23 +220,19 @@
 
   /** The card right below the sticky timeline defines the current time; the window follows it. */
   function follow() {
-    const nextStuck: Record<string, boolean> = {};
-    for (const video of review.videos) {
-      const head = heads[video.id];
-      const section = head?.parentElement?.getBoundingClientRect();
-      if (!head || !section) continue;
-      const hr = head.getBoundingClientRect();
-      const stickyTop = parseFloat(getComputedStyle(head).top) || 0;
-      nextStuck[video.id] = hr.top <= stickyTop + 0.5 && section.top < hr.top - 0.5;
-      const list = entriesByVideo.get(video.id) ?? [];
-      if (programmatic || !list.length || section.bottom < hr.bottom || section.top > window.innerHeight) continue;
-      const bottomOf = (i: number) => document.getElementById(`card-${list[i]!.key}`)?.getBoundingClientRect().bottom ?? -Infinity;
-      const c = list[Math.min(list.length - 1, firstBelow(list.length, bottomOf, hr.bottom + 8))]!.candidate;
-      const cur = windowOf(video);
-      const next = followWindow(cur, (c.startS + c.endS) / 2, video.durationS);
-      if (next !== cur) setTarget(video.id, next);
-    }
-    if (Object.keys(nextStuck).some((k) => nextStuck[k] !== stuck[k])) stuck = nextStuck;
+    const section = head?.parentElement?.getBoundingClientRect();
+    if (!head || !section) return;
+    const hr = head.getBoundingClientRect();
+    const stickyTop = parseFloat(getComputedStyle(head).top) || 0;
+    const nextStuck = hr.top <= stickyTop + 0.5 && section.top < hr.top - 0.5;
+    if (nextStuck !== stuck) stuck = nextStuck;
+    const list = review.entries;
+    if (programmatic || !list.length || section.bottom < hr.bottom) return;
+    const bottomOf = (i: number) => document.getElementById(`card-${list[i]!.key}`)?.getBoundingClientRect().bottom ?? -Infinity;
+    const e = list[Math.min(list.length - 1, firstBelow(list.length, bottomOf, hr.bottom + 8))]!;
+    const cur = currentWindow();
+    const next = followWindow(cur, offsetOf(e.videoId) + (e.candidate.startS + e.candidate.endS) / 2, timelineS);
+    if (next !== cur) target = next;
   }
 
   let scrollRaf = 0;
@@ -249,18 +259,18 @@
   });
 
   /** Overview drag: the window follows the finger. */
-  function scrubOverview(video: Video, t: number) {
-    const cur = windowOf(video);
-    setTarget(video.id, { ...windowAround(t, cur.endS - cur.startS, video.durationS), animate: false });
+  function scrubOverview(t: number) {
+    const cur = currentWindow();
+    target = { ...windowAround(t, cur.endS - cur.startS, timelineS), animate: false };
   }
 
   /** Overview tap (or end of a drag): moves the window there and scrolls the list to the card at that time. */
-  function pickOverview(video: Video, t: number, dragged: boolean) {
-    const cur = windowOf(video);
-    setTarget(video.id, { ...windowAround(t, cur.endS - cur.startS, video.durationS), animate: !dragged });
-    const list = entriesByVideo.get(video.id) ?? [];
-    const at = list.find((e) => e.candidate.endS >= t) ?? list[list.length - 1];
-    if (at) scrollToCard(at.key, video.id, true);
+  function pickOverview(t: number, dragged: boolean) {
+    const cur = currentWindow();
+    target = { ...windowAround(t, cur.endS - cur.startS, timelineS), animate: !dragged };
+    const list = review.entries;
+    const at = list.find((e) => offsetOf(e.videoId) + e.candidate.endS >= t) ?? list[list.length - 1];
+    if (at) scrollToCard(at.key, true);
   }
 
   function frameOf(videoId: string) {
@@ -271,8 +281,27 @@
   async function selectFromGraph(key: string) {
     selectedKey = key;
     await tick();
-    const e = review.entry(key);
-    if (e) scrollToCard(key, e.videoId);
+    scrollToCard(key);
+  }
+
+  /** "Add missed hold" over the whole session: with several videos, asks which part it is in. */
+  async function addMissed() {
+    if (analysed.length <= 1) {
+      if (analysed[0]) scrub = { mode: 'add', videoId: analysed[0].id };
+      return;
+    }
+    const choice = await dialog.ask({
+      title: 'Add missed hold',
+      message: 'Which part of the session is it in?',
+      options: [
+        ...analysed.map((v) => {
+          const o = offsetOf(v.id);
+          return { id: v.id, label: `${formatTime(o)}–${formatTime(o + v.durationS)}`, detail: v.fileName };
+        }),
+        { id: 'cancel', label: 'Cancel', kind: 'quiet' as const },
+      ],
+    });
+    if (review.analyses[choice]) scrub = { mode: 'add', videoId: choice };
   }
 
   async function more(entry: SessionEntry) {
@@ -281,7 +310,7 @@
     const hasStill = !!entry.hold && app.assets.some((a) => a.holdId === entry.hold!.id && a.kind === 'still');
     const f = frameOf(entry.videoId);
     const choice = await dialog.ask({
-      title: `Hold at ${Math.floor(entry.candidate.startS / 60)}:${String(Math.floor(entry.candidate.startS % 60)).padStart(2, '0')}`,
+      title: `Hold at ${formatTime(offsetOf(entry.videoId) + entry.candidate.startS)}`,
       frames: {
         videoId: entry.videoId,
         width: f.width,
@@ -392,6 +421,10 @@
 <main class="review-screen">
   <header class="top">
     <button class="btn quiet" type="button" onclick={() => router.go({ name: 'home', tab: 'sessions' })}>‹ Sessions</button>
+    {#if review.session}
+      {@const n = review.session.videoIds.length}
+      <a class="btn quiet videos-link" href={routeHash({ name: 'session-videos', id })}>{n} {n === 1 ? 'video' : 'videos'} ›</a>
+    {/if}
   </header>
 
   {#if review.loaded && !review.session}
@@ -442,121 +475,107 @@
       />
     </div>
 
-    {#each review.videos as video (video.id)}
-      {@const analysis = review.analyses[video.id]}
-      {@const entries = entriesByVideo.get(video.id) ?? []}
-      <section class="video">
-        {#if review.videos.length > 1}<h3 class="section-title">{video.fileName}</h3>{/if}
-        {#if waiting.has(video.id)}
-          <div class="card notice">
-            <p class="small">Select <strong>{video.fileName}</strong> again to save full-resolution stills and clips of the labeled holds.</p>
-            <label class="btn">
-              Select video
-              <input class="visually-hidden" type="file" accept="video/*" onchange={(e) => reattach(e, video)} />
-            </label>
-            {#if attachError}<p class="small error">{attachError}</p>{/if}
-          </div>
-        {/if}
-        {#if analysis}
-          {@const overview = overviewOf(video.id)}
-          {@const gaps = gapsFor(video)}
-          <div class="timeline-head" class:stuck={stuck[video.id]} bind:this={heads[video.id]}>
-            <div class="overview-row">
-              <TimelineOverview
-                durationS={video.durationS}
-                segments={overview.segments}
-                open={overview.open}
-                window={windowOf(video)}
-                onscrub={(t) => scrubOverview(video, t)}
-                onpick={(t, dragged) => pickOverview(video, t, dragged)}
-              />
-              <button class="chev-btn" type="button" aria-expanded={graphOpen} aria-label="Timeline graph" onclick={() => (graphOpen = !graphOpen)}>
-                <span class="chev" class:open={graphOpen}>›</span>
-              </button>
-            </div>
-            {#if graphOpen}
-              <div class="card graph">
-                <TimelineGraph
-                  durationS={video.durationS}
-                  sampleHz={analysis.sampleHz}
-                  values={analysis.C}
-                  threshold={analysis.threshold}
-                  spans={spansFor(video.id)}
-                  selectedId={selectedKey}
-                  height={136}
-                  range={targetOf(video)}
-                  onselect={selectFromGraph}
-                  onview={(a, b) => onView(video.id, a, b)}
-                />
-              </div>
-            {/if}
-          </div>
+    {#if waiting.size || unanalysed.length}
+      <div class="card notice">
+        {#each review.videos.filter((v) => waiting.has(v.id)) as video (video.id)}
+          <p class="small">Select <strong>{video.fileName}</strong> again to save full-resolution stills and clips of the labeled holds.</p>
+          <label class="btn">
+            Select video
+            <input class="visually-hidden" type="file" accept="video/*" onchange={(e) => reattach(e, video)} />
+          </label>
+        {/each}
+        {#if attachError}<p class="small error">{attachError}</p>{/if}
+        {#each unanalysed as video (video.id)}
+          <p class="small muted">{video.fileName} is not analysed yet. Import the file again to process it.</p>
+        {/each}
+      </div>
+    {/if}
 
-          {#snippet gapRow(gap: CoverageGap)}
-            <button
-              class="gap"
-              type="button"
-              aria-label="{formatDuration(gap.endS - gap.startS)} not covered at {formatTime(gap.startS)}: add a hold"
-              onclick={() => (scrub = { mode: 'add', videoId: video.id, gap })}
-            >
-              <span class="tabular">{formatDuration(gap.endS - gap.startS)} not covered</span>
-              <span class="gap-add">+ Add hold</span>
+    {#if analysed.length}
+      <section class="timeline">
+        <div class="timeline-head" class:stuck bind:this={head}>
+          <div class="overview-row">
+            <TimelineOverview
+              durationS={timelineS}
+              segments={overview.segments}
+              open={overview.open}
+              window={currentWindow()}
+              onscrub={scrubOverview}
+              onpick={pickOverview}
+            />
+            <button class="chev-btn" type="button" aria-expanded={graphOpen} aria-label="Timeline graph" onclick={() => (graphOpen = !graphOpen)}>
+              <span class="chev" class:open={graphOpen} aria-hidden="true">›</span>
             </button>
-          {/snippet}
+          </div>
+          {#if graphOpen}
+            <div class="card graph">
+              <TimelineGraph
+                durationS={timelineS}
+                sampleHz={signal.sampleHz}
+                values={signal.values}
+                version={signal.version}
+                threshold={1}
+                {spans}
+                {boundaries}
+                selectedId={selectedKey}
+                height={136}
+                range={currentTarget()}
+                onselect={selectFromGraph}
+                onview={onView}
+              />
+            </div>
+          {/if}
+        </div>
 
-          <div class="cards">
-            {#each entries as entry, i (entry.key)}
-              {#if gaps.has(i)}{@render gapRow(gaps.get(i)!)}{/if}
+        {#snippet gapRow(gap: CoverageGap, video: Video)}
+          {@const o = offsetOf(video.id)}
+          <button
+            class="gap"
+            type="button"
+            aria-label="{formatDuration(gap.endS - gap.startS)} not covered at {formatTime(o + gap.startS)}: add a hold"
+            onclick={() => (scrub = { mode: 'add', videoId: video.id, gap })}
+          >
+            <span class="tabular">{formatDuration(gap.endS - gap.startS)} not covered</span>
+            <span class="gap-add">+ Add hold</span>
+          </button>
+        {/snippet}
+
+        <div class="cards">
+          {#each rows as row (row.kind === 'card' ? row.entry.key : `gap-${row.video.id}-${row.gap.startS}`)}
+            {#if row.kind === 'gap'}
+              {@render gapRow(row.gap, row.video)}
+            {:else}
+              {@const entry = row.entry}
               <ReviewCard
                 {entry}
-                number={i + 1}
+                number={row.number}
+                offsetS={offsetOf(entry.videoId)}
                 suggestion={review.suggestions[entry.key]?.[0]}
                 {nameOf}
-                frame={frameOf(video.id)}
+                frame={frameOf(entry.videoId)}
                 selected={selectedKey === entry.key}
                 thumb={entry.hold ? app.assets.find((a) => a.holdId === entry.hold!.id && a.kind === 'thumb') : undefined}
                 captureStatus={entry.hold ? capture.status[entry.hold.id] : undefined}
                 rep={entry.hold ? reps.get(entry.hold.id) : undefined}
                 expected={expectedAt(entry)}
                 onsplit={(k) => review.splitInto(entry.key, k)}
-                onframe={() => (scrub = { mode: 'nudge', videoId: video.id, key: entry.key })}
+                onframe={() => (scrub = { mode: 'nudge', videoId: entry.videoId, key: entry.key })}
                 oncrop={entry.hold ? () => (cropHoldId = entry.hold?.id ?? null) : undefined}
-                onfullframe={app.files.has(video.id) ? () => (probe = { videoId: video.id, t: entry.candidate.bestS }) : undefined}
+                onfullframe={app.files.has(entry.videoId) ? () => (probe = { videoId: entry.videoId, t: entry.candidate.bestS }) : undefined}
                 onselect={() => (selectedKey = entry.key)}
                 onconfirm={() => review.confirm(entry.key)}
                 onpick={() => (pickerKey = entry.key)}
                 onmore={() => more(entry)}
                 onrestore={() => review.restore(entry.key)}
               />
-            {:else}
-              <p class="muted">No holds found in this video. Add one by hand below.</p>
-            {/each}
-            {#if entries.length && gaps.has(entries.length)}{@render gapRow(gaps.get(entries.length)!)}{/if}
-          </div>
-          <button class="btn add" type="button" onclick={() => (scrub = { mode: 'add', videoId: video.id })}>+ Add missed hold</button>
-        {:else}
-          <p class="muted">{video.fileName} is not analysed yet. Import the file again to process it.</p>
-        {/if}
-
-        <button
-          class="disclosure"
-          type="button"
-          aria-expanded={!!debugOpen[video.id]}
-          onclick={() => (debugOpen = { ...debugOpen, [video.id]: !debugOpen[video.id] })}
-        >
-          <span class="section-title">Debug{review.videos.length > 1 ? ` · ${video.fileName}` : ''}</span>
-          <span class="chev" class:open={debugOpen[video.id]}>›</span>
-        </button>
-        {#if debugOpen[video.id]}
-          <DebugPanel
-            {video}
-            analysis={analysis ?? null}
-            rerun={(p, onProgress) => review.rerun(video.id, p, onProgress)}
-            onchanged={() => review.load(id)}
-          />
-        {/if}
+            {/if}
+          {:else}
+            <p class="muted">No holds found in this session. Add one by hand below.</p>
+          {/each}
+        </div>
+        <button class="btn add" type="button" onclick={addMissed}>+ Add missed hold</button>
       </section>
-    {/each}
+    {/if}
   {/if}
 </main>
 
@@ -668,7 +687,16 @@
   }
 
   .top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     margin: 0 calc(-1 * var(--space-3));
+  }
+
+  /* The video files are a technical detail: a quiet link to their own page. */
+  .videos-link {
+    color: var(--color-text-2);
+    text-decoration: none;
   }
 
   .title {
@@ -827,24 +855,15 @@
     font-size: 16px;
   }
 
-  .video {
+  .timeline {
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
   }
 
-  .disclosure {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    min-height: var(--touch);
-    padding: 0;
-    border: 0;
-    background: transparent;
-  }
-
+  /* inline-block: a transform does not apply to an inline span (the expanded state would not show). */
   .chev {
+    display: inline-block;
     color: var(--color-text-3);
     font-size: var(--text-xl);
     transition: transform var(--duration) var(--ease);

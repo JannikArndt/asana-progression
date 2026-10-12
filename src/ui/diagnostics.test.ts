@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessHandover, formatBytes, videoForReport, withoutLocation } from './diagnostics';
+import { assessHandover, formatBytes, videoDiagnostics, videoForReport, withoutLocation } from './diagnostics';
 import type { VideoMeta } from '../source';
 
 const base: VideoMeta = {
@@ -51,5 +51,30 @@ describe('withoutLocation', () => {
     expect(v.meta.location).toEqual({ lat: 1, lon: 2, altM: null });
     const plain = { id: 'w', meta: { location: null } };
     expect(videoForReport(plain)).toBe(plain);
+  });
+});
+
+describe('videoDiagnostics', () => {
+  const video = {
+    id: 'vid_1', fingerprint: 'fp', fileName: 'IMG_1234.MOV', fileSize: 1, durationS: 60, codec: 'hevc', width: 3840, height: 2160,
+    fps: 60, recordedAt: '2024-05-12T07:31:22+02:00', importedAt: '2024-05-12T08:00:00Z',
+    meta: { ...base, location: { lat: 52.5, lon: 13.4 } } as unknown as Record<string, unknown>,
+  };
+  it('reports the video without its coordinates, and the analysis in short', () => {
+    const analysis = { sampleCount: 240, frameWidth: 80, frameHeight: 45, candidates: [{}, {}], threshold: 1.5, singleStill: false, stats: null };
+    const d = videoDiagnostics(video, analysis as never);
+    expect(d.video.meta).toBeUndefined();
+    expect(d.video.recordedAt).toBe('2024-05-12T07:31:22+02:00');
+    expect(d.source?.location).toBe('present');
+    expect(JSON.stringify(d)).not.toContain('52.5');
+    expect(d.handover?.verdict).toBe('original');
+    expect(d.decoderSupport).toBeNull();
+    expect(d.analysis).toEqual({ samples: 240, frame: '80×45', candidates: 2, threshold: 1.5, singleStill: false });
+  });
+  it('works without metadata and analysis', () => {
+    const d = videoDiagnostics({ ...video, meta: undefined }, null);
+    expect(d.source).toBeNull();
+    expect(d.handover).toBeNull();
+    expect(d.analysis).toBeNull();
   });
 });
