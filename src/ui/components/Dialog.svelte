@@ -18,7 +18,7 @@
           <ol class="frames" aria-label="Frames of this hold">
             {#each f.items as item, i (i)}
               <li style:width="{tileW}px">
-                <TinyFrame videoId={f.videoId} frameWidth={f.width} frameHeight={f.height} index={item.index} alt="Frame at {item.label}" />
+                <TinyFrame videoId={item.videoId ?? f.videoId} frameWidth={f.width} frameHeight={f.height} index={item.index} alt="Frame at {item.label}" />
                 <span class="tabular">{item.label}</span>
               </li>
             {/each}

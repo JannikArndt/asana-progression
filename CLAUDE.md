@@ -141,7 +141,12 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
 - Uncovered gaps (`session-data.coverageGaps`): between the cards of a video (and before the first /
   after the last) a quiet row "1 min 7 s not covered · + Add holds" marks stretches covered by no
   card. "Not a pose" (dismissed) candidates are never cards: they count as uncovered, and a gap
-  holding one is always listed, however short ("· 1 skipped"). Threshold
+  holding one is always listed, however short ("· 1 skipped"). Nothing separates the end of one
+  video from the start of the next on the session timeline, so stretches meeting at a boundary (and
+  a whole video without cards) are **one** row with several parts (`coverageRows` → `GapPart[]`,
+  listed when the total reaches the smaller threshold of its videos; a video without analysis ends
+  a gap); its sheet shows frames from every part, Find runs per part, and "Add a hold by hand…"
+  asks which part. Threshold
   `gapThreshold`: always from 30 s, down to 10 s when the gap is ≥ 1.5 × the video's median gap
   between candidates (the outdoor primary series has a 19 s median from vinyasas; 10 s would put a
   row after most cards, while a missed hold leaves two transitions plus the hold). Tapping opens a
@@ -396,7 +401,7 @@ for the whole session**: the videos back to back in session order (`videoOffsets
 the order is the user's), C(t) joined with each video divided by its own threshold
 (`combinedSignal`, threshold line at 1, NaN between videos), thin lines at video boundaries
 (`TimelineGraph` `boundaries`), cards numbered through and showing session time (`ReviewCard`
-`offsetS`); gap rows stay per video; "+ Add missed hold" asks which part with several videos. One
+`offsetS`); gap rows join across video boundaries; "+ Add missed hold" asks which part with several videos. One
 sticky header (`top: var(--safe-top)`, solid background, hairline once stuck; the status-bar area is
 covered by a fixed strip) with
 1. the overview (`TimelineOverview.svelte`, DOM, 36 px): the whole session, runs of consecutive

@@ -305,6 +305,60 @@ export function coverageGaps(
   return out;
 }
 
+/** One video's share of an uncovered stretch of the session. */
+export interface GapPart {
+  videoId: string;
+  startS: number;
+  endS: number;
+  /** Candidates marked "Not a pose" inside this part. */
+  skipped?: number;
+}
+
+export type CoverageRow<T> = { kind: 'card'; videoId: string; item: T } | { kind: 'gap'; parts: GapPart[] };
+
+/**
+ * The review list of a session: each video's cards in session order with a row for every
+ * uncovered stretch (`coverageGaps`). Nothing separates the end of one video from the start of the
+ * next on the session timeline, so consecutive stretches there (and a whole video without cards)
+ * become one gap row with several parts; it is listed when its total length reaches the smaller
+ * threshold of its videos, or when a part holds a "Not a pose" candidate. A video without analysis
+ * (`cards: null`) is not part of the timeline's coverage and ends a gap.
+ */
+export function coverageRows<T extends { startS: number; endS: number }>(
+  videos: ReadonlyArray<{ id: string; durationS: number; cards: readonly T[] | null; skipped?: ReadonlyArray<{ startS: number; endS: number }> }>,
+): CoverageRow<T>[] {
+  const out: CoverageRow<T>[] = [];
+  let pending: { parts: GapPart[]; minS: number } | null = null;
+  const flush = () => {
+    if (pending && (pending.parts.reduce((sum, p) => sum + p.endS - p.startS, 0) >= pending.minS || pending.parts.some((p) => p.skipped))) {
+      out.push({ kind: 'gap', parts: pending.parts });
+    }
+    pending = null;
+  };
+  for (const v of videos) {
+    if (!v.cards) {
+      flush();
+      continue;
+    }
+    const minS = gapThreshold(v.cards);
+    // Every uncovered stretch (thresholds apply after joining across video boundaries).
+    const gaps = new Map(coverageGaps(v.cards, v.durationS, 1e-6, v.skipped).map((g) => [g.beforeIndex, g]));
+    const add = (g: CoverageGap | undefined) => {
+      if (!g) return;
+      const part: GapPart = { videoId: v.id, startS: g.startS, endS: g.endS, ...(g.skipped ? { skipped: g.skipped } : {}) };
+      pending = pending ? { parts: [...pending.parts, part], minS: Math.min(pending.minS, minS) } : { parts: [part], minS };
+    };
+    v.cards.forEach((item, i) => {
+      add(gaps.get(i));
+      flush();
+      out.push({ kind: 'card', videoId: v.id, item });
+    });
+    add(gaps.get(v.cards.length));
+  }
+  flush();
+  return out;
+}
+
 // ----- session length, place and preview -----
 
 /** Longest plausible pause between the clips of one practice (beyond it, a recording time is wrong). */
