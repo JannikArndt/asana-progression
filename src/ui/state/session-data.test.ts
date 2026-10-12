@@ -9,6 +9,7 @@ import {
   GAP_MIN_S,
   gapThreshold,
   orderVideoIds,
+  moveItem,
   dayOf,
   groupByDay,
   historyFrom,
@@ -193,6 +194,16 @@ describe('same-day sessions', () => {
     expect(combineSessions({ ...t, location: { lat: 3, lon: 4 } }, [o], [], []).session.location).toEqual({ lat: 3, lon: 4 });
     expect(combineSessions({ ...t, location: { name: 'Home' } }, [{ ...o, location: { name: 'Park' } }], [], []).session.location).toEqual({ name: 'Home' });
     expect('location' in combineSessions(t, [], [], []).session).toBe(false);
+  });
+});
+
+describe('moveItem', () => {
+  it('moves an item up or down and clamps at the ends', () => {
+    expect(moveItem(['a', 'b', 'c'], 2, -1)).toEqual(['a', 'c', 'b']);
+    expect(moveItem(['a', 'b', 'c'], 0, 1)).toEqual(['b', 'a', 'c']);
+    expect(moveItem(['a', 'b', 'c'], 0, -1)).toEqual(['a', 'b', 'c']);
+    expect(moveItem(['a', 'b', 'c'], 1, 5)).toEqual(['a', 'c', 'b']);
+    expect(moveItem(['a'], 3, 1)).toEqual(['a']);
   });
 });
 

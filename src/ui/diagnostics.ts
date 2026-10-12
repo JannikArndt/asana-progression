@@ -1,4 +1,5 @@
-import type { VideoMeta } from '../source';
+import type { Analysis, Video } from '../model';
+import type { DecoderSupport, VideoMeta } from '../source';
 
 export interface HandoverAssessment {
   verdict: 'original' | 'transcoded' | 'unknown';
@@ -34,6 +35,24 @@ export function withoutLocation(m: VideoMeta): Omit<VideoMeta, 'location'> & { l
 export function videoForReport<T extends { meta?: Record<string, unknown> }>(v: T): T {
   if (!v.meta || !v.meta['location']) return v;
   return { ...v, meta: { ...v.meta, location: 'present' } };
+}
+
+/**
+ * Diagnostics of one video (no location): stored record, source metadata, handover verdict,
+ * decoder support (null unless checked with the file attached), processing stats and analysis.
+ */
+export function videoDiagnostics(video: Video, analysis: Analysis | null | undefined, decoderSupport: DecoderSupport | null = null) {
+  const meta = video.meta as unknown as VideoMeta | undefined;
+  return {
+    video: { ...video, meta: undefined },
+    source: meta ? withoutLocation(meta) : null,
+    handover: meta ? assessHandover(meta) : null,
+    decoderSupport,
+    processing: analysis?.stats ?? null,
+    analysis: analysis
+      ? { samples: analysis.sampleCount, frame: `${analysis.frameWidth}×${analysis.frameHeight}`, candidates: analysis.candidates.length, threshold: analysis.threshold, singleStill: analysis.singleStill }
+      : null,
+  };
 }
 
 export interface DeviceInfo {

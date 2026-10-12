@@ -194,6 +194,16 @@ export function orderVideoIds(ids: string[], videos: Video[]): string[] {
   return [...new Set([...known, ...ids.filter((id) => !byId.has(id))])];
 }
 
+/** `list` with the item at `index` moved by `delta` places (clamped to the ends). */
+export function moveItem<T>(list: readonly T[], index: number, delta: number): T[] {
+  const out = [...list];
+  if (index < 0 || index >= out.length) return out;
+  const to = Math.min(out.length - 1, Math.max(0, index + delta));
+  const [item] = out.splice(index, 1);
+  out.splice(to, 0, item!);
+  return out;
+}
+
 /** Groups videos by recording day (videos without a date use their import day). */
 export function groupByDay(videos: Video[]): Map<string, Video[]> {
   const out = new Map<string, Video[]>();

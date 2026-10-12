@@ -129,8 +129,13 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   tiny frames across the hold (`previewTimes`: one per 6 s, 4–24) to spot a posture change, actions:
   choose frame, split,
   split into several, merge with previous, not a pose, full-resolution frame, add missed hold),
+  the session's video files (`#/session/<id>/videos`, `SessionVideos.svelte`, linked "N videos ›"
+  top right of the review: order with ↑/↓ or "Sort by recording time" → `SessionReview.setVideoOrder`,
+  recording time (`formatRecordedAt`, own UTC offset) and its source, place on the session timeline,
+  "Select file", Debug panel per video, "Copy diagnostics of all videos" via `videoDiagnostics`),
   asana progression
-  (`#/asana/<id>`). `#/video/<id>` redirects to the session.
+  (`#/asana/<id>`). `#/video/<id>` redirects to the session. Splitting a practice into several
+  videos is a technical matter: the review shows asanas only, file details live on the videos page.
 - Uncovered gaps (`session-data.coverageGaps`): between the cards of a video (and before the first /
   after the last) a quiet row "1 min 7 s not covered · + Add hold" marks stretches covered by no
   candidate. Dismissed candidates count as covered (the user has looked at them). Threshold
@@ -377,16 +382,23 @@ rotated wherever it keeps 12 px from the previous rotated label), open = neutral
 hatched. Optional `range` (show a window instead of the whole video; a new object moves there,
 animated unless `animate: false`) and `onview` (visible range on every view change).
 
-Session review timeline (`SessionReview.svelte`, maths in `session-timeline.ts`): per video a
+Session review timeline (`SessionReview.svelte`, maths in `session-timeline.ts`): **one timeline
+for the whole session**: the videos back to back in session order (`videoOffsets`; pauses left out,
+the order is the user's), C(t) joined with each video divided by its own threshold
+(`combinedSignal`, threshold line at 1, NaN between videos), thin lines at video boundaries
+(`TimelineGraph` `boundaries`), cards numbered through and showing session time (`ReviewCard`
+`offsetS`); gap rows stay per video; "+ Add missed hold" asks which part with several videos. One
 sticky header (`top: var(--safe-top)`, solid background, hairline once stuck; the status-bar area is
 covered by a fixed strip) with
-1. the overview (`TimelineOverview.svelte`, DOM, 36 px): the whole video, runs of consecutive
+1. the overview (`TimelineOverview.svelte`, DOM, 36 px): the whole session, runs of consecutive
    labeled holds with the same catalog `group` as labeled segments (`groupSegments`; open and
    dismissed cards do not break a run; short names "Sun", "Backbends"), open candidates as grey
    ticks, and a rectangle for the range the detail graph shows. Tap or drag moves the window; the
    end of the gesture scrolls the list to the first card ending after that time.
 2. the detail graph (136 px, collapsible with the chevron; collapsed = only the overview stays
-   sticky): a 20 min window (`DETAIL_WINDOW_S`; videos ≤ 25 min are shown whole).
+   sticky; the chevron `›` turns to point down while expanded — it is `inline-block`, a transform
+   does not apply to an inline span): a 10 min window (`DETAIL_WINDOW_S`; sessions ≤ 12 min are
+   shown whole).
 The window follows the list: on scroll (rAF-throttled, layout reads only) the card right below
 the header (binary search over the card rects, `firstBelow`) defines the current time; the window
 re-centres on it only when it leaves the middle 50 % (`followWindow`), so it moves in calm steps.

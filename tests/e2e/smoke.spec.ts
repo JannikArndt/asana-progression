@@ -68,10 +68,24 @@ test('import → review → asana', async ({ page }) => {
   await page.getByRole('button', { name: '−1 s' }).click();
   await page.getByRole('button', { name: 'Use this frame' }).click();
 
-  // Re-running detection keeps the labels.
+  // The graph's chevron shows whether the graph is expanded (rotated) or collapsed.
+  const chev = page.getByRole('button', { name: 'Timeline graph' });
+  const rotation = () => chev.locator('.chev').evaluate((el) => getComputedStyle(el).transform);
+  await expect(chev).toHaveAttribute('aria-expanded', 'true');
+  await expect.poll(rotation).toBe('matrix(0, 1, -1, 0, 0, 0)');
+  await chev.click();
+  await expect(page.locator('.graph canvas')).toHaveCount(0);
+  await expect.poll(rotation).toBe('none');
+  await chev.click();
+
+  // The video files have their own page; re-running detection there keeps the labels.
+  await page.getByRole('link', { name: '1 video ›' }).click();
+  await expect(page.getByRole('heading', { name: 'Videos' })).toBeVisible();
+  await expect(page.locator('li[data-video-id]')).toHaveCount(1);
   await page.getByRole('button', { name: /^Debug/ }).click();
   await page.getByRole('button', { name: 'Re-run detection' }).click();
   await expect(page.getByText('Detection updated.')).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: '‹ Session' }).click();
   await expect(page.locator('article.review[data-status=labeled]')).toHaveCount(2);
 
   // Labels survive a reload (persisted immediately).
@@ -176,6 +190,48 @@ test('import → review → asana', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('the videos of a session form one timeline; the files have their own page', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('./');
+  await page.evaluate(() => localStorage.setItem('asana.debug.capture', JSON.stringify({ cropper: 'none' })));
+  await importVideo(page, 'None');
+  await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
+
+  // The same file again as a second session of the day, then combined: one session, two videos.
+  await page.getByRole('button', { name: '‹ Sessions' }).click();
+  await page.locator('input[type=file]').first().setInputFiles(video);
+  await page.getByRole('button', { name: /^Import as a new session/ }).click();
+  await expect(page.getByText('Suggestions for this session')).toBeVisible();
+  await page.getByRole('button', { name: /^None/ }).click();
+  await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
+  await page.getByRole('button', { name: 'Combine into this session…' }).click();
+  await page.getByRole('dialog', { name: 'Combine sessions?' }).getByRole('button', { name: 'Combine', exact: true }).click();
+
+  // One timeline: one sticky head, cards numbered through, the second video's cards in session time.
+  await expect(cards(page)).toHaveCount(6);
+  await expect(page.locator('.timeline-head')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: /^More actions for hold 6$/ })).toBeVisible();
+  await expect(cards(page).nth(0)).toContainText(/00:\d\d–00:\d\d/);
+  await expect(cards(page).nth(3)).toContainText(/01:\d\d–01:\d\d/);
+
+  // The videos page: both files with their place on the timeline; the order can be changed.
+  await page.getByRole('link', { name: '2 videos ›' }).click();
+  const items = page.locator('li[data-video-id]');
+  await expect(items).toHaveCount(2);
+  await expect(items.nth(0)).toContainText('00:00–01:00');
+  await expect(items.nth(1)).toContainText('01:00–02:00');
+  const firstId = await items.nth(0).getAttribute('data-video-id');
+  await expect(page.getByRole('button', { name: /^Move .* up$/ }).first()).toBeDisabled();
+  await page.getByRole('button', { name: /^Move .* down$/ }).first().click();
+  await expect(items.nth(1)).toHaveAttribute('data-video-id', firstId!);
+  await expect(page.getByRole('button', { name: /^Debug · / })).toHaveCount(2);
+  await page.getByRole('button', { name: '‹ Session' }).click();
+  await expect(cards(page)).toHaveCount(6);
+
+  expect(errors).toEqual([]);
+});
+
 test('version.json is served and the manifest is linked', async ({ page, request }) => {
   const res = await request.get('./version.json');
   expect(res.ok()).toBe(true);
@@ -219,6 +275,7 @@ test('processing resumes after the page was reloaded mid-way', async ({ page }) 
   await expect(page.getByText('Resume processing?')).toBeVisible();
   await page.getByRole('button', { name: 'Resume', exact: true }).click();
   await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
+  await page.getByRole('link', { name: '1 video ›' }).click();
   await page.getByRole('button', { name: /^Debug/ }).click();
   await expect(page.locator('dd', { hasText: /^1×$/ })).toBeVisible();
 });
@@ -240,11 +297,15 @@ test('a pinned luma-plane conversion is used and finds the three holds', async (
   // The new hold stays inside the gap (after the third card's end).
   await expect(cards(page).nth(3)).toContainText(/00:5\d–(00:5\d|01:00)/);
 
+  await page.getByRole('link', { name: '1 video ›' }).click();
+  // The videos page shows where the video sits on the session timeline.
+  await expect(page.locator('li[data-video-id]')).toContainText(/00:00–01:00/);
   await page.getByRole('button', { name: /^Debug/ }).click();
   // Pinned runs skip the benchmark, so the row ends with the method (and pixel format).
   await expect(page.locator('dt:has-text("Frame → gray") + dd')).toHaveText(/· luma( \([^)]*\))?$/);
   // The synthetic video carries no location.
   await expect(page.locator('dt:has-text("Location") + dd')).toHaveText('–');
+  await page.getByRole('button', { name: '‹ Session' }).click();
 
   // Header: the template picker lists every template; the place is named in a sheet.
   await page.getByRole('button', { name: 'Template: No template' }).click();

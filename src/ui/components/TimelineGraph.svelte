@@ -31,6 +31,8 @@
     selectedId?: string | null;
     /** Processed media time (s) shown as a playhead while processing. */
     playheadS?: number | null;
+    /** Times where one video of a session ends and the next begins (thin vertical lines). */
+    boundaries?: number[];
     height?: number;
     /**
      * Time range to show instead of the whole video (session review: a window of a long video).
@@ -52,6 +54,7 @@
     spans = [],
     selectedId = null,
     playheadS = null,
+    boundaries = [],
     height = 168,
     range = null,
     onselect,
@@ -165,6 +168,18 @@
         ctx.lineWidth = 1.5;
         ctx.strokeRect(x0 + 0.75, top + 0.75, Math.max(0, bw - 1.5), plotH - 1.5);
       }
+    }
+
+    // Video boundaries
+    ctx.strokeStyle = colors.text3;
+    ctx.lineWidth = 1;
+    for (const t of boundaries) {
+      const bx = Math.round(timeToX(view, t)) + 0.5;
+      if (bx < 0 || bx > w) continue;
+      ctx.beginPath();
+      ctx.moveTo(bx, top);
+      ctx.lineTo(bx, bottom);
+      ctx.stroke();
     }
 
     // Threshold
@@ -531,7 +546,7 @@
 
   // Redraw on any input change.
   $effect(() => {
-    void [view, values, available, version, threshold, spans, selectedId, playheadS, height];
+    void [view, values, available, version, threshold, spans, selectedId, playheadS, boundaries, height];
     schedule();
   });
 

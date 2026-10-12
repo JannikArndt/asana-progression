@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  combinedSignal,
   DETAIL_WINDOW_S,
   detailLength,
   firstBelow,
@@ -7,14 +8,16 @@ import {
   groupSegments,
   shortGroup,
   windowAround,
+  videoOffsets,
   type OverviewSpan,
 } from './session-timeline';
 
 describe('detail window', () => {
-  it('shows short videos whole and long ones as a 20 min window', () => {
-    expect(detailLength(600)).toBe(600);
-    expect(detailLength(36 * 60)).toBe(DETAIL_WINDOW_S);
-    expect(detailLength(25 * 60)).toBe(25 * 60);
+  it('shows short sessions whole and long ones as a 10 min window', () => {
+    expect(DETAIL_WINDOW_S).toBe(600);
+    expect(detailLength(300)).toBe(300);
+    expect(detailLength(12 * 60)).toBe(12 * 60);
+    expect(detailLength(13 * 60)).toBe(DETAIL_WINDOW_S);
     expect(detailLength(67 * 60)).toBe(DETAIL_WINDOW_S);
   });
 
@@ -88,5 +91,35 @@ describe('firstBelow', () => {
     expect(firstBelow(4, at, 250)).toBe(2);
     expect(firstBelow(4, at, 400)).toBe(4);
     expect(firstBelow(0, at, 0)).toBe(0);
+  });
+});
+
+describe('one timeline for all videos', () => {
+  it('places the videos back to back in session order', () => {
+    const o = videoOffsets([
+      { id: 'b', durationS: 600 },
+      { id: 'a', durationS: 90.5 },
+      { id: 'c', durationS: 10 },
+    ]);
+    expect([...o]).toEqual([
+      ['b', 0],
+      ['a', 600],
+      ['c', 690.5],
+    ]);
+  });
+
+  it('joins C(t) of the videos, each divided by its own threshold', () => {
+    const a = { offsetS: 0, durationS: 2, sampleHz: 2, values: Float32Array.from([NaN, 2, 4, NaN]), threshold: 2 };
+    const b = { offsetS: 2.5, durationS: 1.5, sampleHz: 4, values: Float32Array.from([10, 10, 20, 20, 30, 30]), threshold: 10 };
+    const out = combinedSignal([a, b], 4, 2);
+    expect(out.length).toBe(8);
+    // a: samples 0…3; nothing at 2.0 s (b starts at 2.5 s); b at 2.5, 3.0, 3.5 s → its samples 0, 2, 4.
+    expect([...out].map((x) => (Number.isNaN(x) ? null : x))).toEqual([null, 1, 2, null, null, 1, 2, 3]);
+  });
+
+  it('keeps a raw signal without a usable threshold and ignores samples past the end', () => {
+    const out = combinedSignal([{ offsetS: 0, durationS: 2, sampleHz: 1, values: Float32Array.from([5]), threshold: 0 }], 2, 1);
+    expect(out[0]).toBe(5);
+    expect(out[1]).toBeNaN();
   });
 });
