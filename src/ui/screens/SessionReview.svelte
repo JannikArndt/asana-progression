@@ -92,6 +92,8 @@
   const boundaries = $derived(review.videos.slice(1).map((v) => offsets.get(v.id) ?? 0));
   const offsetOf = (videoId: string) => offsets.get(videoId) ?? 0;
   const analysed = $derived(review.videos.filter((v) => review.analyses[v.id]));
+  /** Cards on screen: "Not a pose" candidates live only in the gap rows. */
+  const visible = $derived(review.entries.filter((e) => e.candidate.status !== 'dismissed'));
   const unanalysed = $derived(review.videos.filter((v) => !review.analyses[v.id]));
 
   /** C(t) of all videos on the session timeline, each divided by its threshold (threshold 1). */
@@ -106,7 +108,7 @@
   });
 
   const spans = $derived<Span[]>(
-    review.entries.map((e) => {
+    visible.map((e) => {
       const o = offsetOf(e.videoId);
       return {
         id: e.key,
@@ -114,7 +116,7 @@
         endS: o + e.candidate.endS,
         bestS: o + e.candidate.bestS,
         alternatesS: e.candidate.alternatesS.map((t) => o + t),
-        status: e.candidate.status === 'labeled' && e.hold ? 'labeled' : e.candidate.status === 'dismissed' ? 'dismissed' : 'open',
+        status: e.candidate.status === 'labeled' && e.hold ? 'labeled' : 'open',
         ...(e.hold ? { label: `${nameOf(e.hold.asanaId)}${e.hold.side ? ` ${e.hold.side}` : ''}` } : {}),
       };
     }),
@@ -126,7 +128,7 @@
         startS: sp.startS,
         endS: sp.endS,
         status: sp.status === 'labeled' ? ('labeled' as const) : ('open' as const),
-        group: review.entries[i]!.hold ? groups.get(review.entries[i]!.hold!.asanaId) : undefined,
+        group: visible[i]!.hold ? groups.get(visible[i]!.hold!.asanaId) : undefined,
       })),
     ),
     open: spans.filter((sp) => sp.status === 'open').map((sp) => ({ startS: sp.startS, endS: sp.endS })),
@@ -135,23 +137,24 @@
   type Row = { kind: 'card'; entry: SessionEntry; number: number } | { kind: 'gap'; gap: CoverageGap; video: Video };
   /**
    * The card list: every video's cards in session order, with a row for each uncovered stretch
-   * (per video; dismissed candidates count as covered).
+   * (per video). "Not a pose" candidates are not cards: they count as uncovered, and their gap
+   * row is always shown.
    */
   const rows = $derived.by(() => {
-    const byVideo = new Map<string, SessionEntry[]>();
-    for (const e of review.entries) byVideo.set(e.videoId, [...(byVideo.get(e.videoId) ?? []), e]);
     const out: Row[] = [];
     let n = 0;
     for (const video of analysed) {
-      const list = byVideo.get(video.id) ?? [];
-      const gaps = new Map(coverageGaps(list.map((e) => e.candidate), video.durationS).map((g) => [g.beforeIndex, g]));
+      const all = review.entries.filter((e) => e.videoId === video.id);
+      const list = all.filter((e) => e.candidate.status !== 'dismissed');
+      const skipped = all.filter((e) => e.candidate.status === 'dismissed').map((e) => e.candidate);
+      const gaps = new Map(coverageGaps(list.map((e) => e.candidate), video.durationS, undefined, skipped).map((g) => [g.beforeIndex, g]));
       list.forEach((entry, i) => {
         const gap = gaps.get(i);
         if (gap) out.push({ kind: 'gap', gap, video });
         out.push({ kind: 'card', entry, number: ++n });
       });
       const last = gaps.get(list.length);
-      if (last && list.length) out.push({ kind: 'gap', gap: last, video });
+      if (last && (list.length || last.skipped)) out.push({ kind: 'gap', gap: last, video });
     }
     return out;
   });
@@ -226,7 +229,7 @@
     const stickyTop = parseFloat(getComputedStyle(head).top) || 0;
     const nextStuck = hr.top <= stickyTop + 0.5 && section.top < hr.top - 0.5;
     if (nextStuck !== stuck) stuck = nextStuck;
-    const list = review.entries;
+    const list = visible;
     if (programmatic || !list.length || section.bottom < hr.bottom) return;
     const bottomOf = (i: number) => document.getElementById(`card-${list[i]!.key}`)?.getBoundingClientRect().bottom ?? -Infinity;
     const e = list[Math.min(list.length - 1, firstBelow(list.length, bottomOf, hr.bottom + 8))]!;
@@ -268,7 +271,7 @@
   function pickOverview(t: number, dragged: boolean) {
     const cur = currentWindow();
     target = { ...windowAround(t, cur.endS - cur.startS, timelineS), animate: !dragged };
-    const list = review.entries;
+    const list = visible;
     const at = list.find((e) => offsetOf(e.videoId) + e.candidate.endS >= t) ?? list[list.length - 1];
     if (at) scrollToCard(at.key, true);
   }
@@ -315,7 +318,7 @@
         videoId: entry.videoId,
         width: f.width,
         height: f.height,
-        items: previewTimes(entry.candidate.startS, entry.candidate.endS).map((t) => ({ index: Math.floor(t * f.hz), label: formatTime(t) })),
+        items: previewTimes(entry.candidate.startS, entry.candidate.endS).map((t) => ({ index: Math.floor(t * f.hz), label: formatTime(offsetOf(entry.videoId) + t) })),
       },
       options: [
         { id: 'label', label: 'Choose label…' },
@@ -354,6 +357,52 @@
       case 'probe':
         probe = { videoId: entry.videoId, t: entry.candidate.bestS };
         break;
+    }
+  }
+
+  /**
+   * An uncovered stretch: analyse it on its own (several holds at once), add a hold by hand, or
+   * bring back what was marked "Not a pose" there.
+   */
+  async function gapMenu(gap: CoverageGap, video: Video) {
+    const o = offsetOf(video.id);
+    const f = frameOf(video.id);
+    const range = { fromS: gap.startS, toS: gap.endS };
+    const skipped = gap.skipped ?? 0;
+    const choice = await dialog.ask({
+      title: `${formatDuration(gap.endS - gap.startS)} not covered`,
+      message: `${formatTime(o + gap.startS)}–${formatTime(o + gap.endS)}`,
+      frames: {
+        videoId: video.id,
+        width: f.width,
+        height: f.height,
+        items: previewTimes(gap.startS, gap.endS).map((t) => ({ index: Math.floor(t * f.hz), label: formatTime(o + t) })),
+      },
+      options: [
+        { id: 'find', label: 'Find holds here', kind: 'primary', detail: 'Analyses this stretch on its own.' },
+        { id: 'add', label: 'Add a hold by hand…' },
+        ...(skipped ? [{ id: 'restore', label: `Show ${skipped === 1 ? 'the skipped hold' : `${skipped} skipped holds`}`, detail: 'Marked “Not a pose”.' }] : []),
+        { id: 'cancel', label: 'Cancel', kind: 'quiet' },
+      ],
+    });
+    if (choice === 'add') scrub = { mode: 'add', videoId: video.id, gap };
+    else if (choice === 'restore') await review.restoreIn(video.id, range);
+    else if (choice === 'find') {
+      const keys = await review.findHolds(video.id, range);
+      if (keys[0]) {
+        void selectFromGraph(keys[0]);
+        return;
+      }
+      const minHold = review.analyses[video.id]?.params.minHoldS ?? 6;
+      const next = await dialog.ask({
+        title: 'No hold found',
+        message: `Nothing in this stretch stays still for ${minHold} s${skipped ? ', apart from what was marked “Not a pose”' : ''}.`,
+        options: [
+          { id: 'add', label: 'Add a hold by hand…', kind: 'primary' },
+          { id: 'cancel', label: 'Cancel', kind: 'quiet' },
+        ],
+      });
+      if (next === 'add') scrub = { mode: 'add', videoId: video.id, gap };
     }
   }
 
@@ -532,11 +581,12 @@
           <button
             class="gap"
             type="button"
-            aria-label="{formatDuration(gap.endS - gap.startS)} not covered at {formatTime(o + gap.startS)}: add a hold"
-            onclick={() => (scrub = { mode: 'add', videoId: video.id, gap })}
+            aria-haspopup="dialog"
+            aria-label="{formatDuration(gap.endS - gap.startS)} not covered at {formatTime(o + gap.startS)}{gap.skipped ? `, ${gap.skipped} skipped` : ''}: find or add holds"
+            onclick={() => gapMenu(gap, video)}
           >
-            <span class="tabular">{formatDuration(gap.endS - gap.startS)} not covered</span>
-            <span class="gap-add">+ Add hold</span>
+            <span class="tabular">{formatDuration(gap.endS - gap.startS)} not covered{#if gap.skipped}<span class="faint"> · {gap.skipped} skipped</span>{/if}</span>
+            <span class="gap-add">+ Add holds</span>
           </button>
         {/snippet}
 
@@ -566,7 +616,6 @@
                 onconfirm={() => review.confirm(entry.key)}
                 onpick={() => (pickerKey = entry.key)}
                 onmore={() => more(entry)}
-                onrestore={() => review.restore(entry.key)}
               />
             {/if}
           {:else}

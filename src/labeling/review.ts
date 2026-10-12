@@ -1,4 +1,4 @@
-import { bestFrameIndex, lowestSumWindow, percentile } from '../detection';
+import { bestFrameIndex, findCandidates, lowestSumWindow, percentile, type DetectionParams, type FrameAccess } from '../detection';
 import type { Hold, ReviewCandidate } from '../model/types';
 import type { SignalView, TimeRange } from './types';
 
@@ -31,7 +31,8 @@ export function editedId(prefix: string): string {
 
 /**
  * Merges two candidates (in time order). The stiller best frame wins; the other best frame and
- * all alternates are kept as alternates. The merged candidate keeps `a`'s id and hold.
+ * all alternates are kept as alternates. The merged candidate keeps `a`'s id and hold. A label
+ * always survives (labeled + anything = labeled); "Not a pose" only when both were dismissed.
  */
 export function mergeCandidates(a: ReviewCandidate, b: ReviewCandidate, sig: SignalView): ReviewCandidate {
   const [first, second] = a.startS <= b.startS ? [a, b] : [b, a];
@@ -50,7 +51,7 @@ export function mergeCandidates(a: ReviewCandidate, b: ReviewCandidate, sig: Sig
     alternatesS,
     clipStartS: fit.clipStartS,
     clipEndS: fit.clipEndS,
-    status: a.status === 'labeled' || b.status !== 'labeled' ? a.status : b.status,
+    status: a.status === 'labeled' || b.status === 'labeled' ? 'labeled' : a.status === 'dismissed' && b.status === 'dismissed' ? 'dismissed' : 'open',
     ...(a.holdId ? { holdId: a.holdId } : b.holdId ? { holdId: b.holdId } : {}),
   };
 }
@@ -179,6 +180,38 @@ export function missedCandidate(atS: number, sig: SignalView, bounds?: TimeRange
   const startS = a / hz;
   const endS = Math.min(sig.durationS, b / hz);
   return { id: editedId('manual'), startS, endS, ...fitSpan(startS, endS, sig), alternatesS: [], status: 'open', origin: 'manual' };
+}
+
+/**
+ * Runs the detector on one stretch of a video (e.g. an uncovered gap): the still threshold is the
+ * stretch's own percentile, so holds the global threshold missed (sway, a short practice part
+ * with much movement) can show up. Uses the stored signals; `frames` (pooled analysis frames, by
+ * sample index of the whole video) enable the similar-frame merge, without them nothing merges.
+ * The single-still case is off: a stretch is never one hold just because it is uniform. Returns
+ * new open candidates (origin `manual`: a re-run of the whole video keeps them).
+ */
+export async function detectInRange(range: TimeRange, sig: SignalView, params: DetectionParams, frames: FrameAccess | null): Promise<ReviewCandidate[]> {
+  const hz = sig.sampleHz;
+  const a = Math.max(0, Math.ceil(range.fromS * hz - 1e-6));
+  const b = Math.min(sig.C.length, sig.m.length, Math.floor(range.toS * hz + 1e-6));
+  if (b - a < params.minHoldS * hz) return [];
+  const slice = (v: ArrayLike<number>) => Float32Array.from({ length: b - a }, (_, i) => v[a + i] ?? NaN);
+  const p: DetectionParams = { ...params, sampleHz: hz, singleStillMaxS: 0, ...(frames ? {} : { similarMergeFactor: 0 }) };
+  const empty = new Uint8Array(0);
+  const result = await findCandidates({ sampleHz: hz, m: slice(sig.m), C: slice(sig.C) }, { frame: (i) => (frames ? frames.frame(a + i) : empty) }, p);
+  const o = a / hz;
+  return result.candidates.map((c) => ({
+    ...c,
+    id: editedId('found'),
+    startS: o + c.startS,
+    endS: o + c.endS,
+    bestS: o + c.bestS,
+    alternatesS: c.alternatesS.map((t) => o + t),
+    clipStartS: o + c.clipStartS,
+    clipEndS: o + c.clipEndS,
+    status: 'open' as const,
+    origin: 'manual' as const,
+  }));
 }
 
 /**

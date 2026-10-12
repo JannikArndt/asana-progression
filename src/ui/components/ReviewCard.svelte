@@ -32,9 +32,8 @@
     onconfirm: () => void;
     onpick: () => void;
     onmore: () => void;
-    onrestore: () => void;
   }
-  let { entry, number, offsetS = 0, suggestion, nameOf, frame, selected, thumb, captureStatus, rep, expected, onsplit, onframe, oncrop, onfullframe, onselect, onconfirm, onpick, onmore, onrestore }: Props = $props();
+  let { entry, number, offsetS = 0, suggestion, nameOf, frame, selected, thumb, captureStatus, rep, expected, onsplit, onframe, oncrop, onfullframe, onselect, onconfirm, onpick, onmore }: Props = $props();
   const statusText: Record<CaptureStatus, string> = {
     queued: 'Waiting to save still…',
     capturing: 'Saving still and clip…',
@@ -44,7 +43,8 @@
   };
 
   const c = $derived(entry.candidate);
-  const status = $derived(c.status === 'labeled' && entry.hold ? 'labeled' : c.status === 'dismissed' ? 'dismissed' : 'open');
+  /** "Not a pose" candidates are not shown as cards (their gap row brings them back). */
+  const status = $derived(c.status === 'labeled' && entry.hold ? 'labeled' : 'open');
   const label = $derived(
     status === 'labeled'
       ? `${nameOf(entry.hold!.asanaId)}${entry.hold!.side ? ` ${entry.hold!.side}` : ''}`
@@ -125,12 +125,7 @@
       <span class="faint">· {formatDuration(c.endS - c.startS)}</span>
       <button class="more" type="button" onclick={onmore} aria-label="More actions for hold {number}">•••</button>
     </div>
-    {#if status === 'dismissed'}
-      <div class="row">
-        <span class="faint">Not a pose</span>
-        <button class="btn quiet small" type="button" onclick={onrestore}>Restore</button>
-      </div>
-    {:else if status === 'labeled'}
+    {#if status === 'labeled'}
       <button class="label done" type="button" onclick={onpick}>
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
         <span>{label}</span>
@@ -189,10 +184,6 @@
     background: var(--color-accent-tint);
     font-size: var(--text-s);
     color: var(--color-text-2);
-  }
-
-  .review.dismissed {
-    opacity: 0.55;
   }
 
   .thumb-wrap {

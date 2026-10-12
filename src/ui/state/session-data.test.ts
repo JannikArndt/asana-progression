@@ -249,6 +249,15 @@ describe('coverageGaps', () => {
     expect(coverageGaps([], 30)).toEqual([{ startS: 0, endS: 30, beforeIndex: 0 }]);
     expect(coverageGaps([], 5)).toEqual([]);
   });
+  it('lists every gap holding a "Not a pose" candidate, however short', () => {
+    const spans = [span(0, 20), span(28, 50), span(55, 80)];
+    // 20…28 is below the 10 s floor but holds a skipped candidate; 50…55 holds none.
+    expect(coverageGaps(spans, 80, undefined, [span(21, 27)])).toEqual([{ startS: 20, endS: 28, beforeIndex: 1, skipped: 1 }]);
+    // Skipped candidates do not cover: a long gap counts them.
+    expect(coverageGaps([span(0, 10)], 60, undefined, [span(15, 25), span(30, 40)])).toEqual([{ startS: 10, endS: 60, beforeIndex: 1, skipped: 2 }]);
+    // A skipped candidate under a visible one adds nothing.
+    expect(coverageGaps([span(0, 30)], 30, undefined, [span(5, 10)])).toEqual([]);
+  });
 });
 
 describe('sessionSpanS', () => {

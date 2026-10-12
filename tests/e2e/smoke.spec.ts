@@ -41,7 +41,8 @@ test('import → review → asana', async ({ page }) => {
   await expect(second).toHaveAttribute('data-status', 'labeled');
   await expect(second.getByText('Utthita Trikonasana R')).toBeVisible();
 
-  // The third card follows the template after Trikonasana R → Trikonasana L. Dismiss it, then restore.
+  // The third card follows the template after Trikonasana R → Trikonasana L. "Not a pose" hides it
+  // in the gap row after the second card; the gap row brings it back.
   const third = cards(page).nth(2);
   await expect(third.getByRole('button', { name: 'Utthita Trikonasana L', exact: true })).toBeVisible();
   await third.getByRole('button', { name: /More actions/ }).click();
@@ -50,9 +51,19 @@ test('import → review → asana', async ({ page }) => {
   expect(await frames.count()).toBeGreaterThanOrEqual(4);
   await expect(frames.first().locator('.tiny')).not.toHaveClass(/missing/);
   await page.getByRole('button', { name: 'Not a pose' }).click();
-  await expect(third).toHaveAttribute('data-status', 'dismissed');
-  await third.getByRole('button', { name: 'Restore' }).click();
+  await expect(cards(page)).toHaveCount(2);
+  const skippedGap = page.getByRole('button', { name: /not covered at 00:3\d, 1 skipped: find or add holds/ });
+  await expect(skippedGap).toContainText('1 skipped');
+  // Analysing the stretch again does not bring back what was marked "Not a pose".
+  await skippedGap.click();
+  await page.getByRole('button', { name: /^Find holds here/ }).click();
+  await expect(page.getByRole('heading', { name: 'No hold found' })).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  await skippedGap.click();
+  await page.getByRole('button', { name: /^Show the skipped hold/ }).click();
+  await expect(cards(page)).toHaveCount(3);
   await expect(third).toHaveAttribute('data-status', 'open');
+  await expect(skippedGap).toHaveCount(0);
 
   // A tap on a thumbnail selects the hold and offers frame actions.
   await first.getByRole('button', { name: 'Frame actions for hold 1' }).click();
@@ -286,10 +297,14 @@ test('a pinned luma-plane conversion is used and finds the three holds', async (
   await importVideo(page, 'None');
   await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
 
-  // The last ~10 s are covered by no candidate: a row after the last card adds a hold there.
-  const gap = page.getByRole('button', { name: /not covered at 00:5\d: add a hold/ });
+  // The last ~10 s are covered by no candidate: a row after the last card finds or adds holds there.
+  const gap = page.getByRole('button', { name: /not covered at 00:5\d: find or add holds/ });
   await expect(gap).toHaveCount(1);
   await gap.click();
+  // The stretch is analysed on its own: the final 5 s pose is too short for a hold.
+  await page.getByRole('button', { name: /^Find holds here/ }).click();
+  await expect(page.getByRole('heading', { name: 'No hold found' })).toBeVisible();
+  await page.getByRole('button', { name: /^Add a hold by hand/ }).click();
   await expect(page.getByRole('heading', { name: /^Add hold · 00:5\d–01:00$/ })).toBeVisible();
   await page.getByRole('button', { name: 'Add hold here' }).click();
   await expect(cards(page)).toHaveCount(4);
