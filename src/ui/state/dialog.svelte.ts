@@ -11,7 +11,8 @@ export interface DialogFrames {
   videoId: string;
   width: number;
   height: number;
-  items: Array<{ index: number; label: string }>;
+  /** `videoId` overrides the strip's video (frames across a video boundary). */
+  items: Array<{ index: number; label: string; videoId?: string }>;
 }
 
 export interface DialogRequest {

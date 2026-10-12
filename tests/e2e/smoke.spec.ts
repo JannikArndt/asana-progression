@@ -226,6 +226,23 @@ test('the videos of a session form one timeline; the files have their own page',
   await expect(cards(page).nth(0)).toContainText(/00:\d\d–00:\d\d/);
   await expect(cards(page).nth(3)).toContainText(/01:\d\d–01:\d\d/);
 
+  // The end of the first video and the start of the second are one uncovered stretch: one row.
+  const gaps = page.getByRole('button', { name: /not covered at .*: find or add holds/ });
+  await expect(gaps).toHaveCount(2);
+  const boundary = page.getByRole('button', { name: /not covered at 00:5\d: find or add holds/ });
+  await expect(boundary).toHaveCount(1);
+  await boundary.click();
+  const frames = page.getByRole('list', { name: 'Frames of this hold' }).getByRole('listitem');
+  await expect(frames.first()).toContainText(/00:5\d/);
+  await expect(frames.last()).toContainText(/01:0\d/);
+  await page.getByRole('button', { name: /^Add a hold by hand/ }).click();
+  // Adding by hand asks which video's part.
+  await expect(page.getByText('This stretch spans several videos. Which part is it in?')).toBeVisible();
+  await page.getByRole('button', { name: /^01:00–01:0\d/ }).click();
+  await expect(page.getByRole('heading', { name: /^Add hold · 01:00–01:0\d$/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(cards(page)).toHaveCount(6);
+
   // The videos page: both files with their place on the timeline; the order can be changed.
   await page.getByRole('link', { name: '2 videos ›' }).click();
   const items = page.locator('li[data-video-id]');

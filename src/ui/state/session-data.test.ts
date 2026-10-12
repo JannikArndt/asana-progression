@@ -5,6 +5,7 @@ import {
   familyStats,
   compareVideos,
   coverageGaps,
+  coverageRows,
   GAP_ALWAYS_S,
   GAP_MIN_S,
   gapThreshold,
@@ -257,6 +258,47 @@ describe('coverageGaps', () => {
     expect(coverageGaps([span(0, 10)], 60, undefined, [span(15, 25), span(30, 40)])).toEqual([{ startS: 10, endS: 60, beforeIndex: 1, skipped: 2 }]);
     // A skipped candidate under a visible one adds nothing.
     expect(coverageGaps([span(0, 30)], 30, undefined, [span(5, 10)])).toEqual([]);
+  });
+});
+
+describe('coverageRows', () => {
+  const span = (startS: number, endS: number) => ({ startS, endS });
+  const kinds = (rows: ReturnType<typeof coverageRows>) =>
+    rows.map((r) => (r.kind === 'card' ? `${r.videoId}:${r.item.startS}` : r.parts.map((p) => `${p.videoId}[${p.startS}-${p.endS}${p.skipped ? `,${p.skipped}` : ''}]`).join('+')));
+
+  it('lists cards with the gaps between them, per video threshold', () => {
+    const rows = coverageRows([{ id: 'a', durationS: 100, cards: [span(0, 20), span(25, 40), span(60, 100)] }]);
+    expect(kinds(rows)).toEqual(['a:0', 'a:25', 'a[40-60]', 'a:60']);
+  });
+
+  it('joins the end of one video and the start of the next into one gap', () => {
+    const rows = coverageRows([
+      { id: 'a', durationS: 100, cards: [span(0, 94)] },
+      { id: 'b', durationS: 100, cards: [span(7, 100)] },
+    ]);
+    // 6 s + 7 s: each below the 10 s floor, together a gap.
+    expect(kinds(rows)).toEqual(['a:0', 'a[94-100]+b[0-7]', 'b:7']);
+    // A short pair stays hidden.
+    expect(kinds(coverageRows([{ id: 'a', durationS: 100, cards: [span(0, 97)] }, { id: 'b', durationS: 50, cards: [span(3, 50)] }]))).toEqual(['a:0', 'b:3']);
+  });
+
+  it('runs a gap through a video without cards; a skipped hold keeps it listed', () => {
+    const rows = coverageRows([
+      { id: 'a', durationS: 60, cards: [span(0, 50)] },
+      { id: 'b', durationS: 30, cards: [], skipped: [span(5, 15)] },
+      { id: 'c', durationS: 60, cards: [span(0, 60)] },
+    ]);
+    expect(kinds(rows)).toEqual(['a:0', 'a[50-60]+b[0-30,1]', 'c:0']);
+  });
+
+  it('ends a gap at a video without analysis', () => {
+    const rows = coverageRows([
+      { id: 'a', durationS: 60, cards: [span(0, 30)] },
+      { id: 'x', durationS: 60, cards: null },
+      { id: 'b', durationS: 60, cards: [span(30, 60)] },
+    ]);
+    expect(kinds(rows)).toEqual(['a:0', 'a[30-60]', 'b[0-30]', 'b:30']);
+    expect(coverageRows([{ id: 'a', durationS: 5, cards: [] }])).toEqual([]);
   });
 });
 

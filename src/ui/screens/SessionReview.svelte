@@ -20,7 +20,7 @@
   import { routeHash, router } from '../state/router.svelte';
   import { dialog } from '../state/dialog.svelte';
   import { SessionReview } from '../state/review.svelte';
-  import { coverageGaps, formatCoords, placeLabel, placeNames, sessionCoords, sessionSpanS, type CoverageGap, type SessionEntry } from '../state/session-data';
+  import { coverageRows, formatCoords, placeLabel, placeNames, sessionCoords, sessionSpanS, type GapPart, type SessionEntry } from '../state/session-data';
   import { capture } from '../state/capture.svelte';
   import { reattachVideo, setManualCrop } from '../state/hold-actions';
 
@@ -32,7 +32,7 @@
   const review = new SessionReview();
   let selectedKey = $state<string | null>(null);
   let pickerKey = $state<string | null>(null);
-  let scrub = $state<{ mode: 'nudge' | 'split' | 'add'; videoId: string; key?: string; gap?: CoverageGap } | null>(null);
+  let scrub = $state<{ mode: 'nudge' | 'split' | 'add'; videoId: string; key?: string; gap?: GapPart } | null>(null);
   let probe = $state<{ videoId: string; t: number } | null>(null);
   let cropHoldId = $state<string | null>(null);
   const cropHold = $derived(cropHoldId ? app.holds.find((h) => h.id === cropHoldId) : undefined);
@@ -134,29 +134,25 @@
     open: spans.filter((sp) => sp.status === 'open').map((sp) => ({ startS: sp.startS, endS: sp.endS })),
   });
 
-  type Row = { kind: 'card'; entry: SessionEntry; number: number } | { kind: 'gap'; gap: CoverageGap; video: Video };
+  type Row = { kind: 'card'; entry: SessionEntry; number: number } | { kind: 'gap'; parts: GapPart[] };
   /**
-   * The card list: every video's cards in session order, with a row for each uncovered stretch
-   * (per video). "Not a pose" candidates are not cards: they count as uncovered, and their gap
-   * row is always shown.
+   * The card list: every video's cards in session order, with a row for each uncovered stretch.
+   * Stretches that meet at a video boundary are one row (`coverageRows`). "Not a pose" candidates
+   * are not cards: they count as uncovered, and their gap row is always shown.
    */
   const rows = $derived.by(() => {
-    const out: Row[] = [];
     let n = 0;
-    for (const video of analysed) {
+    const input = review.videos.map((video) => {
+      if (!review.analyses[video.id]) return { id: video.id, durationS: video.durationS, cards: null };
       const all = review.entries.filter((e) => e.videoId === video.id);
-      const list = all.filter((e) => e.candidate.status !== 'dismissed');
-      const skipped = all.filter((e) => e.candidate.status === 'dismissed').map((e) => e.candidate);
-      const gaps = new Map(coverageGaps(list.map((e) => e.candidate), video.durationS, undefined, skipped).map((g) => [g.beforeIndex, g]));
-      list.forEach((entry, i) => {
-        const gap = gaps.get(i);
-        if (gap) out.push({ kind: 'gap', gap, video });
-        out.push({ kind: 'card', entry, number: ++n });
-      });
-      const last = gaps.get(list.length);
-      if (last && (list.length || last.skipped)) out.push({ kind: 'gap', gap: last, video });
-    }
-    return out;
+      return {
+        id: video.id,
+        durationS: video.durationS,
+        cards: all.filter((e) => e.candidate.status !== 'dismissed').map((e) => ({ startS: e.candidate.startS, endS: e.candidate.endS, entry: e })),
+        skipped: all.filter((e) => e.candidate.status === 'dismissed').map((e) => e.candidate),
+      };
+    });
+    return coverageRows(input).map((r): Row => (r.kind === 'card' ? { kind: 'card', entry: r.item.entry, number: ++n } : r));
   });
 
   // ----- sticky timeline: a detail window that follows the list -----
@@ -360,24 +356,50 @@
     }
   }
 
-  /**
-   * An uncovered stretch: analyse it on its own (several holds at once), add a hold by hand, or
-   * bring back what was marked "Not a pose" there.
-   */
-  async function gapMenu(gap: CoverageGap, video: Video) {
-    const o = offsetOf(video.id);
-    const f = frameOf(video.id);
-    const range = { fromS: gap.startS, toS: gap.endS };
-    const skipped = gap.skipped ?? 0;
+  const gapLength = (parts: GapPart[]) => parts.reduce((sum, p) => sum + p.endS - p.startS, 0);
+  const gapSkipped = (parts: GapPart[]) => parts.reduce((sum, p) => sum + (p.skipped ?? 0), 0);
+  /** Session time of a gap: its parts are contiguous on the session timeline. */
+  const gapStart = (parts: GapPart[]) => offsetOf(parts[0]!.videoId) + parts[0]!.startS;
+
+  /** Which part of a gap that spans several videos (one part: that one). */
+  async function pickPart(parts: GapPart[], title: string): Promise<GapPart | undefined> {
+    if (parts.length === 1) return parts[0];
     const choice = await dialog.ask({
-      title: `${formatDuration(gap.endS - gap.startS)} not covered`,
-      message: `${formatTime(o + gap.startS)}–${formatTime(o + gap.endS)}`,
-      frames: {
-        videoId: video.id,
-        width: f.width,
-        height: f.height,
-        items: previewTimes(gap.startS, gap.endS).map((t) => ({ index: Math.floor(t * f.hz), label: formatTime(o + t) })),
-      },
+      title,
+      message: 'This stretch spans several videos. Which part is it in?',
+      options: [
+        ...parts.map((p, i) => {
+          const o = offsetOf(p.videoId);
+          return { id: String(i), label: `${formatTime(o + p.startS)}–${formatTime(o + p.endS)}`, detail: review.videos.find((v) => v.id === p.videoId)?.fileName ?? '' };
+        }),
+        { id: 'cancel', label: 'Cancel', kind: 'quiet' as const },
+      ],
+    });
+    return parts[Number(choice)];
+  }
+
+  /**
+   * An uncovered stretch (possibly across a video boundary): analyse it on its own (several holds
+   * at once), add a hold by hand, or bring back what was marked "Not a pose" there.
+   */
+  async function gapMenu(parts: GapPart[]) {
+    const first = parts[0]!;
+    const f = frameOf(first.videoId);
+    const total = gapLength(parts);
+    const skipped = gapSkipped(parts);
+    // Preview frames across the whole stretch, shared out by length, each from its own video.
+    const count = previewTimes(0, total).length;
+    const items = parts.flatMap((p) => {
+      const o = offsetOf(p.videoId);
+      const hz = frameOf(p.videoId).hz;
+      const n = Math.max(1, Math.round((count * (p.endS - p.startS)) / total));
+      const times = n === 1 ? [(p.startS + p.endS) / 2] : Array.from({ length: n }, (_, i) => p.startS + ((i + 0.5) * (p.endS - p.startS)) / n);
+      return times.map((t) => ({ index: Math.floor(t * hz), label: formatTime(o + t), videoId: p.videoId }));
+    });
+    const choice = await dialog.ask({
+      title: `${formatDuration(total)} not covered`,
+      message: `${formatTime(gapStart(parts))}–${formatTime(gapStart(parts) + total)}`,
+      frames: { videoId: first.videoId, width: f.width, height: f.height, items },
       options: [
         { id: 'find', label: 'Find holds here', kind: 'primary', detail: 'Analyses this stretch on its own.' },
         { id: 'add', label: 'Add a hold by hand…' },
@@ -385,15 +407,17 @@
         { id: 'cancel', label: 'Cancel', kind: 'quiet' },
       ],
     });
-    if (choice === 'add') scrub = { mode: 'add', videoId: video.id, gap };
-    else if (choice === 'restore') await review.restoreIn(video.id, range);
-    else if (choice === 'find') {
-      const keys = await review.findHolds(video.id, range);
+    if (choice === 'add') await addInGap(parts);
+    else if (choice === 'restore') {
+      for (const p of parts) if (p.skipped) await review.restoreIn(p.videoId, { fromS: p.startS, toS: p.endS });
+    } else if (choice === 'find') {
+      const keys: string[] = [];
+      for (const p of parts) keys.push(...(await review.findHolds(p.videoId, { fromS: p.startS, toS: p.endS })));
       if (keys[0]) {
         void selectFromGraph(keys[0]);
         return;
       }
-      const minHold = review.analyses[video.id]?.params.minHoldS ?? 6;
+      const minHold = review.analyses[first.videoId]?.params.minHoldS ?? 6;
       const next = await dialog.ask({
         title: 'No hold found',
         message: `Nothing in this stretch stays still for ${minHold} s${skipped ? ', apart from what was marked “Not a pose”' : ''}.`,
@@ -402,8 +426,13 @@
           { id: 'cancel', label: 'Cancel', kind: 'quiet' },
         ],
       });
-      if (next === 'add') scrub = { mode: 'add', videoId: video.id, gap };
+      if (next === 'add') await addInGap(parts);
     }
+  }
+
+  async function addInGap(parts: GapPart[]) {
+    const part = await pickPart(parts, 'Add a hold');
+    if (part) scrub = { mode: 'add', videoId: part.videoId, gap: part };
   }
 
   /** Holds the template expects in place of an open card (when it is more than one). */
@@ -576,24 +605,25 @@
           {/if}
         </div>
 
-        {#snippet gapRow(gap: CoverageGap, video: Video)}
-          {@const o = offsetOf(video.id)}
+        {#snippet gapRow(parts: GapPart[])}
+          {@const total = gapLength(parts)}
+          {@const skipped = gapSkipped(parts)}
           <button
             class="gap"
             type="button"
             aria-haspopup="dialog"
-            aria-label="{formatDuration(gap.endS - gap.startS)} not covered at {formatTime(o + gap.startS)}{gap.skipped ? `, ${gap.skipped} skipped` : ''}: find or add holds"
-            onclick={() => gapMenu(gap, video)}
+            aria-label="{formatDuration(total)} not covered at {formatTime(gapStart(parts))}{skipped ? `, ${skipped} skipped` : ''}: find or add holds"
+            onclick={() => gapMenu(parts)}
           >
-            <span class="tabular">{formatDuration(gap.endS - gap.startS)} not covered{#if gap.skipped}<span class="faint"> · {gap.skipped} skipped</span>{/if}</span>
+            <span class="tabular">{formatDuration(total)} not covered{#if skipped}<span class="faint"> · {skipped} skipped</span>{/if}</span>
             <span class="gap-add">+ Add holds</span>
           </button>
         {/snippet}
 
         <div class="cards">
-          {#each rows as row (row.kind === 'card' ? row.entry.key : `gap-${row.video.id}-${row.gap.startS}`)}
+          {#each rows as row (row.kind === 'card' ? row.entry.key : `gap-${row.parts[0]!.videoId}-${row.parts[0]!.startS}`)}
             {#if row.kind === 'gap'}
-              {@render gapRow(row.gap, row.video)}
+              {@render gapRow(row.parts)}
             {:else}
               {@const entry = row.entry}
               <ReviewCard
@@ -647,7 +677,7 @@
     {@const from = scrub.gap?.startS ?? 0}
     {@const to = scrub.gap?.endS ?? v?.durationS ?? 0}
     <FrameScrubber
-      title={scrub.gap ? `Add hold · ${formatTime(from)}–${formatTime(to)}` : 'Add missed hold'}
+      title={scrub.gap ? `Add hold · ${formatTime(offsetOf(scrub.videoId) + from)}–${formatTime(offsetOf(scrub.videoId) + to)}` : 'Add missed hold'}
       confirmLabel="Add hold here"
       videoId={scrub.videoId}
       frameWidth={f.width}
