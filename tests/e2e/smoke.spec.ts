@@ -532,3 +532,64 @@ test('backup export → delete all data → import restores labels, stills and f
   await page.getByRole('button', { name: 'OK' }).click();
   expect(errors).toEqual([]);
 });
+
+test('research export and detection lab on a fully labeled video', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('worker', (w) => w.on('console', (m) => m.text().includes('pose model unavailable') && errors.push(m.text())));
+  // With the MediaPipe model: the research worker loads it too (cached by the capture worker).
+  await page.goto('./');
+  await importVideo(page);
+  await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
+  // Fully labeled: two confirmed, one "Not a pose".
+  for (const i of [0, 1]) {
+    await cards(page).nth(i).getByRole('button', { name: /^Confirm / }).click();
+    await expect(cards(page).nth(i)).toHaveAttribute('data-status', 'labeled');
+  }
+  await cards(page).nth(2).getByRole('button', { name: /More actions/ }).click();
+  await page.getByRole('button', { name: 'Not a pose' }).click();
+  await expect(cards(page)).toHaveCount(2);
+  await expect(page.locator('[data-capture=done]')).toHaveCount(2, { timeout: 60_000 });
+
+  await page.goto('./#/settings');
+  const diag = page.getByRole('region', { name: 'Diagnostics' });
+  await diag.getByRole('button', { name: 'Export research data' }).click();
+  await expect(diag.getByText(/Research data ready: asana-progression-research-\d{4}-\d\d-\d\d\.json/)).toBeVisible({ timeout: 60_000 });
+  const [download] = await Promise.all([page.waitForEvent('download'), diag.getByRole('button', { name: 'Save', exact: true }).click()]);
+  const text = readFileSync(await download.path(), 'utf8');
+  expect(text).not.toContain('synthetic-practice');
+  const x = JSON.parse(text);
+  expect(x).toMatchObject({ format: 'asana-progression/research', version: 1, cropper: 'mediapipe-pose' });
+  expect(x.sessions).toHaveLength(1);
+  expect(x.sessions[0].fullyLabeled).toBe(true);
+  expect(x.analyses[0].fresh.candidates.length).toBeGreaterThan(0);
+  expect(x.analyses[0].signals.from).toBe('stored');
+  expect(x.holds).toHaveLength(2);
+  // The synthetic figure is no person: usually no body, but the model may still find one.
+  for (const h of x.holds) expect(['no-body', 'ok']).toContain(h.poseStatus);
+  expect(x.summary.fullyLabeled.holds).toBe(2);
+
+  await diag.getByRole('button', { name: 'Detection lab ›' }).click();
+  await expect(page.getByRole('heading', { name: 'Detection lab' })).toBeVisible();
+  await expect(page.getByText('1 fully labeled video in 1 session.')).toBeVisible();
+  await expect(page.getByText('144 parameter sets')).toBeVisible();
+  const grid = page.getByLabel(/Parameter grid/);
+  await grid.fill('{"vary": {"stillPercentile": [50, 55], "pool": [1]}}');
+  await expect(page.getByText(/"pool" shapes the stored frames/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run' })).toBeDisabled();
+  await grid.fill('{"vary": {"stillPercentile": [50, 55]}}');
+  await expect(page.getByText('2 parameter sets')).toBeVisible();
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page.getByRole('heading', { name: 'Best 2 of 2' })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText('current defaults')).toBeVisible();
+  await page.getByRole('button', { name: 'Export results' }).click();
+  const [labDownload] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Save', exact: true }).click()]);
+  const report = JSON.parse(readFileSync(await labDownload.path(), 'utf8'));
+  expect(report).toMatchObject({ format: 'asana-progression/lab', sessions: [x.sessions[0].id] });
+  expect(report.combos).toHaveLength(2);
+  expect(report.reference.total.holds).toBe(2);
+  // The grid text is kept for the next visit.
+  await page.reload();
+  await expect(page.getByText('2 parameter sets')).toBeVisible();
+  expect(errors).toEqual([]);
+});

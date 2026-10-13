@@ -40,7 +40,7 @@ export async function deleteAssets(list: Asset[]): Promise<void> {
   app.removeAssets(list.map((a) => a.id));
 }
 
-function debugCropper(): 'mediapipe' | 'none' {
+export function debugCropper(): 'mediapipe' | 'none' {
   try {
     const raw = localStorage.getItem('asana.debug.capture');
     return raw && (JSON.parse(raw) as { cropper?: string }).cropper === 'none' ? 'none' : 'mediapipe';

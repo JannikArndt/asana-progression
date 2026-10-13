@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { buildAnalysisExport, DEFAULT_PARAMS, needsResample, normalizeParams, PARAM_SPECS, type DetectionParams } from '../../detection';
+  import { buildAnalysisExport, DEFAULT_PARAMS, isChoiceSpec, needsResample, normalizeParams, PARAM_SPECS, type DetectionParams } from '../../detection';
   import { fingerprint, openVideo, type DecoderSupport, type VideoMeta } from '../../source';
   import { deleteFile, sampleFileName } from '../../storage';
   import type { Analysis, Video } from '../../model';
@@ -181,8 +181,14 @@
         <label class="param">
           <span class="plabel">{spec.label}{spec.key === 'sampleHz' || spec.key === 'sampleLongSide' || spec.key === 'pool' ? ' *' : ''}</span>
           <span class="pinput">
-            <input type="number" inputmode="decimal" min={spec.min} max={spec.max} step={spec.step} bind:value={params[spec.key]} />
-            <span class="unit">{spec.unit ?? ''}</span>
+            {#if isChoiceSpec(spec)}
+              <select bind:value={params[spec.key]}>
+                {#each spec.options as o (o)}<option value={o}>{o}</option>{/each}
+              </select>
+            {:else}
+              <input type="number" inputmode="decimal" min={spec.min} max={spec.max} step={spec.step} bind:value={params[spec.key]} />
+            {/if}
+            <span class="unit">{isChoiceSpec(spec) ? '' : (spec.unit ?? '')}</span>
           </span>
         </label>
       {/each}
@@ -306,7 +312,8 @@
     flex: none;
   }
 
-  .pinput input {
+  .pinput input,
+  .pinput select {
     width: 76px;
     min-height: 36px;
     padding: 0 var(--space-2);

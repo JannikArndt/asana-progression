@@ -6,11 +6,11 @@
  * returns the landmarks of one stored still for the viewer's overlay (independent of the queue).
  */
 import { captureHold, previewFromStill, type CapturedAsset } from '../../capture';
-import { createMediaPipeCropper, nullCropper, type Cropper } from '../../crop';
 import { newId, type Asset } from '../../model';
 import { openVideo } from '../../source';
 import { OpfsAssetStore } from '../../storage';
 import type { CaptureEvent, CaptureRequest } from './capture-protocol';
+import { workerCropper } from './cropper';
 
 const scope = self as unknown as {
   postMessage(message: CaptureEvent): void;
@@ -18,28 +18,11 @@ const scope = self as unknown as {
 };
 
 const store = new OpfsAssetStore();
-let cropperPromise: Promise<Cropper> | null = null;
-let cropperKind: 'mediapipe' | 'none' | null = null;
+const getCropper = workerCropper();
 let current: AbortController | null = null;
 
 function post(e: CaptureEvent) {
   scope.postMessage(e);
-}
-
-function getCropper(kind: 'mediapipe' | 'none', baseUrl: string): Promise<Cropper> {
-  if (cropperPromise && cropperKind === kind) return cropperPromise;
-  cropperKind = kind;
-  if (kind === 'none') return (cropperPromise = Promise.resolve(nullCropper));
-  const url = (p: string) => new URL(baseUrl + p, self.location.origin).toString();
-  cropperPromise = createMediaPipeCropper({
-    wasmLoaderUrl: url('mediapipe/vision_wasm_module_internal.js'),
-    wasmBinaryUrl: url('mediapipe/vision_wasm_module_internal.wasm'),
-    modelUrl: url('models/pose_landmarker_lite.task'),
-  }).catch((e) => {
-    console.warn('[capture] pose model unavailable, using full frames', e);
-    return nullCropper;
-  });
-  return cropperPromise;
 }
 
 function extension(mime: string): string {

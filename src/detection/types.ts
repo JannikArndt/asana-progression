@@ -6,6 +6,8 @@
  * hold candidates. It knows nothing about video APIs, asanas, storage or UI.
  */
 
+export type ThresholdMode = 'global' | 'rolling';
+
 /** All tunable thresholds. Editable in the debug panel. */
 export interface DetectionParams {
   /** Sampling rate of the input frames (Hz). Changing it requires re-decoding the video. */
@@ -22,6 +24,26 @@ export interface DetectionParams {
   edgeWindowMinS: number;
   /** Samples with C at or below this percentile of the video's C are "still". */
   stillPercentile: number;
+  /**
+   * 'global': one still threshold for the whole video (the percentile of all C). 'rolling': the
+   * percentile of C within ± thresholdWindowS / 2 around each sample (a practice part with much
+   * movement gets its own threshold).
+   */
+  thresholdMode: ThresholdMode;
+  /** Centred window (seconds) of the rolling threshold. */
+  thresholdWindowS: number;
+  /**
+   * Hysteresis: a still run starts where C ≤ the `stillPercentile` threshold and extends while
+   * C ≤ the threshold at this percentile. Values ≤ stillPercentile: no hysteresis.
+   */
+  stillPercentileExit: number;
+  /**
+   * Splits a still run at an internal C peak: every valley of C inside the run with a prominence of
+   * at least this × the threshold is its own hold, cut at the highest C between neighbouring valleys
+   * (look-alike poses with little movement between them). Parts stay ≥ minHoldS; split parts are
+   * never merged again by the similar-merge. 0 = off.
+   */
+  splitPeakFactor: number;
   /** Still runs separated by gaps shorter than this (seconds) are joined. */
   gapMergeS: number;
   /** Still runs shorter than this (seconds) are dropped. */
@@ -97,7 +119,7 @@ export interface Signals {
 }
 
 export interface CandidateResult {
-  /** C value at `stillPercentile`. */
+  /** C value at `stillPercentile` of the whole video (with a rolling threshold: for display and scale only). */
   threshold: number;
   /** True if the special single-still-run case applied. */
   singleStill: boolean;

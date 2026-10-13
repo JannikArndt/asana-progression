@@ -1,4 +1,4 @@
-import type { DetectionParams } from './types';
+import type { DetectionParams, ThresholdMode } from './types';
 
 /** Defaults from the validated 7.6 min test video (9 of 10 holds found, all best frames correct). */
 export const DEFAULT_PARAMS: Readonly<DetectionParams> = Object.freeze({
@@ -9,6 +9,10 @@ export const DEFAULT_PARAMS: Readonly<DetectionParams> = Object.freeze({
   changeWindowS: 4,
   edgeWindowMinS: 1,
   stillPercentile: 55,
+  thresholdMode: 'global',
+  thresholdWindowS: 300,
+  stillPercentileExit: 55,
+  splitPeakFactor: 0,
   gapMergeS: 1,
   minHoldS: 6,
   bestFrameMiddle: 0.8,
@@ -33,14 +37,29 @@ export const SIGNAL_PARAM_KEYS: ReadonlyArray<keyof DetectionParams> = [
   'edgeWindowMinS',
 ];
 
-export interface ParamSpec {
-  key: keyof DetectionParams;
+/** Parameters with numeric values (everything except the choice parameters). */
+export type NumericParamKey = { [K in keyof DetectionParams]: DetectionParams[K] extends number ? K : never }[keyof DetectionParams];
+
+export interface NumberParamSpec {
+  key: NumericParamKey;
   label: string;
   min: number;
   max: number;
   step: number;
   unit?: string;
   integer?: boolean;
+}
+
+export interface ChoiceParamSpec {
+  key: 'thresholdMode';
+  label: string;
+  options: ReadonlyArray<ThresholdMode>;
+}
+
+export type ParamSpec = NumberParamSpec | ChoiceParamSpec;
+
+export function isChoiceSpec(spec: ParamSpec): spec is ChoiceParamSpec {
+  return 'options' in spec;
 }
 
 /** UI metadata for the debug panel. */
@@ -52,6 +71,10 @@ export const PARAM_SPECS: ReadonlyArray<ParamSpec> = [
   { key: 'changeWindowS', label: 'Posture-change half window', min: 0.5, max: 20, step: 0.5, unit: 's' },
   { key: 'edgeWindowMinS', label: 'Min edge window', min: 0.25, max: 10, step: 0.25, unit: 's' },
   { key: 'stillPercentile', label: 'Still percentile', min: 5, max: 95, step: 1, unit: '%' },
+  { key: 'thresholdMode', label: 'Still threshold', options: ['global', 'rolling'] },
+  { key: 'thresholdWindowS', label: 'Rolling threshold window', min: 30, max: 3600, step: 30, unit: 's' },
+  { key: 'stillPercentileExit', label: 'Still percentile to leave a hold', min: 5, max: 95, step: 1, unit: '%' },
+  { key: 'splitPeakFactor', label: 'Split at inner peaks from', min: 0, max: 2, step: 0.05, unit: '× threshold' },
   { key: 'gapMergeS', label: 'Join gaps shorter than', min: 0, max: 10, step: 0.25, unit: 's' },
   { key: 'minHoldS', label: 'Minimum hold', min: 0.5, max: 60, step: 0.5, unit: 's' },
   { key: 'bestFrameMiddle', label: 'Best-frame search span', min: 0.1, max: 1, step: 0.05 },
@@ -71,6 +94,11 @@ export function normalizeParams(input: Partial<DetectionParams> | undefined): De
   const out: DetectionParams = { ...DEFAULT_PARAMS };
   if (!input) return out;
   for (const spec of PARAM_SPECS) {
+    if (isChoiceSpec(spec)) {
+      const raw = input[spec.key];
+      if (spec.options.includes(raw as ThresholdMode)) out[spec.key] = raw as ThresholdMode;
+      continue;
+    }
     const raw = input[spec.key];
     if (typeof raw !== 'number' || !Number.isFinite(raw)) continue;
     let v = Math.min(spec.max, Math.max(spec.min, raw));

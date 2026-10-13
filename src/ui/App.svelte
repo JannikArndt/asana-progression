@@ -7,6 +7,7 @@
   import AsanaProgression from './screens/AsanaProgression.svelte';
   import Catalog from './screens/Catalog.svelte';
   import TemplateEditor from './screens/TemplateEditor.svelte';
+  import DetectionLab from './screens/DetectionLab.svelte';
   import { sessionOfVideo } from './state/session-data';
   import Settings from './screens/Settings.svelte';
   import Dialog from './components/Dialog.svelte';
@@ -16,6 +17,7 @@
   import { pipeline } from './pipeline/controller.svelte';
   import { capture } from './state/capture.svelte';
   import { backup } from './state/backup.svelte';
+  import { research } from './state/research.svelte';
   import { updates } from './update.svelte';
 
   // Old milestone-1 links (#/video/<id>) open the session containing the video.
@@ -33,6 +35,7 @@
     updates.addQuietCheck(() => !capture.busy);
     // A prepared backup file would be lost, e.g. while the share sheet hides the page.
     updates.addQuietCheck(() => !backup.exporting && !backup.importing && !backup.ready);
+    updates.addQuietCheck(() => !research.busy && !research.ready);
     updates.start();
     void updates.check();
   });
@@ -58,6 +61,8 @@
   {#key router.route.id}<TemplateEditor id={router.route.id} />{/key}
 {:else if router.route.name === 'settings'}
   <Settings />
+{:else if router.route.name === 'lab'}
+  <DetectionLab />
 {/if}
 
 <Dialog />

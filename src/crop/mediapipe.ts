@@ -88,12 +88,14 @@ export async function createMediaPipeCropper(opts: MediaPipeCropperOptions): Pro
     name: 'mediapipe-pose',
     async detect(image: CropperInput): Promise<PoseDetection | null> {
       if (closed) throw new Error('Cropper is closed');
-      const pose = landmarker.detect(image).landmarks[0];
+      const result = landmarker.detect(image);
+      const pose = result.landmarks[0];
       const aspect = image.height > 0 ? image.width / image.height : 1;
       const box = pose ? boxFromLandmarks(pose, { aspect }) : null;
       if (!pose || !box) return null;
-      const landmarks = pose.map(({ x, y, visibility }) => ({ x, y, visibility }));
-      return { box, posture: postureFromLandmarks(pose, { aspect }), landmarks };
+      const copy = (list: typeof pose) => list.map(({ x, y, z, visibility }) => ({ x, y, z, visibility }));
+      const world = result.worldLandmarks[0];
+      return { box, posture: postureFromLandmarks(pose, { aspect }), landmarks: copy(pose), ...(world ? { worldLandmarks: copy(world) } : {}) };
     },
     close() {
       if (closed) return;
