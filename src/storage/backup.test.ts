@@ -42,6 +42,7 @@ const analysis: Analysis = {
   preMerge: [],
   createdAt: 'now',
   stats: null,
+  poses: { '20': { v: 1, world: 'AAAA', vis: 'AA==', posture: 'seated' }, '30': null },
 };
 const hold: Hold = {
   id: 'h1',
@@ -55,6 +56,7 @@ const hold: Hold = {
   clipStartS: 3,
   clipEndS: 7,
   crop: { auto: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } },
+  pose: { v: 1, world: 'AAAA', vis: 'AA==', posture: null },
 };
 const asset = (id: string, kind: Asset['kind'], holdId = 'h1'): Asset => ({
   id,
@@ -117,6 +119,7 @@ describe('backup', () => {
     expect([...a.m].slice(0, 2)).toEqual([1, 2.5]);
     expect(Number.isNaN(a.m[2]!)).toBe(true);
     expect([...a.C].slice(1)).toEqual([0.25, -1]);
+    expect(a.poses).toEqual(analysis.poses);
     expect(await (await files2.get('assets/a3.mp4'))!.text()).toBe('a3');
     expect((await files2.get('samples-v1.bin'))!.size).toBe(12);
     expect(await db2.settings.get('clipQuality')).toBe('original');

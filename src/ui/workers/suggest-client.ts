@@ -1,4 +1,4 @@
-import { suggest, type HistoryEntry, type ReviewItem, type Suggestion, type SuggestionOptions } from '../../labeling';
+import { planSession, type HistoryEntry, type ReviewItem, type SessionPlan, type SuggestionOptions } from '../../labeling';
 import type { Asana, SequenceTemplate } from '../../model';
 
 export interface SuggestRequest {
@@ -10,7 +10,7 @@ export interface SuggestRequest {
   options: SuggestionOptions;
 }
 
-export type SuggestResponse = { id: number; result: Record<string, Suggestion[]> } | { id: number; error: string };
+export type SuggestResponse = { id: number; result: SessionPlan } | { id: number; error: string };
 
 let worker: Worker | null = null;
 let seq = 0;
@@ -31,10 +31,10 @@ function getWorker(): Worker | null {
   }
 }
 
-/** Suggestions computed in a worker (falls back to the main thread if workers are unavailable). */
-export function suggestInWorker(req: Omit<SuggestRequest, 'id'>): Promise<Record<string, Suggestion[]>> {
+/** Suggestions and the "Confirm all" plan, computed in a worker (on the main thread if workers are unavailable). */
+export function suggestInWorker(req: Omit<SuggestRequest, 'id'>): Promise<SessionPlan> {
   const w = getWorker();
-  if (!w) return Promise.resolve(suggest(req.items, req.catalog, req.template, req.history, req.options));
+  if (!w) return Promise.resolve(planSession(req.items, req.catalog, req.template, req.history, req.options));
   const id = ++seq;
   return new Promise((resolve, reject) => {
     pending.set(id, (r) => ('error' in r ? reject(new Error(r.error)) : resolve(r.result)));

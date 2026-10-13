@@ -1,6 +1,6 @@
 import { OpfsAssetStore } from '../../storage';
 import type { ClipQuality } from '../../capture';
-import type { Asset, Hold } from '../../model';
+import type { Asset, CompactPose, Hold } from '../../model';
 import type { CaptureEvent, CaptureRequest } from '../pipeline/capture-protocol';
 import { app } from './app.svelte';
 import { CROP_VERSION, type BodyBox, type PoseDetection } from '../../crop';
@@ -70,6 +70,8 @@ class CaptureQueue {
   private jobId = 0;
   /** Pose results by still storage key, for the page's lifetime (a new still has a new key). */
   private poses = new Map<string, Promise<PoseResult>>();
+  /** Frame-pose keys in flight, by video. */
+  private framePending = new Map<string, Set<string>>();
 
   get busy(): boolean {
     return this.running;
@@ -207,7 +209,7 @@ class CaptureQueue {
         if (ev.jobId !== jobId) return;
         if (ev.type === 'recrop-done') {
           this.cropper = ev.cropper;
-          chain.push(this.storeCrop(ev.holdId, ev.crop, ev.cropper));
+          chain.push(this.storeCrop(ev.holdId, ev.crop, ev.cropper, ev.pose));
         } else if (ev.type === 'hold-error') {
           console.warn('[capture] re-crop failed', ev.holdId, ev.message);
         } else if (ev.type === 'done' || ev.type === 'error') {
@@ -250,12 +252,57 @@ class CaptureQueue {
     return p;
   }
 
-  /** Records a re-detected automatic crop (the stored still did not change). */
-  private async storeCrop(holdId: string, box: BodyBox | null, cropper: string) {
+  /**
+   * Poses of review candidates' best frames (`frames`: key = `poseKey`, time), computed in the
+   * capture worker from the video file and stored in the analysis (`app.addFramePoses`) in small
+   * batches. Needs the file in this page session and the pose model; keys already in flight are
+   * skipped.
+   */
+  requestFramePoses(videoId: string, frames: Array<{ key: string; atS: number }>) {
+    const file = app.files.get(videoId);
+    const cropper = debugCropper();
+    if (!file || cropper === 'none') return;
+    const inflight = this.framePending.get(videoId) ?? new Set<string>();
+    const todo = frames.filter((f) => !inflight.has(f.key));
+    if (!todo.length) return;
+    for (const f of todo) inflight.add(f.key);
+    this.framePending.set(videoId, inflight);
+    const worker = this.ensureWorker();
+    const jobId = ++this.jobId;
+    let buffer: Record<string, CompactPose | null> = {};
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      const batch = buffer;
+      buffer = {};
+      if (Object.keys(batch).length) void app.addFramePoses(videoId, batch);
+    };
+    const listener = (e: MessageEvent<CaptureEvent>) => {
+      const ev = e.data;
+      if (ev.jobId !== jobId) return;
+      if (ev.type === 'frame-pose') {
+        buffer[ev.key] = ev.pose;
+        if (Object.keys(buffer).length >= 10) flush();
+        else timer ??= setTimeout(flush, 1500);
+      } else if (ev.type === 'frame-poses-done') {
+        worker.removeEventListener('message', listener);
+        flush();
+        for (const f of todo) inflight.delete(f.key);
+        if (ev.message) console.warn('[capture] frame poses failed', ev.message);
+      }
+    };
+    worker.addEventListener('message', listener);
+    const req: CaptureRequest = { type: 'frame-poses', jobId, file, videoId, frames: todo, cropper, baseUrl: import.meta.env.BASE_URL };
+    worker.postMessage(req);
+  }
+
+  /** Records a re-detected automatic crop and pose (the stored still did not change). */
+  private async storeCrop(holdId: string, box: BodyBox | null, cropper: string, pose: CompactPose | null | undefined) {
     const version = cropVersion(cropper);
     const hold = await app.db.holds.get(holdId);
     if (!hold || version === null) return;
-    const updated: Hold = { ...hold, crop: withAutoCrop(hold.crop, box, version) };
+    const updated: Hold = { ...hold, crop: withAutoCrop(hold.crop, box, version), ...(pose !== undefined ? { pose } : {}) };
     await app.db.holds.put(updated);
     app.upsertHold(updated);
   }
@@ -274,9 +321,10 @@ class CaptureQueue {
     app.addAssets(ev.assets);
     await deleteAssets(old);
     if (ev.assets.some((a) => a.kind === 'still')) {
-      // A new still: the old automatic crop belonged to another frame.
+      // A new still: the old automatic crop and pose belonged to another frame.
       const { auto: _, ...rest } = hold.crop;
-      const updated: Hold = { ...hold, crop: withAutoCrop(rest, ev.crop, cropVersion(ev.cropper)) };
+      const { pose: _pose, ...base } = hold;
+      const updated: Hold = { ...base, crop: withAutoCrop(rest, ev.crop, cropVersion(ev.cropper)), ...(ev.pose !== undefined ? { pose: ev.pose } : {}) };
       await db.holds.put(updated);
       app.upsertHold(updated);
     }

@@ -36,7 +36,7 @@ import {
   sessionPreview,
   sessionTinyFrame,
 } from './session-data';
-import type { Analysis, Hold, ReviewCandidate, Session, Video } from '../../model';
+import type { Analysis, CompactPose, Hold, ReviewCandidate, Session, Video } from '../../model';
 import { DEFAULT_PARAMS } from '../../detection';
 
 const cand = (id: string, startS: number, status: ReviewCandidate['status'] = 'open', holdId?: string): ReviewCandidate => ({
@@ -67,10 +67,16 @@ describe('session data', () => {
     expect(entries[0]!.hold?.id).toBe('h1');
     const items = toReviewItems(entries);
     expect(items).toEqual([
-      { key: 'v1/a', status: 'labeled', label: { asanaId: 'navasana', side: null, templateEntryIndex: 40 } },
-      { key: 'v1/b', status: 'open' },
-      { key: 'v2/c', status: 'dismissed' },
+      { key: 'v1/a', status: 'labeled', label: { asanaId: 'navasana', side: null, templateEntryIndex: 40 }, videoId: 'v1' },
+      { key: 'v1/b', status: 'open', videoId: 'v1' },
+      { key: 'v2/c', status: 'dismissed', videoId: 'v2' },
     ]);
+    // poses: a labeled hold's own pose, else the stored pose of the candidate's best frame
+    const own: CompactPose = { v: 1, world: 'own', vis: '', posture: null };
+    const frame: CompactPose = { v: 1, world: 'frame', vis: '', posture: 'standing' };
+    const withPose = sessionEntries(s1, analyses, [{ ...holds[0]!, pose: own }]);
+    const posed = toReviewItems(withPose, (videoId, bestS) => (videoId === 'v1' && bestS === 55 ? frame : undefined));
+    expect(posed.map((i) => i.pose)).toEqual([own, frame, undefined]);
     // labeled without a hold record is treated as open
     expect(toReviewItems(sessionEntries(s1, { v1: analysis('v1', [cand('x', 1, 'labeled', 'missing')]) }, []))[0]!.status).toBe('open');
     expect(toReviewItems([{ key: 'k', videoId: 'v', candidate: cand('y', 1, 'labeled', 'h'), hold: hold('h', 's', 'v', 'a', 1) }])[0]!.label).toEqual({ asanaId: 'a', side: null });

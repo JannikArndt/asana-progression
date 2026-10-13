@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import DebugPanel from '../components/DebugPanel.svelte';
   import { formatDuration, formatTime } from '../components/timeline';
   import { videoOffsets } from '../components/session-timeline';
@@ -29,6 +30,7 @@
   $effect(() => {
     if (app.ready) void review.load(id);
   });
+  onDestroy(() => review.dispose());
 
   const offsets = $derived(videoOffsets(review.videos));
   const total = $derived(review.videos.reduce((s, v) => s + v.durationS, 0));
@@ -61,7 +63,9 @@
     const file = input.files?.[0];
     input.value = '';
     if (!file) return;
-    attachError = { ...attachError, [video.id]: await reattachVideo(video, file) };
+    const error = await reattachVideo(video, file);
+    attachError = { ...attachError, [video.id]: error };
+    if (!error) review.requestPoses(video.id);
   }
 
   async function supportOf(videoId: string) {

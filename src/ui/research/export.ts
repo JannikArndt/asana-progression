@@ -19,7 +19,7 @@ import { addScores, scoreDetection, summarizeScore, type DetectionScore, type Sc
 import { holdReps } from '../../progression';
 import { boxFromLandmarks, type BodyBox, type Landmark, type PoseDetection } from '../../crop';
 import type { Analysis, Asana, Asset, Box, Hold, PostureClass, SequenceTemplate, Session, Video } from '../../model';
-import { encodeFloat16 } from './float16';
+import { encodeFloat16 } from '../../model';
 
 export const RESEARCH_FORMAT = 'asana-progression/research';
 export const RESEARCH_VERSION = 1;

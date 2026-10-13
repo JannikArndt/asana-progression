@@ -15,6 +15,7 @@ import {
   type Analysis,
   type Asana,
   type Asset,
+  type CompactPose,
   type Hold,
   type ProcessingJob,
   type SequenceTemplate,
@@ -255,6 +256,42 @@ class AppState {
 
   removeHold(id: string) {
     this.holds = this.holds.filter((x) => x.id !== id);
+  }
+
+  private analysisWrites = new Map<string, Promise<unknown>>();
+  private analysisListeners = new Set<(a: Analysis) => void>();
+
+  /**
+   * Read-modify-write of a stored analysis, one at a time per video, so background results (frame
+   * poses) and review edits never overwrite each other. `fn` returns the new record (or null to
+   * keep it). Listeners hear about every write.
+   */
+  updateAnalysis(videoId: string, fn: (a: Analysis) => Analysis | null): Promise<Analysis | null> {
+    const run = (this.analysisWrites.get(videoId) ?? Promise.resolve())
+      .catch(() => {})
+      .then(async () => {
+        const a = await this.db.analyses.get(videoId);
+        if (!a) return null;
+        const next = fn(a);
+        if (!next) return a;
+        await this.db.analyses.put(next);
+        this.setCandidates(videoId, next.candidates);
+        for (const l of this.analysisListeners) l(next);
+        return next;
+      });
+    this.analysisWrites.set(videoId, run);
+    return run;
+  }
+
+  /** Stores frame poses (by `poseKey`) in a video's analysis. */
+  addFramePoses(videoId: string, poses: Record<string, CompactPose | null>): Promise<Analysis | null> {
+    return this.updateAnalysis(videoId, (a) => ({ ...a, poses: { ...a.poses, ...poses } }));
+  }
+
+  /** Called after every `updateAnalysis` write; returns the unsubscribe function. */
+  onAnalysis(listener: (a: Analysis) => void): () => void {
+    this.analysisListeners.add(listener);
+    return () => this.analysisListeners.delete(listener);
   }
 
   setCandidates(videoId: string, candidates: Analysis['candidates']) {

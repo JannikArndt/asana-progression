@@ -1,4 +1,6 @@
 import type { Asana, SequenceTemplate } from '../model/types';
+import { alignSlots, type AlignSlot } from './align';
+import { classKey, PoseClassifier } from './pose';
 import type { HistoryEntry, Label, ReviewItem, Suggestion, SuggestionOptions } from './types';
 
 const DAY_MS = 86_400_000;
@@ -183,9 +185,121 @@ function historySuggestions(
   return out;
 }
 
+/** Whole-session alignment with poses (research/REPORT.md, B2). */
+export const POSE_ALIGNMENT = {
+  /** Emission = weight × (distance to the entry's pose class − the item's nearest class distance). */
+  weight: 2,
+  /** Used only when the labeled poses cover at least this share of the template's entries. */
+  minCoverage: 0.5,
+} as const;
+
+export interface SessionPlan {
+  /** Top `limit` suggestions per open item (as `suggest`). */
+  suggestions: Record<string, Suggestion[]>;
+  /**
+   * "Confirm all": the label the alignment gives each open item with a pose (items it takes for
+   * no hold are left out). Null when the alignment is not used (no template or too few poses).
+   */
+  confirmAll: Array<{ key: string; label: Label }> | null;
+}
+
+function median(values: number[]): number {
+  const v = [...values].sort((a, b) => a - b);
+  const mid = v.length >> 1;
+  return v.length % 2 ? v[mid]! : (v[mid - 1]! + v[mid]!) / 2;
+}
+
 /**
- * Suggestions (top `limit`) for every open item. With a template: template order; once the
- * template is exhausted (or without a template): recency and frequency of use.
+ * Alignment of the whole session to the template with pose evidence: labeled items are pinned to
+ * their entry, open items are ranked by min-marginals (transition costs + pose distances to the
+ * entries' classes, learned from labeled holds with a pose). Null when it does not apply.
+ */
+function poseAlignment(
+  items: ReviewItem[],
+  template: SequenceTemplate,
+  catalog: Map<string, Asana>,
+  history: HistoryEntry[],
+  limit: number,
+): SessionPlan | null {
+  const classifier = new PoseClassifier([
+    ...history.map((h) => ({ asanaId: h.asanaId, side: h.side, pose: h.pose })),
+    ...items.filter((it) => it.status === 'labeled' && it.label).map((it) => ({ asanaId: it.label!.asanaId, side: it.label!.side, pose: it.pose })),
+  ]);
+  const known = classifier.classes;
+  const m = template.entries.length;
+  if (!m) return null;
+  const entryKeys = template.entries.map((_, i) => {
+    const l = entryLabel(template, i, catalog);
+    return classKey(l.asanaId, l.side);
+  });
+  if (entryKeys.filter((k) => known.has(k)).length < POSE_ALIGNMENT.minCoverage * m) return null;
+  const sequence = items.filter((it) => it.status !== 'dismissed');
+  const distances = sequence.map((it) => (it.status === 'open' ? classifier.distances(it.pose) : null));
+  if (!distances.some(Boolean)) return null;
+  const slots: AlignSlot[] = sequence.map((it, i) => {
+    const prev = sequence[i - 1];
+    const newVideo = !!prev && it.videoId !== undefined && prev.videoId !== undefined && it.videoId !== prev.videoId;
+    if (it.status === 'labeled') {
+      const e = it.label?.templateEntryIndex;
+      return e !== undefined && e < m ? { kind: 'entry', entry: e, newVideo } : { kind: 'other', newVideo };
+    }
+    const d = distances[i];
+    if (!d) return { kind: 'open', newVideo, emission: () => 0 };
+    const values = [...d.values()];
+    const best = Math.min(...values);
+    const typical = median(values);
+    const em = entryKeys.map((k) => POSE_ALIGNMENT.weight * ((d.get(k) ?? typical) - best));
+    return { kind: 'open', newVideo, emission: (k) => em[k]! };
+  });
+  const { path, marginals } = alignSlots(slots, template);
+  const suggestions: Record<string, Suggestion[]> = {};
+  const confirmAll: SessionPlan['confirmAll'] = [];
+  sequence.forEach((it, i) => {
+    const mm = marginals[i];
+    if (!mm) return;
+    const ranked = [...mm.entries.keys()].sort((a, b) => mm.entries[a]! - mm.entries[b]! || a - b);
+    const out: Suggestion[] = [];
+    for (const e of ranked) {
+      if (!Number.isFinite(mm.entries[e]!)) break;
+      const l = entryLabel(template, e, catalog);
+      if (out.some((x) => sameLabel(template, x.templateEntryIndex!, l))) continue;
+      out.push({ ...l, reason: 'pose' });
+      if (out.length === limit) break;
+    }
+    if (out.length) suggestions[it.key] = out;
+    if (path[i]! >= 0 && distances[i]) confirmAll.push({ key: it.key, label: entryLabel(template, path[i]!, catalog) });
+  });
+  return { suggestions, confirmAll };
+}
+
+/**
+ * Suggestions (top `limit`) for every open item, and the "Confirm all" plan. With a template and
+ * enough labeled poses: whole-session alignment with poses; with a template otherwise: template
+ * order; once the template is exhausted (or without a template): recency and frequency of use.
+ */
+export function planSession(
+  items: ReviewItem[],
+  catalog: Asana[],
+  template: SequenceTemplate | null,
+  history: HistoryEntry[],
+  options: SuggestionOptions = {},
+): SessionPlan {
+  const limit = options.limit ?? 3;
+  const lookahead = options.lookahead ?? 5;
+  const nowMs = options.now ? Date.parse(options.now) : Date.now();
+  const byId = new Map(catalog.map((a) => [a.id, a]));
+  const fromTemplate = template ? templateSuggestions(items, template, byId, limit, lookahead) : new Map<string, Suggestion[]>();
+  const fromHistory = historySuggestions(items, byId, history, limit, nowMs, new Set(fromTemplate.keys()));
+  const base = Object.fromEntries([...fromTemplate, ...fromHistory]);
+  const aligned = template ? poseAlignment(items, template, byId, history, limit) : null;
+  if (!aligned) return { suggestions: base, confirmAll: null };
+  return { suggestions: { ...base, ...aligned.suggestions }, confirmAll: aligned.confirmAll };
+}
+
+/**
+ * Suggestions (top `limit`) for every open item. With a template: template order (or, with enough
+ * labeled poses, the whole-session alignment); once the template is exhausted (or without a
+ * template): recency and frequency of use.
  */
 export function suggest(
   items: ReviewItem[],
@@ -194,13 +308,7 @@ export function suggest(
   history: HistoryEntry[],
   options: SuggestionOptions = {},
 ): Record<string, Suggestion[]> {
-  const limit = options.limit ?? 3;
-  const lookahead = options.lookahead ?? 5;
-  const nowMs = options.now ? Date.parse(options.now) : Date.now();
-  const byId = new Map(catalog.map((a) => [a.id, a]));
-  const fromTemplate = template ? templateSuggestions(items, template, byId, limit, lookahead) : new Map<string, Suggestion[]>();
-  const fromHistory = historySuggestions(items, byId, history, limit, nowMs, new Set(fromTemplate.keys()));
-  return Object.fromEntries([...fromTemplate, ...fromHistory]);
+  return planSession(items, catalog, template, history, options).suggestions;
 }
 
 /**

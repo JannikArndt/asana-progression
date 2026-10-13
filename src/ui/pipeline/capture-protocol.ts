@@ -1,6 +1,6 @@
 import type { ClipQuality, HoldSpan } from '../../capture';
 import type { BodyBox, PoseDetection } from '../../crop';
-import type { Asset, PostureClass } from '../../model';
+import type { Asset, CompactPose, PostureClass } from '../../model';
 
 export type CaptureRequest =
   | {
@@ -18,6 +18,16 @@ export type CaptureRequest =
       type: 'recrop';
       jobId: number;
       holds: Array<{ id: string; stillKey: string }>;
+      cropper: 'mediapipe' | 'none';
+      baseUrl: string;
+    }
+  | {
+      /** Poses of exact frames (review candidates' best frames), by key; runs beside a capture. */
+      type: 'frame-poses';
+      jobId: number;
+      file: File;
+      videoId: string;
+      frames: Array<{ key: string; atS: number }>;
       cropper: 'mediapipe' | 'none';
       baseUrl: string;
     }
@@ -41,10 +51,14 @@ export type CaptureEvent =
       assets: Asset[];
       crop: BodyBox | null;
       posture: PostureClass | null;
+      /** Compact pose of the still (null: no body found; undefined: no pose model). */
+      pose?: CompactPose | null;
       /** Name of the cropper that ran ("mediapipe-pose" or "none"). */
       cropper: string;
     }
-  | { type: 'recrop-done'; jobId: number; holdId: string; crop: BodyBox | null; cropper: string }
+  | { type: 'recrop-done'; jobId: number; holdId: string; crop: BodyBox | null; pose?: CompactPose | null; cropper: string }
+  | { type: 'frame-pose'; jobId: number; videoId: string; key: string; pose: CompactPose | null }
+  | { type: 'frame-poses-done'; jobId: number; videoId: string; message?: string }
   | { type: 'hold-error'; jobId: number; holdId: string; message: string }
   | { type: 'pose-done'; jobId: number; detection: PoseDetection | null; cropper: string; message?: string }
   | { type: 'done'; jobId: number; cropper: string }

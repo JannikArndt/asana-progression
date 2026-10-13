@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import TimelineGraph from '../components/TimelineGraph.svelte';
   import TimelineOverview from '../components/TimelineOverview.svelte';
   import ReviewCard from '../components/ReviewCard.svelte';
@@ -42,6 +42,7 @@
   $effect(() => {
     if (app.ready) void review.load(id);
   });
+  onDestroy(() => review.dispose());
 
   const names = $derived(new Map(app.asanas.map((a) => [a.id, a.name])));
   const groups = $derived(new Map(app.asanas.map((a) => [a.id, a.group])));
@@ -69,6 +70,29 @@
     });
     if (choice === 'none') await review.setTemplate(null);
     else if (choice.startsWith('t:') && choice.slice(2) !== current) await review.setTemplate(choice.slice(2));
+  }
+
+  /** Open cards the pose alignment can label in one go (shown from two on). */
+  const confirmable = $derived(review.confirmAllPlan && review.confirmAllPlan.length >= 2 ? review.confirmAllPlan.length : 0);
+  let confirmingAll = $state(false);
+
+  async function confirmAll() {
+    const n = confirmable;
+    const choice = await dialog.ask({
+      title: `Label ${n} holds?`,
+      message: 'Each open card gets its first suggestion, from the template order and the pose. You can change any label afterwards.',
+      options: [
+        { id: 'go', label: `Confirm ${n}`, kind: 'primary' },
+        { id: 'cancel', label: 'Cancel', kind: 'quiet' },
+      ],
+    });
+    if (choice !== 'go') return;
+    confirmingAll = true;
+    try {
+      await review.confirmAll();
+    } finally {
+      confirmingAll = false;
+    }
   }
 
   /** Place name being edited (null = sheet closed). */
@@ -489,6 +513,7 @@
     input.value = '';
     if (!file) return;
     attachError = await reattachVideo(video, file);
+    if (!attachError) review.requestPoses(video.id);
   }
 
   const scrubEntry = $derived(scrub?.key ? review.entry(scrub.key) : undefined);
@@ -552,6 +577,13 @@
         onchange={(e) => review.setNote(e.currentTarget.value)}
       />
     </div>
+
+    {#if confirmable}
+      <div class="card notice">
+        <p class="small">{confirmable} open {confirmable === 1 ? 'card has' : 'cards have'} a suggestion from the template order and the pose.</p>
+        <button class="btn primary" type="button" onclick={confirmAll} disabled={confirmingAll}>Confirm all {confirmable}</button>
+      </div>
+    {/if}
 
     {#if waiting.size || unanalysed.length}
       <div class="card notice">
