@@ -108,6 +108,11 @@ export interface Candidate {
 /** Random access to the pooled frames of the analysed video, by sample index. */
 export interface FrameAccess {
   frame(index: number): Uint8Array | Promise<Uint8Array>;
+  /**
+   * Mean absolute difference of two frames, when the frames themselves are not at hand (research
+   * replays from exported distances). Used instead of `frame` by the similar-merge when present.
+   */
+  distance?(a: number, b: number): number;
 }
 
 export interface Signals {

@@ -99,7 +99,16 @@ function unionLength(spans: ScoredSpan[]): number {
  * candidate it overlaps most: holds sharing a candidate need splits, candidates sharing a found
  * hold need merges (fragments of a missed hold go with the miss).
  */
-export function scoreDetection(candidates: readonly ScoredSpan[], holds: readonly ScoredSpan[]): DetectionScore {
+/** How candidates and labeled holds were matched (indices into the inputs; -1 = none). */
+export interface DetectionMatch {
+  /** Per hold: missed, its main candidate, and the candidate it is own with. */
+  holds: Array<{ missed: boolean; main: number; own: number }>;
+  /** Per candidate: false detection, and the found hold it belongs to. */
+  candidates: Array<{ falsePos: boolean; main: number }>;
+}
+
+/** The matching behind `scoreDetection` (see there), per hold and candidate. */
+export function matchDetection(candidates: readonly ScoredSpan[], holds: readonly ScoredSpan[]): DetectionMatch {
   const R = SCORE_RULES;
   const ov = holds.map((h) => candidates.map((c) => overlap(h, c)));
   const touches = (hi: number, ci: number) => ov[hi]![ci]! > 0 && ov[hi]![ci]! >= R.overlap * Math.min(len(holds[hi]!), len(candidates[ci]!));
@@ -108,26 +117,42 @@ export function scoreDetection(candidates: readonly ScoredSpan[], holds: readonl
     return !(len(h) > 0 && unionLength(touching) >= R.missCover * len(h));
   });
   const falsePos = candidates.map((_, ci) => !holds.some((_, hi) => touches(hi, ci)));
-  const mainCandidate = holds.map((_, hi) => (missed[hi] ? -1 : argmaxPositive(candidates.map((_, ci) => (touches(hi, ci) ? ov[hi]![ci]! : 0)))));
-  const mainHold = candidates.map((_, ci) => {
-    if (falsePos[ci]) return -1;
-    const hi = argmaxPositive(holds.map((_, k) => (touches(k, ci) ? ov[k]![ci]! : 0)));
-    return missed[hi] ? -1 : hi;
-  });
+  return {
+    holds: holds.map((h, hi) => ({
+      missed: missed[hi]!,
+      main: missed[hi] ? -1 : argmaxPositive(candidates.map((_, ci) => (touches(hi, ci) ? ov[hi]![ci]! : 0))),
+      own: candidates.findIndex((c, k) => ov[hi]![k]! > 0 && ov[hi]![k]! >= R.ownCover * len(h) && ov[hi]![k]! >= R.ownPurity * len(c)),
+    })),
+    candidates: candidates.map((_, ci) => {
+      if (falsePos[ci]) return { falsePos: true, main: -1 };
+      const hi = argmaxPositive(holds.map((_, k) => (touches(k, ci) ? ov[k]![ci]! : 0)));
+      return { falsePos: false, main: missed[hi] ? -1 : hi };
+    }),
+  };
+}
+
+export function scoreDetection(candidates: readonly ScoredSpan[], holds: readonly ScoredSpan[]): DetectionScore {
+  const match = matchDetection(candidates, holds);
   const count = (list: number[], n: number) => {
     const out = new Array<number>(n).fill(0);
     for (const i of list) if (i >= 0) out[i]!++;
     return out;
   };
-  const needSplit = count(mainCandidate, candidates.length).reduce((s, k) => s + Math.max(0, k - 1), 0);
-  const needMerge = count(mainHold, holds.length).reduce((s, k) => s + Math.max(0, k - 1), 0);
+  const needSplit = count(
+    match.holds.map((h) => h.main),
+    candidates.length,
+  ).reduce((s, k) => s + Math.max(0, k - 1), 0);
+  const needMerge = count(
+    match.candidates.map((c) => c.main),
+    holds.length,
+  ).reduce((s, k) => s + Math.max(0, k - 1), 0);
 
   const startErrS: number[] = [];
   const endErrS: number[] = [];
   const bestErrS: number[] = [];
   let own = 0;
   holds.forEach((h, hi) => {
-    const ci = candidates.findIndex((c, k) => ov[hi]![k]! >= R.ownCover * len(h) && ov[hi]![k]! >= R.ownPurity * len(c) && ov[hi]![k]! > 0);
+    const ci = match.holds[hi]!.own;
     if (ci < 0) return;
     own++;
     const c = candidates[ci]!;
@@ -136,10 +161,10 @@ export function scoreDetection(candidates: readonly ScoredSpan[], holds: readonl
     if (h.bestS !== undefined && c.bestS !== undefined) bestErrS.push(Math.abs(c.bestS - h.bestS));
   });
   const counts = {
-    missed: missed.filter(Boolean).length,
+    missed: match.holds.filter((h) => h.missed).length,
     needSplit,
     needMerge,
-    falsePos: falsePos.filter(Boolean).length,
+    falsePos: match.candidates.filter((c) => c.falsePos).length,
   };
   return { holds: holds.length, candidates: candidates.length, own, ...counts, editCost: editCost(counts), startErrS, endErrS, bestErrS };
 }

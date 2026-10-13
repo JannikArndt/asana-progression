@@ -12,7 +12,8 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "fixtures": "node scripts/make-test-videos.mjs",
-    "icons": "node scripts/make-icons.mjs"
+    "icons": "node scripts/make-icons.mjs",
+    "research": "node research/run.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.1.0",

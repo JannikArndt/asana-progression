@@ -168,3 +168,22 @@ describe('detector variants', () => {
     expect(innerPeakCuts([0.2, NaN, 0.9, 0.2], 0, 4, thr, 0.5, 1)).toEqual([2]);
   });
 });
+
+describe('FrameAccess.distance', () => {
+  it('replaces frame reads in the similar-merge when given (research replays)', async () => {
+    // Two holds with a quiet, short gap (C just above the threshold): they merge when their best frames look alike.
+    const sig = signal([
+      [10, 5],
+      [20, 0.5],
+      [1.5, 0.55],
+      [20, 0.5],
+      [10, 5],
+    ]);
+    const params = { ...P, gapMergeS: 0 };
+    const near = await findCandidates(sig, { frame: () => { throw new Error('no frames'); }, distance: () => 0 }, params);
+    const far = await findCandidates(sig, { frame: () => { throw new Error('no frames'); }, distance: () => 1e6 }, params);
+    expect(near.preMerge.length).toBe(2);
+    expect(near.candidates.length).toBe(1);
+    expect(far.candidates.length).toBe(2);
+  });
+});

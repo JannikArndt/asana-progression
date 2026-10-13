@@ -36,7 +36,7 @@ API). `src/architecture.test.ts` enforces the allowed dependencies:
 | `source` | File → metadata, fingerprint, gray samples on a 4 Hz grid, exact frame at t, packets for a range, HDR helpers | nothing (+ Mediabunny) |
 | `model` | Shared data model (types), `newId`, catalog seed + Primary series template | `detection` types |
 | `storage` | `MetadataStore` (IndexedDB, one repository per entity), OPFS sample files, quota helpers | `model` |
-| `labeling` | Suggestion engine; review edits on candidates (merge, split, add missed, nudge, reconcile); catalog search; scoring detection against labeled holds in review edits (`evaluate.ts`) | `model`, `detection` (best-frame helpers on signals, `findCandidates`) |
+| `labeling` | Suggestion engine; review edits on candidates (merge, split, add missed, nudge, reconcile); catalog search; scoring detection against labeled holds in review edits (`evaluate.ts`, `matchDetection`) | `model`, `detection` (best-frame helpers on signals, `findCandidates`) |
 | `capture` | Still (exact frame → JPEG q 0.9 + 512 px thumb + preview for the cropper) and clip (720p/1080p H.264 re-encode via WebCodecs, or `original` = stream copy snapped to key frames; falls back to `original` when AVC encoding is unavailable) | `source`, `model` |
 | `crop` | `Cropper` interface; MediaPipe Pose Landmarker (lite, CPU, lazy, Cache Storage `mediapipe-pose-v1` for offline) → body box + coarse posture class (+ image landmarks with z, world landmarks); `nullCropper` fallback | `model` |
 | `progression` | Views over holds + assets: items per asana (oldest first), display crop, tile aspect, grid density, swipe, flipbook timing | `model` |
@@ -172,10 +172,14 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
 - Files live in OPFS under `assets/<assetId>.<ext>` (`OpfsAssetStore`, written in the worker with
   sync access handles); records in the `assets` store. Replaced assets are deleted.
 - The cropper runs on the 640 px preview; `crop.auto` = body box + padding. BlazePose has no
-  crown or fingertip landmarks, so the box is grown by a head circle (1.6 × the face-landmark
-  spread, at least 0.35 torso lengths) and by the hand landmarks extended 0.6 × from the wrist,
-  then padded 0.15 × its longer side in pixels (at least 2 % of the image height); see
-  `BOX_DEFAULTS`. Crops are display metadata only (`manual ?? auto ?? full frame`); `CropEditor`
+  crown, fingertip or toe landmarks, so the box is grown by a head circle (1.6 × the face-landmark
+  spread, at least 0.35 torso lengths), by the hand landmarks extended 0.6 × from the wrist and by
+  the foot index extended 0.5 × from the heel, then padded 0.18 × its longer side in pixels (at
+  least 2 % of the image height) plus 0.05 headroom above; landmarks below visibility 0.3 are
+  ignored. See `BOX_DEFAULTS` (`BoxOptions.geometry` overrides it for research fits). Fitted to the
+  user's manual crops (research/REPORT.md, B3): 37 of 66 contained instead of 16 at 1.2 × the
+  median area; `crop/__fixtures__/crops.json` (landmarks + manual boxes, no images) and
+  `crop/fit.test.ts` keep that floor. Crops are display metadata only (`manual ?? auto ?? full frame`); `CropEditor`
   writes `crop.manual`. `crop.autoVersion` = `CROP_VERSION` of the box; holds with an older
   version are cropped again from their stored still in the capture worker (`recrop`, no video
   file needed) on startup and whenever capture is requested. Bump `CROP_VERSION` when the box
@@ -259,7 +263,8 @@ share sheet ("Save to Files"). "Keep separate" for same-day sessions is `Session
    ≤ stillPercentile = none); `splitPeakFactor` > 0 cuts a still run at inner C peaks whose
    prominence (`valleyProminence` on −C, shared with `labeling.splitInto`) is ≥ factor × threshold,
    most prominent first while every part stays ≥ minHoldS (`innerPeakCuts`); split parts are never
-   merged again by step 7. `thresholdMode` is the only choice parameter (`ChoiceParamSpec`, a select
+   merged again by step 7. `FrameAccess.distance` (optional) replaces frame reads in step 7 with
+   given distances (research replays). `thresholdMode` is the only choice parameter (`ChoiceParamSpec`, a select
    in the debug panel; `isChoiceSpec`). Single-still special case: if the video is ≤ 300 s and
    p99(C) ≤ 4 × p50(C) it has no clear posture change → one candidate covering the whole video.
    (p99 rather than p95: videos with very long holds have < 5 % transition samples. The length
@@ -351,6 +356,24 @@ notes, places, coordinates, images or analysis frames (`research.test.ts` checks
   `boxFromLandmarks` with every landmark regardless of visibility, 4 decimals; `poseStatus` ok |
   no-still | no-body | no-model | error); `summary` = the scoring of `fresh` per video and over the
   fully labeled ones.
+
+Research scripts (Stage B, `research/`): `npm run research -- research/<script>.ts [--list]` runs a
+TypeScript script that imports `src/` through Vite's module runner (`research/run.mjs`, no extra
+dependency; `tsconfig` type-checks `research/`). Data in `research/data/` (`research.json` = the
+export, `lab-default-grid.json` = one lab run; the repository is public: only these numbers-only
+files), outputs in `research/out/`, findings and decisions in `research/REPORT.md`. Libraries:
+`lib/data.ts` (sessions S1… in date order, float16 signals decoded, `exportedFrames`: a
+`FrameAccess` whose `distance` comes from the exported merge inputs, so `findCandidates` replays the
+similar-merge without frames — exact while only merge parameters vary), `lib/grid.ts` (offline
+grids, leave one session out), `lib/fixtures.ts` (fixture.test's check for any parameters),
+`lib/pose.ts` (world-landmark features: hip-centred, torso-scaled, canonical facing, mirror, joint
+angles), `lib/align.ts` (Viterbi of items to template entries with skip / fewer reps / extra rep /
+back / no-hold costs and pose emission; min-marginals for top-3). `labeling.matchDetection` gives
+the per-hold / per-candidate matching behind `scoreDetection`. Results: no detection default
+passes the rules (a looser similar-merge cap saves 10 edits but merges look-alike neighbours and
+fails the outdoor fixture's floor; pieces of one hold look as different as different holds); the
+template suggestions are 91 % top 1 / 96 % top 3 card by card, but 9 % with zero corrections,
+where alignment + pose reaches 89 %.
 
 ### Real-signal fixtures
 
@@ -508,12 +531,15 @@ Fill in from the user's device reports (Settings → "Copy diagnostics report", 
 
 6. **Research** (improve hold finding, naming, auto-crop from the user's fully labeled sessions).
    Stage A ✅: scoring, detection lab, detector variants, research export (see "Research tooling").
-   Stage B (after the user uploads the research export and a lab run to `research/data/` on branch
-   `research-data`): scripts in `research/` and `research/REPORT.md`; change defaults only if the
-   edit cost drops in every held-out session and both fixtures still pass; storage changes (a
-   per-hold pose) only after asking.
+   Stage B ✅ (`research/REPORT.md`): detection defaults unchanged (nothing lowers the edit cost in
+   every held-out session with both fixtures passing); auto-crop refitted (`CROP_VERSION` 3);
+   naming: pose + whole-session alignment wins only with a pose per open candidate — proposed
+   (`CompactPose` on `ReviewCandidate` and `Hold`), waiting for the user's decision.
 
 Open (needs the user):
+
+- Decide on the compact per-candidate / per-hold pose (research/REPORT.md, "Proposal"); with it:
+  pose for each candidate after analysis, alignment-based suggestions, "Confirm all suggestions".
 
 - A failed video: reproduce from its diagnostics report (codec string, `decoderSupport`, sampler
   stats, error stage). A detection miss becomes a fixture with `truth`, tuned via `DetectionParams`.
@@ -521,4 +547,5 @@ Open (needs the user):
   untested); MediaPipe load/per-still time and crop quality; gestures (grid pinch, viewer swipe,
   split/crossfade slider, crop pinch); memory with long clips and big flipbooks; backup Save,
   Share → Save to Files and importing a multi-GB backup. Record results in "Measured iOS limits".
-- Check the new automatic crops on the iPhone (re-cropped from the stills after the update).
+- Check the new automatic crops on the iPhone (re-cropped from the stills after the update;
+  `CROP_VERSION` 3: more padding, headroom, toes).
