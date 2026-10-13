@@ -188,7 +188,8 @@ export async function findCandidates(
     if (!f) cache.set(i, (f = await frames.frame(i)));
     return f;
   };
-  const cap = await neighbourCap(runs, C, t.enter, frame, p);
+  const distance = async (a: number, b: number) => frames.distance?.(a, b) ?? meanAbsDiff(await frame(a), await frame(b));
+  const cap = await neighbourCap(runs, C, t.enter, distance, p);
   const merged: Run[] = [];
   const maxGap = p.similarMergeMaxGapS * p.sampleHz;
   for (const r of runs) {
@@ -198,7 +199,7 @@ export async function findCandidates(
     const scale = last ? Math.max(t.enter(r.start), m[last.best] ?? 0, m[r.best] ?? 0) : 0;
     const maxDiff = Math.min(cap, p.similarMergeFactor * (Number.isFinite(scale) ? scale : 0));
     if (last && !r.cutBefore && r.start - last.end <= maxGap && maxDiff > 0 && quietGap(m, last, r, p.similarMergeMotion)) {
-      const d = meanAbsDiff(await frame(last.best), await frame(r.best));
+      const d = await distance(last.best, r.best);
       if (d < maxDiff) {
         const keepLast = !(m[r.best]! < m[last.best]!);
         const winner = keepLast ? last.best : r.best;
@@ -238,7 +239,7 @@ async function neighbourCap(
   runs: Run[],
   C: Float32Array,
   threshold: (i: number) => number,
-  frame: (i: number) => Promise<Uint8Array>,
+  distance: (a: number, b: number) => Promise<number>,
   p: DetectionParams,
 ): Promise<number> {
   const d: number[] = [];
@@ -248,7 +249,7 @@ async function neighbourCap(
     let peak = -Infinity;
     let at = a.end;
     for (let k = a.end; k < b.start; k++) if (C[k]! > peak) ((peak = C[k]!), (at = k));
-    if (peak >= p.similarMergeRefPeak * threshold(at)) d.push(meanAbsDiff(await frame(a.best), await frame(b.best)));
+    if (peak >= p.similarMergeRefPeak * threshold(at)) d.push(await distance(a.best, b.best));
   }
   if (d.length < p.similarMergeMinPairs) return Infinity;
   d.sort((x, y) => x - y);

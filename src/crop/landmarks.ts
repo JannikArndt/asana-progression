@@ -34,13 +34,16 @@ const DEFAULT_MIN_VISIBILITY = 0.3;
 const MIN_BOX_LANDMARKS = 5;
 
 /**
- * Body-box geometry. BlazePose has no landmark on the top of the head or the fingertips, so the
- * box is grown there before padding. Lengths are in the pixel-proportional units of the image
- * height.
+ * Body-box geometry. BlazePose has no landmark on the top of the head, the fingertips or the toes,
+ * so the box is grown there before padding. Lengths are in the pixel-proportional units of the
+ * image height. Fitted to the user's manual crops (research/REPORT.md, B3): pad, headroom and toes
+ * contain 37 of 66 manual crops instead of 16 at 1.2 × the median area.
  */
 export const BOX_DEFAULTS = {
   /** Padding on every side as a fraction of the longer side of the grown bounds. */
-  pad: 0.15,
+  pad: 0.18,
+  /** Extra padding above (headroom), as a fraction of the longer side of the grown bounds. */
+  padTop: 0.05,
   /** Padding at least this fraction of the image height (small figures, imprecise landmarks). */
   minPad: 0.02,
   /** Head radius = this × the largest distance of a face landmark from their centre… */
@@ -49,13 +52,20 @@ export const BOX_DEFAULTS = {
   headTorso: 0.35,
   /** Fingertips: the hand landmarks extended by this × their distance from the wrist. */
   handReach: 0.6,
+  /** Toes: the foot-index landmark extended by this × its distance from the heel. */
+  footReach: 0.5,
+  /** Landmarks with a lower visibility are ignored (a missing visibility counts as 1). */
+  minVisibility: 0.3,
 } as const;
+
+export type BoxGeometry = { -readonly [K in keyof typeof BOX_DEFAULTS]: number };
 
 /**
  * Version of `boxFromLandmarks`. Holds whose automatic crop has an older version are cropped again
- * from their stored still (2: head and fingertips, aspect-aware padding of 0.15 instead of 0.12).
+ * from their stored still (2: head and fingertips, aspect-aware padding of 0.15 instead of 0.12;
+ * 3: padding 0.18, headroom 0.05, toes; fitted to manual crops).
  */
-export const CROP_VERSION = 2;
+export const CROP_VERSION = 3;
 
 /** Face landmarks (nose, eyes, ears, mouth). */
 const FACE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
@@ -63,6 +73,11 @@ const FACE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 const HANDS = [
   [15, 17, 19, 21],
   [16, 18, 20, 22],
+] as const;
+/** Heel, then foot index of each foot. */
+const FEET = [
+  [29, 31],
+  [30, 32],
 ] as const;
 
 function usable(l: Landmark | undefined, minVisibility: number): l is Landmark {
@@ -94,12 +109,14 @@ export function unionBox(first: Box, ...rest: Box[]): Box {
 }
 
 export interface BoxOptions {
-  /** Landmarks with a lower visibility are ignored (default 0.3; a missing visibility counts as 1). */
+  /** Landmarks with a lower visibility are ignored (default BOX_DEFAULTS.minVisibility). */
   minVisibility?: number;
-  /** Padding on every side as a fraction of the longer side of the grown bounds (default 0.15). */
+  /** Padding on every side as a fraction of the longer side of the grown bounds (default BOX_DEFAULTS.pad). */
   pad?: number;
   /** Image width / height; padding and head size are measured in pixels (default 1). */
   aspect?: number;
+  /** Other geometry than BOX_DEFAULTS (research fits). */
+  geometry?: Partial<BoxGeometry>;
 }
 
 /**
@@ -109,8 +126,9 @@ export interface BoxOptions {
  * of the landmarks used. Null with fewer than 5 usable landmarks or when the box has no area.
  */
 export function boxFromLandmarks(landmarks: Landmark[], opts: BoxOptions = {}): BodyBox | null {
-  const minVisibility = opts.minVisibility ?? DEFAULT_MIN_VISIBILITY;
-  const pad = opts.pad ?? BOX_DEFAULTS.pad;
+  const g: BoxGeometry = { ...BOX_DEFAULTS, ...opts.geometry };
+  const minVisibility = opts.minVisibility ?? g.minVisibility;
+  const pad = opts.pad ?? g.pad;
   const aspect = opts.aspect ?? 1;
   const used = landmarks.filter((l) => usable(l, minVisibility));
   if (used.length < MIN_BOX_LANDMARKS) return null;
@@ -128,7 +146,7 @@ export function boxFromLandmarks(landmarks: Landmark[], opts: BoxOptions = {}): 
       const S = mid(pt(BLAZEPOSE.leftShoulder), pt(BLAZEPOSE.rightShoulder));
       const H = mid(pt(BLAZEPOSE.leftHip), pt(BLAZEPOSE.rightHip));
       const torso = S && H ? Math.hypot(S.x - H.x, S.y - H.y) : 0;
-      const r = Math.max(BOX_DEFAULTS.headSpread * spread, BOX_DEFAULTS.headTorso * torso);
+      const r = Math.max(g.headSpread * spread, g.headTorso * torso);
       pts.push({ x: c.x - r, y: c.y - r }, { x: c.x + r, y: c.y + r });
     }
     for (const [wrist, ...tips] of HANDS) {
@@ -136,7 +154,14 @@ export function boxFromLandmarks(landmarks: Landmark[], opts: BoxOptions = {}): 
       if (!w) continue;
       for (const i of tips) {
         const t = pt(i);
-        if (t) pts.push({ x: t.x + BOX_DEFAULTS.handReach * (t.x - w.x), y: t.y + BOX_DEFAULTS.handReach * (t.y - w.y) });
+        if (t) pts.push({ x: t.x + g.handReach * (t.x - w.x), y: t.y + g.handReach * (t.y - w.y) });
+      }
+    }
+    if (g.footReach > 0) {
+      for (const [heel, tip] of FEET) {
+        const h = pt(heel);
+        const t = pt(tip);
+        if (h && t) pts.push({ x: t.x + g.footReach * (t.x - h.x), y: t.y + g.footReach * (t.y - h.y) });
       }
     }
   }
@@ -153,8 +178,9 @@ export function boxFromLandmarks(landmarks: Landmark[], opts: BoxOptions = {}): 
   // All landmarks on one spot: no body to frame.
   if (x1 - x0 <= 0 && y1 - y0 <= 0) return null;
   const visibility = used.reduce((s, l) => s + (l.visibility ?? 1), 0);
-  const p = Math.max(pad * Math.max(x1 - x0, y1 - y0), pad > 0 ? BOX_DEFAULTS.minPad : 0);
-  const box = clampBox({ x: (x0 - p) / aspect, y: y0 - p, w: (x1 - x0 + 2 * p) / aspect, h: y1 - y0 + 2 * p });
+  const p = Math.max(pad * Math.max(x1 - x0, y1 - y0), pad > 0 ? g.minPad : 0);
+  const top = p + g.padTop * Math.max(x1 - x0, y1 - y0);
+  const box = clampBox({ x: (x0 - p) / aspect, y: y0 - top, w: (x1 - x0 + 2 * p) / aspect, h: y1 - y0 + p + top });
   if (box.w <= 0 || box.h <= 0) return null;
   return { ...box, score: visibility / used.length };
 }

@@ -289,19 +289,32 @@ describe('boxFromLandmarks', () => {
   const pts = (coords: Array<[number, number, number?]>): Landmark[] =>
     coords.map(([x, y, visibility]) => (visibility === undefined ? { x, y } : { x, y, visibility }));
 
-  it('pads the bounds by pad × the longer side', () => {
+  /** Without the extra headroom: the padding is the same on every side. */
+  const even = { geometry: { padTop: 0 } };
+
+  it('pads the bounds by pad × the longer side, plus headroom above', () => {
     const b = boxFromLandmarks(pts([[0.4, 0.2, 1], [0.6, 0.2, 0.5], [0.5, 0.6, 1], [0.45, 0.4, 1], [0.55, 0.4, 0.5]]))!;
-    const p = 0.15 * 0.4;
+    const p = BOX_DEFAULTS.pad * 0.4;
+    const top = p + BOX_DEFAULTS.padTop * 0.4;
     expect(b.x).toBeCloseTo(0.4 - p);
-    expect(b.y).toBeCloseTo(0.2 - p);
+    expect(b.y).toBeCloseTo(0.2 - top);
     expect(b.w).toBeCloseTo(0.2 + 2 * p);
-    expect(b.h).toBeCloseTo(0.4 + 2 * p);
+    expect(b.h).toBeCloseTo(0.4 + p + top);
     expect(b.score).toBeCloseTo(0.8);
   });
 
   it('honours the pad option and treats missing visibility as 1', () => {
-    const b = boxFromLandmarks(pts([[0.1, 0.1], [0.3, 0.1], [0.2, 0.5], [0.2, 0.3], [0.25, 0.3]]), { pad: 0 })!;
+    const b = boxFromLandmarks(pts([[0.1, 0.1], [0.3, 0.1], [0.2, 0.5], [0.2, 0.3], [0.25, 0.3]]), { pad: 0, ...even })!;
     expect(b).toEqual({ x: 0.1, y: 0.1, w: expect.closeTo(0.2) as number, h: expect.closeTo(0.4) as number, score: 1 });
+  });
+
+  it('takes other geometry: headroom, minimum visibility', () => {
+    const lm = pts([[0.1, 0.2], [0.3, 0.2], [0.2, 0.6], [0.2, 0.4], [0.25, 0.4], [0.9, 0.9, 0.1]]);
+    const b = boxFromLandmarks(lm, { pad: 0, geometry: { padTop: 0.25 } })!;
+    expect(b.y).toBeCloseTo(0.2 - 0.25 * 0.4);
+    expect(b.y + b.h).toBeCloseTo(0.6);
+    const all = boxFromLandmarks(lm, { pad: 0, geometry: { padTop: 0, minVisibility: 0 } })!;
+    expect(all.x + all.w).toBeCloseTo(0.9);
   });
 
   it('clamps to the image', () => {
@@ -315,9 +328,9 @@ describe('boxFromLandmarks', () => {
   it('ignores low-visibility and non-finite landmarks', () => {
     const lm = pts([[0.4, 0.4], [0.5, 0.4], [0.4, 0.5], [0.5, 0.5], [0.45, 0.45], [0.95, 0.95, 0.1]]);
     lm.push({ x: NaN, y: 0.1 });
-    const b = boxFromLandmarks(lm, { pad: 0 })!;
+    const b = boxFromLandmarks(lm, { pad: 0, ...even })!;
     expect(b.x + b.w).toBeCloseTo(0.5);
-    const all = boxFromLandmarks(lm, { pad: 0, minVisibility: 0 })!;
+    const all = boxFromLandmarks(lm, { pad: 0, minVisibility: 0, ...even })!;
     expect(all.x + all.w).toBeCloseTo(0.95);
     expect(all.y).toBeCloseTo(0.4);
   });
@@ -333,14 +346,14 @@ describe('boxFromLandmarks', () => {
     // the crown is ≈ 0.17 m higher and must be inside the box before any padding.
     const lm = landmarks(standing);
     const crownY = 0.9 - 1.75 * 0.4;
-    const b = boxFromLandmarks(lm, { pad: 0 })!;
+    const b = boxFromLandmarks(lm, { pad: 0, ...even })!;
     expect(b.y).toBeLessThanOrEqual(crownY);
     // Face landmarks spread out: the radius follows their spread.
     const face = lm.map((l) => ({ ...l }));
     const nose = face[BLAZEPOSE.nose]!;
     face[7] = { x: nose.x - 0.03, y: nose.y, visibility: 0.9 };
     face[8] = { x: nose.x + 0.03, y: nose.y, visibility: 0.9 };
-    const wide = boxFromLandmarks(face, { pad: 0 })!;
+    const wide = boxFromLandmarks(face, { pad: 0, ...even })!;
     const c = { x: nose.x, y: nose.y };
     const r = Math.max(BOX_DEFAULTS.headSpread * 0.02, BOX_DEFAULTS.headTorso * 0.5 * 0.4);
     expect(wide.y).toBeCloseTo(c.y - r);
@@ -355,15 +368,26 @@ describe('boxFromLandmarks', () => {
     expect(b.x + b.w).toBeCloseTo(0.84 + BOX_DEFAULTS.handReach * 0.04);
   });
 
+  it('reaches past the foot index to the toes', () => {
+    const lm = landmarks(standing);
+    // A foot pointing forward, beyond everything else: heel at 0.8, foot index at 0.86.
+    lm[29] = { x: 0.8, y: 0.9, visibility: 0.9 };
+    lm[31] = { x: 0.86, y: 0.9, visibility: 0.9 };
+    const b = boxFromLandmarks(lm, { pad: 0, ...even })!;
+    expect(b.x + b.w).toBeCloseTo(0.86 + BOX_DEFAULTS.footReach * 0.06);
+    const none = boxFromLandmarks(lm, { pad: 0, geometry: { padTop: 0, footReach: 0 } })!;
+    expect(none.x + none.w).toBeCloseTo(0.86);
+  });
+
   it('pads in pixels on wide images', () => {
     const lm = pts([[0.4, 0.2], [0.6, 0.2], [0.5, 0.6], [0.45, 0.4], [0.55, 0.4]]);
-    const b = boxFromLandmarks(lm, { aspect: 2 })!;
+    const b = boxFromLandmarks(lm, { aspect: 2, ...even })!;
     // Longer side in pixel units: 0.4 image heights (x extent 0.2 × 2 = 0.4 as well).
-    const p = 0.15 * 0.4;
+    const p = BOX_DEFAULTS.pad * 0.4;
     expect(b.y).toBeCloseTo(0.2 - p);
     expect(b.x).toBeCloseTo(0.4 - p / 2);
     // A tiny figure still gets the minimum padding.
-    const tiny = boxFromLandmarks(pts([[0.5, 0.5], [0.501, 0.5], [0.5, 0.502], [0.501, 0.501], [0.5005, 0.5005]]))!;
+    const tiny = boxFromLandmarks(pts([[0.5, 0.5], [0.501, 0.5], [0.5, 0.502], [0.501, 0.501], [0.5005, 0.5005]]), even)!;
     expect(tiny.y).toBeCloseTo(0.5 - BOX_DEFAULTS.minPad);
   });
 

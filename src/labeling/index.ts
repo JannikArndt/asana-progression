@@ -17,6 +17,7 @@ export {
 export { searchAsanas } from './search';
 export {
   scoreDetection,
+  matchDetection,
   evaluateParams,
   addScores,
   emptyScore,
@@ -32,6 +33,7 @@ export {
   MAX_GRID_COMBOS,
   type ScoredSpan,
   type DetectionScore,
+  type DetectionMatch,
   type ScoreSummary,
   type ParamGrid,
 } from './evaluate';

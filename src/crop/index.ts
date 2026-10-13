@@ -10,6 +10,7 @@ export {
   clampBox,
   unionBox,
   type BoxOptions,
+  type BoxGeometry,
   type PostureOptions,
 } from './landmarks';
 export { BLAZEPOSE_CONNECTIONS, OVERLAY_MIN_VISIBILITY, poseOverlay, toView, boxToView, type PoseOverlay, type OverlayLine, type OverlayPoint } from './overlay';
