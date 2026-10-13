@@ -1,6 +1,6 @@
 /** Pure helpers joining sessions, videos, analyses and holds (tested; no I/O). */
 import type { HistoryEntry, ReviewItem } from '../../labeling';
-import type { Analysis, Hold, ReviewCandidate, Session, SessionLocation, Video } from '../../model';
+import type { Analysis, CompactPose, Hold, ReviewCandidate, Session, SessionLocation, Video } from '../../model';
 import type { GeoLocation } from '../../source';
 
 export function dayOf(iso: string | null | undefined): string {
@@ -41,8 +41,14 @@ export function sessionEntries(session: Session, analyses: Record<string, Analys
   return out;
 }
 
-export function toReviewItems(entries: SessionEntry[]): ReviewItem[] {
-  return entries.map(({ key, candidate, hold }) => {
+/**
+ * Review items in session order. `framePose` gives the stored pose of a candidate's best frame
+ * (`Analysis.poses`); labeled items prefer their still's pose.
+ */
+export function toReviewItems(entries: SessionEntry[], framePose?: (videoId: string, bestS: number) => CompactPose | null | undefined): ReviewItem[] {
+  return entries.map(({ key, videoId, candidate, hold }) => {
+    const pose = (candidate.status === 'labeled' ? hold?.pose : undefined) ?? framePose?.(videoId, candidate.bestS);
+    const extra = { videoId, ...(pose ? { pose } : {}) };
     if (candidate.status === 'labeled' && hold) {
       return {
         key,
@@ -52,9 +58,10 @@ export function toReviewItems(entries: SessionEntry[]): ReviewItem[] {
           side: hold.side,
           ...(hold.templateEntryIndex !== undefined ? { templateEntryIndex: hold.templateEntryIndex } : {}),
         },
+        ...extra,
       };
     }
-    return { key, status: candidate.status === 'dismissed' ? 'dismissed' : 'open' };
+    return { key, status: candidate.status === 'dismissed' ? 'dismissed' : 'open', ...extra };
   });
 }
 
@@ -72,7 +79,7 @@ export function historyFrom(sessions: Session[], holds: Hold[], excludeSessionId
   for (const [sid, list] of bySession) {
     const s = sessionById.get(sid)!;
     list.sort((a, b) => s.videoIds.indexOf(a.videoId) - s.videoIds.indexOf(b.videoId) || a.startS - b.startS);
-    list.forEach((h, order) => out.push({ asanaId: h.asanaId, side: h.side, date: s.date, sessionId: sid, order }));
+    list.forEach((h, order) => out.push({ asanaId: h.asanaId, side: h.side, date: s.date, sessionId: sid, order, ...(h.pose ? { pose: h.pose } : {}) }));
   }
   return out;
 }

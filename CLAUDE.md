@@ -34,10 +34,10 @@ API). `src/architecture.test.ts` enforces the allowed dependencies:
 |---|---|---|
 | `detection` | Pure streaming algorithm: pooled gray samples → m(t), C(t), candidates; params; analysis export format | nothing |
 | `source` | File → metadata, fingerprint, gray samples on a 4 Hz grid, exact frame at t, packets for a range, HDR helpers | nothing (+ Mediabunny) |
-| `model` | Shared data model (types), `newId`, catalog seed + Primary series template | `detection` types |
+| `model` | Shared data model (types), `newId`, catalog seed + Primary series template, `CompactPose` codec (`encodePose`/`decodePose`, `poseKey`) + float16 | `detection` types |
 | `storage` | `MetadataStore` (IndexedDB, one repository per entity), OPFS sample files, quota helpers | `model` |
-| `labeling` | Suggestion engine; review edits on candidates (merge, split, add missed, nudge, reconcile); catalog search; scoring detection against labeled holds in review edits (`evaluate.ts`, `matchDetection`) | `model`, `detection` (best-frame helpers on signals, `findCandidates`) |
-| `capture` | Still (exact frame → JPEG q 0.9 + 512 px thumb + preview for the cropper) and clip (720p/1080p H.264 re-encode via WebCodecs, or `original` = stream copy snapped to key frames; falls back to `original` when AVC encoding is unavailable) | `source`, `model` |
+| `labeling` | Suggestion engine; review edits on candidates (merge, split, add missed, nudge, reconcile); catalog search; scoring detection against labeled holds in review edits (`evaluate.ts`, `matchDetection`); pose classifier (`pose.ts`) + whole-session template alignment (`align.ts`) | `model`, `detection` (best-frame helpers on signals, `findCandidates`) |
+| `capture` | Still (exact frame → JPEG q 0.9 + 512 px thumb + preview for the cropper; `framePreview` = the preview alone) and clip (720p/1080p H.264 re-encode via WebCodecs, or `original` = stream copy snapped to key frames; falls back to `original` when AVC encoding is unavailable) | `source`, `model` |
 | `crop` | `Cropper` interface; MediaPipe Pose Landmarker (lite, CPU, lazy, Cache Storage `mediapipe-pose-v1` for offline) → body box + coarse posture class (+ image landmarks with z, world landmarks); `nullCropper` fallback | `model` |
 | `progression` | Views over holds + assets: items per asana (oldest first), display crop, tile aspect, grid density, swipe, flipbook timing | `model` |
 | `ui` | Screens, components, workers, research export + detection lab (`ui/research/`); the **only** place modules are wired together | public APIs of all modules |
@@ -114,7 +114,9 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   leave the coordinates out (`withoutLocation`, `videoForReport`).
 - Review state lives in `Analysis.candidates` (`ReviewCandidate`: status, `holdId`, `origin`);
   labels live in `Hold` records. Every action writes immediately — there is never unsaved
-  labeling state.
+  labeling state. Analyses are written through `app.updateAnalysis(videoId, fn)`: a read-modify-write
+  serialized per video, so background frame poses and review edits never overwrite each other;
+  `app.onAnalysis` listeners (the open review) take every write in.
 - Suggestions (`labeling/suggest.ts`, run in `ui/workers/suggest.worker.ts`): template order,
   each entry for its `reps` (see Reps), R before L (template order), skipping allowed. Start after the
   last confirmed entry; consecutive open cards are projected onto consecutive entries; entries
@@ -122,6 +124,25 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   the next entry, look ahead up to 5 entries. Top 3. Without a template (or once it is
   exhausted): frecency (exp(−age/45 d)) plus a boost for what usually follows the previous
   asana in past sessions.
+- **Pose alignment** (`labeling.planSession`; `suggest` = its `suggestions`, same API and top 3):
+  with a template and poses, suggestions come from a whole-session Viterbi alignment of the cards
+  to the template entries (`alignSlots`: states entry × reps; costs `ALIGN_COSTS` skip 1, fewer
+  reps 0.5, extra rep 1.5, back 4, no hold 3, skip at the start / after a new video 0.05 per
+  entry; labeled cards pinned to their entry, labels outside the template change nothing) with a
+  pose emission 2 × (distance − nearest class distance) per open card (`POSE_ALIGNMENT`); the top
+  3 are the min-marginals (`reason: 'pose'`). Pose distance (`labeling/pose.ts`,
+  `PoseClassifier`): nearest labeled example of each asana + side over the user's holds (all
+  sessions incl. this one's labeled cards; sided examples also count mirrored for the other
+  side) on world joints hip-centred, torso-scaled, rotated to a canonical facing, plus 9 joint
+  angles (weight 0.5). Active only when the classifier knows ≥ 50 % of the template's entries
+  (`minCoverage`) and some open card has a pose; otherwise the template order above (it is better
+  without poses). Classes never seen get the median distance. `confirmAll` = the aligned label of
+  every open card with a pose that the path does not call "no hold"; the review shows "Confirm
+  all N" (from 2) with a confirmation dialog (`SessionReview.confirmAll`: one batch of holds, one
+  analysis write per video). On the three labeled sessions, taking every first suggestion without
+  a correction labels 89 % of the holds right vs 9 % before (one card per hold; on the raw
+  detector candidates 60–67 % vs 15 %; research/REPORT.md, B2; `pose-align.test.ts` keeps ≥ 85 %
+  on `research/data/research.json`).
 - Re-running detection reconciles: labeled holds and manual candidates are kept, dismissals are
   carried over to overlapping new candidates.
 - Screens: Home (tabs Asanas / Sessions), session review (`#/session/<id>`: timeline, cards with
@@ -194,6 +215,19 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   stored; cached per still storage key for the page's lifetime). `crop/overlay.ts` maps landmarks
   and the box into the displayed crop (tested); `PoseOverlay.svelte` draws skeleton, dots (dimmed
   below visibility 0.3), dashed body box; the posture class is a chip. Null cropper → "Pose model off".
+- Stored poses (`CompactPose`: 15 body joints — nose, shoulders, elbows, wrists, hips, knees,
+  ankles, foot index — of the MediaPipe world landmarks as float16 base64 + visibilities as
+  uint8 base64 + posture, ≈ 150 bytes; `v: 1`). `Hold.pose` comes from its still at capture and
+  re-crop (`recropStill` also picks holds without the key, so existing holds get one from their
+  stored still; null = no body found, undefined = not tried, e.g. null cropper); a new still drops
+  the old pose. `Analysis.poses` holds the poses of candidates' best frames by `poseKey` (sample
+  index of the best time), so edits that keep the frame keep the pose: the review asks for missing
+  ones (`SessionReview.requestPoses` on load, after every candidate edit and after re-attaching a
+  file → `capture.requestFramePoses` → `frame-poses` job in the capture worker: exact frame →
+  640 px preview → MediaPipe, beside any capture; results stored in batches of 10 or every 1.5 s
+  via `app.addFramePoses`). Needs the video file in this page session and the pose model. The
+  review uses a labeled hold's own pose, else its frame's. Both fields are optional (no
+  migration); backups carry them (they are part of `holds` and `analyses`).
 - ReviewCard: a tap on the thumbnail selects the hold and opens a small anchored menu (Choose
   frame, Edit crop when a still exists, Full-resolution frame when the file is attached); entries
   come from optional callback props.
@@ -237,7 +271,7 @@ share sheet ("Save to Files"). "Keep separate" for same-day sessions is `Session
 ### Storage layout
 
 - IndexedDB `asana-progression` v1: `asanas`, `templates`, `sessions` (idx date, videoIds*),
-  `videos` (idx fingerprint), `analyses` (key videoId), `holds` (idx asanaId, sessionId,
+  `videos` (idx fingerprint), `analyses` (key videoId; `poses` by best-frame sample index), `holds` (idx asanaId, sessionId,
   videoId), `assets` (idx holdId), `jobs` (key videoId, idx fingerprint), `settings` (key/value).
 - OPFS: `samples-<videoId>.bin` = consecutive pooled frames, `frameWidth × frameHeight` bytes
   each (80×45 = 3.6 KB per sample for 16:9 → ~52 MB per 60 min at 4 Hz). Written with sync
@@ -346,7 +380,7 @@ notes, places, coordinates, images or analysis frames (`research.test.ts` checks
   template, video order, fullyLabeled), videos (id, durationS, size, fps, codec, recordedAt);
   per analysis its (normalized) params, frame size, threshold, review candidates (status, origin,
   holdId, spans, best, alternates, clip), stored preMerge, m and C with the default signal
-  parameters (float16 little-endian base64, `ui/research/float16.ts`; `from: stored | recomputed`),
+  parameters (float16 little-endian base64, `model/float16.ts`; `from: stored | recomputed`),
   and `fresh` = `findCandidates` with `DEFAULT_PARAMS` on the stored frames (candidates, preMerge,
   `mergeInputs`: for pre-merge pairs ≤ 120 s apart the best-frame `meanAbsDiff` and the largest m
   between them — everything the similar-merge needs besides the frames); per hold its spans, clip,
@@ -373,7 +407,9 @@ the per-hold / per-candidate matching behind `scoreDetection`. Results: no detec
 passes the rules (a looser similar-merge cap saves 10 edits but merges look-alike neighbours and
 fails the outdoor fixture's floor; pieces of one hold look as different as different holds); the
 template suggestions are 91 % top 1 / 96 % top 3 card by card, but 9 % with zero corrections,
-where alignment + pose reaches 89 %.
+where alignment + pose reaches 89 %. The app's versions are `labeling/pose.ts` (on `CompactPose`)
+and `labeling/align.ts` (`alignSlots`); `research/lib/pose.ts`/`align.ts` stay as the record of the
+report (they work on the export's 33-landmark rows).
 
 ### Real-signal fixtures
 
@@ -533,14 +569,14 @@ Fill in from the user's device reports (Settings → "Copy diagnostics report", 
    Stage A ✅: scoring, detection lab, detector variants, research export (see "Research tooling").
    Stage B ✅ (`research/REPORT.md`): detection defaults unchanged (nothing lowers the edit cost in
    every held-out session with both fixtures passing); auto-crop refitted (`CROP_VERSION` 3);
-   naming: pose + whole-session alignment wins only with a pose per open candidate — proposed
-   (`CompactPose` on `ReviewCandidate` and `Hold`), waiting for the user's decision.
+   naming: pose + whole-session alignment. Approved and built: `Hold.pose`, `Analysis.poses`
+   (by best frame instead of a field on `ReviewCandidate`), frame poses in the background,
+   alignment-based suggestions, "Confirm all" (see Labeling, "Pose alignment").
 
 Open (needs the user):
 
-- Decide on the compact per-candidate / per-hold pose (research/REPORT.md, "Proposal"); with it:
-  pose for each candidate after analysis, alignment-based suggestions, "Confirm all suggestions".
-
+- On the iPhone: frame-pose time per candidate (estimated 0.2–0.4 s on a 4K HEVC file) and the
+  pose suggestions / "Confirm all" on a new session.
 - A failed video: reproduce from its diagnostics report (codec string, `decoderSupport`, sampler
   stats, error stage). A detection miss becomes a fixture with `truth`, tuned via `DetectionParams`.
 - On the iPhone: 720p/1080p clips are H.264 at the right size (Chromium has no AVC encoder, so

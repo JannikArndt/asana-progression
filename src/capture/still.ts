@@ -24,6 +24,35 @@ export async function previewFromStill(still: Blob): Promise<ImageBitmap> {
   }
 }
 
+/** The exact frame at `atS` in display orientation on a canvas (null if there is none). */
+async function renderFrame(source: VideoSource, atS: number): Promise<{ canvas: OffscreenCanvas; timestampS: number } | null> {
+  const exact = await source.frameAt(atS);
+  if (!exact) return null;
+  try {
+    const size = rotatedSize(exact.frame.displayWidth, exact.frame.displayHeight, exact.rotation);
+    const c = canvas2d(size.width, size.height);
+    drawRotated(c.ctx, exact.frame, exact.rotation, size.width, size.height);
+    return { canvas: c.canvas, timestampS: exact.timestampS };
+  } finally {
+    exact.frame.close();
+  }
+}
+
+/**
+ * Small bitmap (long side ≤ 640) of the exact frame at `atS`, like the capture preview: the pose of
+ * a review candidate's best frame before it has a still. Caller closes it; null without a frame.
+ */
+export async function framePreview(source: VideoSource, atS: number): Promise<ImageBitmap | null> {
+  const r = await renderFrame(source, atS);
+  if (!r) return null;
+  const preview = downscale(r.canvas, thumbSize(r.canvas.width, r.canvas.height, PREVIEW_LONG_SIDE));
+  try {
+    return await createImageBitmap(preview);
+  } finally {
+    release(r.canvas, preview);
+  }
+}
+
 /** Full-resolution JPEG of the hold's best frame (display orientation) plus a thumbnail. */
 export class StillStrategy implements CaptureStrategy {
   readonly kind = 'still' as const;
@@ -39,17 +68,9 @@ export class StillStrategy implements CaptureStrategy {
 
   private async render(hold: HoldSpan, source: VideoSource, opts: CaptureOptions, withPreview: boolean): Promise<StillCapture> {
     opts.signal?.throwIfAborted();
-    const exact = await source.frameAt(hold.bestS);
-    if (!exact) throw new Error(`No video frame at ${hold.bestS.toFixed(2)} s`);
-    let full: OffscreenCanvas;
-    try {
-      const size = rotatedSize(exact.frame.displayWidth, exact.frame.displayHeight, exact.rotation);
-      const c = canvas2d(size.width, size.height);
-      drawRotated(c.ctx, exact.frame, exact.rotation, size.width, size.height);
-      full = c.canvas;
-    } finally {
-      exact.frame.close();
-    }
+    const rendered = await renderFrame(source, hold.bestS);
+    if (!rendered) throw new Error(`No video frame at ${hold.bestS.toFixed(2)} s`);
+    const full = rendered.canvas;
     const canvases = [full];
     try {
       const thumb = downscale(full, thumbSize(full.width, full.height, opts.thumbLongSide ?? THUMB_LONG_SIDE));
@@ -59,7 +80,7 @@ export class StillStrategy implements CaptureStrategy {
         full.convertToBlob({ type: JPEG, quality: opts.stillQuality ?? STILL_QUALITY }),
         thumb.convertToBlob({ type: JPEG, quality: THUMB_QUALITY }),
       ]);
-      const atS = exact.timestampS;
+      const atS = rendered.timestampS;
       const assets: CapturedAsset[] = [
         { kind: 'still', mime: still.type || JPEG, width: full.width, height: full.height, blob: still, atS },
         { kind: 'thumb', mime: small.type || JPEG, width: thumb.width, height: thumb.height, blob: small, atS },

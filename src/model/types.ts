@@ -16,6 +16,20 @@ export interface Box {
 /** Coarse body orientation; a pose model can classify frames into these (crop module, M3). */
 export type PostureClass = 'standing' | 'seated' | 'lying' | 'inverted' | 'arm-balance';
 
+/**
+ * Body pose of one frame, compact (research/REPORT.md, B2): the 15 body joints of `POSE_JOINTS` in
+ * MediaPipe world coordinates (metres, origin between the hips). Encode and decode with
+ * `encodePose` / `decodePose`.
+ */
+export interface CompactPose {
+  v: 1;
+  /** x, y, z per joint, float16 little-endian, base64. */
+  world: string;
+  /** Visibility × 255 per joint, uint8, base64. */
+  vis: string;
+  posture: PostureClass | null;
+}
+
 /** Core entity; lettered variants are separate asanas. */
 export interface Asana {
   id: string;
@@ -132,6 +146,11 @@ export interface Analysis {
   preMerge: Candidate[];
   createdAt: string;
   stats: ProcessingStats | null;
+  /**
+   * Poses of candidates' best frames, by sample index (`poseKey`): a pose belongs to a frame, so it
+   * survives edits that keep the frame. Null = no body found there.
+   */
+  poses?: Record<string, CompactPose | null>;
 }
 
 export interface Hold {
@@ -148,6 +167,8 @@ export interface Hold {
   templateEntryIndex?: number;
   /** Display crop: `manual` wins over `auto`; `autoVersion` = crop module version that made `auto`. */
   crop: { auto?: Box; manual?: Box; autoVersion?: number };
+  /** Pose found on the still (with the automatic crop); null = no body found. */
+  pose?: CompactPose | null;
 }
 
 export interface Asset {

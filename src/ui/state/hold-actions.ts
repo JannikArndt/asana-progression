@@ -40,15 +40,14 @@ export async function chooseBestFrame(holdId: string, bestS: number): Promise<vo
   const hold = app.holds.find((h) => h.id === holdId);
   if (!hold) return;
   let updated: Hold = { ...hold, bestS: Math.min(hold.endS, Math.max(hold.startS, bestS)) };
-  const analysis = await app.db.analyses.get(hold.videoId);
-  const candidate = analysis?.candidates.find((c) => c.holdId === holdId);
-  if (analysis && candidate) {
+  const analysis = await app.updateAnalysis(hold.videoId, (a) => {
+    const candidate = a.candidates.find((c) => c.holdId === holdId);
+    if (!candidate) return null;
     const next = nudgeBest(candidate, bestS);
-    const candidates = sortCandidates(analysis.candidates.map((c) => (c.id === candidate.id ? next : c)));
-    await app.db.analyses.put({ ...analysis, candidates });
-    app.setCandidates(hold.videoId, candidates);
-    updated = holdFromCandidate(hold, next);
-  }
+    return { ...a, candidates: sortCandidates(a.candidates.map((c) => (c.id === candidate.id ? next : c))) };
+  });
+  const moved = analysis?.candidates.find((c) => c.holdId === holdId);
+  if (moved) updated = holdFromCandidate(hold, moved);
   await app.db.holds.put(updated);
   app.upsertHold(updated);
   capture.request([updated]);

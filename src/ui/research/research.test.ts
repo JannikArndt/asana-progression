@@ -4,7 +4,7 @@ import { POSES, synthesize, type Segment } from '../../detection/__fixtures__/sy
 import { expandGrid } from '../../labeling';
 import type { Analysis, Asana, Asset, Hold, SequenceTemplate, Session, Video } from '../../model';
 import type { Landmark, PoseDetection } from '../../crop';
-import { decodeFloat16, encodeFloat16, fromFloat16Bits, toFloat16Bits } from './float16';
+import { decodeFloat16, encodeFloat16, fromFloat16Bits, toFloat16Bits } from '../../model';
 import { buildResearchExport, isFullyLabeled, RESEARCH_FORMAT, type ResearchDeps, type ResearchSource, type StoredFrames } from './export';
 import { DEFAULT_LAB_GRID, gridText, labReport, runLab, type LabVideo } from './lab';
 

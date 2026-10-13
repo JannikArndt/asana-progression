@@ -3,7 +3,7 @@
  * holds, and the suggestion engine. It works on labels and time spans; it never sees pixels and
  * does not know how anything is stored.
  */
-import type { PostureClass, Side } from '../model/types';
+import type { CompactPose, PostureClass, Side } from '../model/types';
 
 export interface Label {
   asanaId: string;
@@ -20,11 +20,15 @@ export interface ReviewItem {
   label?: Label;
   /** Optional posture class from a pose model. */
   postureClass?: PostureClass;
+  /** Pose of the item's best frame (open items) or its still (labeled), when known. */
+  pose?: CompactPose | null;
+  /** Video of the item: a change of video between items may be a break in the recording. */
+  videoId?: string;
 }
 
 export interface Suggestion extends Label {
-  /** `rep`: another hold of the previous entry beyond its usual count. */
-  reason: 'template' | 'lookahead' | 'rep' | 'history';
+  /** `rep`: another hold of the previous entry beyond its usual count; `pose`: whole-session alignment with poses. */
+  reason: 'template' | 'lookahead' | 'rep' | 'history' | 'pose';
 }
 
 /** A past hold, for suggestions without a template. */
@@ -36,6 +40,8 @@ export interface HistoryEntry {
   sessionId: string;
   /** Position within its session. */
   order: number;
+  /** Pose of the hold's still, when known (examples for the pose classes). */
+  pose?: CompactPose | null;
 }
 
 export interface SuggestionOptions {

@@ -1,5 +1,5 @@
-/** Runs the labeling suggestion engine off the main thread. */
-import { suggest } from '../../labeling';
+/** Runs the labeling suggestion engine (suggestions and the "Confirm all" plan) off the main thread. */
+import { planSession } from '../../labeling';
 import type { SuggestRequest, SuggestResponse } from './suggest-client';
 
 const scope = self as unknown as {
@@ -10,7 +10,7 @@ const scope = self as unknown as {
 scope.onmessage = (e) => {
   const { id, items, catalog, template, history, options } = e.data;
   try {
-    scope.postMessage({ id, result: suggest(items, catalog, template, history, options) });
+    scope.postMessage({ id, result: planSession(items, catalog, template, history, options) });
   } catch (err) {
     scope.postMessage({ id, error: String(err) });
   }

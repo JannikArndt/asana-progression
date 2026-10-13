@@ -215,7 +215,7 @@ hold is cropped again from its still on the next start. `src/crop/__fixtures__/c
 The remaining 29 are mostly composition (headroom over seated folds; 28 of the 66 manual crops
 use a preset aspect, 18 of them 3:2); covering them would need much larger boxes.
 
-## Proposal — needs your decision
+## Proposal — approved and built
 
 **Compact pose per candidate and hold.** Optional fields, no migration, backups carry them
 (analyses and holds are already in `backup.json`):
@@ -241,3 +241,9 @@ its API and top-3 behaviour but ranks by the alignment above when poses are pres
 review can offer "Confirm all suggestions".
 
 Should I add these two fields?
+
+**Decision (2026-10-13): yes.** Built with one change: candidate poses are stored in the analysis
+by best frame (`Analysis.poses`, key = sample index of the best time) instead of on
+`ReviewCandidate`, so merges, splits and re-runs that keep a frame keep its pose and new frames are
+filled in. In the app: `labeling/pose.ts`, `labeling/align.ts`, `labeling.planSession`, review
+"Confirm all".

@@ -38,7 +38,9 @@ describe('re-crop', () => {
     const still = asset('still');
     expect(recropStill(hold, [asset('thumb'), still], 2)).toBe(still);
     expect(recropStill({ ...hold, crop: { auto: box, autoVersion: 1 } }, [still], 2)).toBe(still);
-    expect(recropStill({ ...hold, crop: { auto: box, autoVersion: 2 } }, [still], 2)).toBeNull();
+    expect(recropStill({ ...hold, crop: { auto: box, autoVersion: 2 }, pose: null }, [still], 2)).toBeNull();
+    // Current crop, but the pose was never stored (holds from before poses were kept).
+    expect(recropStill({ ...hold, crop: { auto: box, autoVersion: 2 } }, [still], 2)).toBe(still);
     expect(recropStill(hold, [asset('thumb')], 2)).toBeNull();
   });
   it('records the new box and version, keeps manual crops and an old box when none was found', () => {

@@ -17,7 +17,7 @@ import {
   type TimeRange,
 } from '../../labeling';
 import type { DetectionParams } from '../../detection';
-import { newId, type Analysis, type Hold, type ReviewCandidate, type Session, type Video } from '../../model';
+import { newId, poseKey, type Analysis, type Hold, type ReviewCandidate, type Session, type Video } from '../../model';
 import { app } from './app.svelte';
 import { dialog } from './dialog.svelte';
 import {
@@ -56,7 +56,19 @@ export class SessionReview {
   template = $derived(app.templates.find((t) => t.id === this.session?.templateId) ?? null);
   entries = $derived<SessionEntry[]>(this.session ? sessionEntries(this.session, this.analyses, this.holds) : []);
   /** Review items with template entries re-aligned to the current template (it may have been switched or edited). */
-  items = $derived(alignToTemplate(toReviewItems(this.entries), this.template));
+  items = $derived(
+    alignToTemplate(
+      toReviewItems(this.entries, (videoId, bestS) => {
+        const a = this.analyses[videoId];
+        return a ? a.poses?.[poseKey(bestS, a.sampleHz)] : undefined;
+      }),
+      this.template,
+    ),
+  );
+  /** "Confirm all": labels the pose alignment gives open cards (null without enough poses). */
+  confirmAllPlan = $state.raw<Array<{ key: string; label: Label }> | null>(null);
+  private unsubscribe: (() => void) | null = null;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   async load(sessionId: string) {
     const db = app.db;
@@ -76,8 +88,91 @@ export class SessionReview {
     this.videos = videos;
     this.analyses = analyses;
     this.loaded = true;
+    // Frame poses arrive in the background: take them in and suggest again (calmly).
+    this.unsubscribe?.();
+    this.unsubscribe = app.onAnalysis((a) => {
+      if (!this.analyses[a.videoId]) return;
+      this.analyses = { ...this.analyses, [a.videoId]: a };
+      if (this.refreshTimer) clearTimeout(this.refreshTimer);
+      this.refreshTimer = setTimeout(() => void this.refreshSuggestions(), 400);
+    });
     capture.request(this.holds);
+    this.requestPoses();
     await this.refreshSuggestions();
+  }
+
+  /** Stops listening for background updates (screen closed). */
+  dispose() {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+  }
+
+  /** A hold's pose: the one it has (from its still), else the stored pose of its candidate's best frame. */
+  private poseFor(e: SessionEntry): Pick<Hold, 'pose'> {
+    if (e.hold?.pose !== undefined && e.hold.bestS === e.candidate.bestS) return { pose: e.hold.pose };
+    const a = this.analyses[e.videoId];
+    const p = a?.poses?.[poseKey(e.candidate.bestS, a.sampleHz)];
+    return p ? { pose: p } : {};
+  }
+
+  /**
+   * "Confirm all": labels every open card of the plan with the label the pose alignment gives it
+   * (one batch of holds, one analysis write per video). Returns the number of cards labeled.
+   */
+  async confirmAll(): Promise<number> {
+    const plan = this.confirmAllPlan;
+    const session = this.session;
+    if (!plan?.length || !session) return 0;
+    const holds: Hold[] = [];
+    const byVideo = new Map<string, Map<string, string>>();
+    for (const { key, label } of plan) {
+      const e = this.entry(key);
+      if (!e || e.candidate.status !== 'open') continue;
+      const c = e.candidate;
+      const hold: Hold = {
+        id: newId('hold'),
+        sessionId: session.id,
+        videoId: e.videoId,
+        asanaId: label.asanaId,
+        side: label.side,
+        startS: c.startS,
+        endS: c.endS,
+        bestS: c.bestS,
+        clipStartS: c.clipStartS,
+        clipEndS: c.clipEndS,
+        ...(label.templateEntryIndex !== undefined ? { templateEntryIndex: label.templateEntryIndex } : {}),
+        crop: {},
+        ...this.poseFor(e),
+      };
+      holds.push(hold);
+      byVideo.set(e.videoId, (byVideo.get(e.videoId) ?? new Map()).set(c.id, hold.id));
+    }
+    if (!holds.length) return 0;
+    await app.db.batch(holds.map((put) => ({ store: 'holds' as const, put })));
+    for (const h of holds) app.upsertHold(h);
+    for (const [videoId, ids] of byVideo) {
+      const a = await app.updateAnalysis(videoId, (stored) => ({
+        ...stored,
+        candidates: stored.candidates.map((c) => (c.status === 'open' && ids.has(c.id) ? { ...c, status: 'labeled' as const, holdId: ids.get(c.id)! } : c)),
+      }));
+      if (a) this.analyses = { ...this.analyses, [videoId]: a };
+    }
+    capture.request(holds);
+    await this.refreshSuggestions();
+    return holds.length;
+  }
+
+  /** Asks for the poses of candidates' best frames that are not stored yet (needs the video file). */
+  requestPoses(videoId?: string) {
+    for (const [id, a] of Object.entries(this.analyses)) {
+      if (videoId && id !== videoId) continue;
+      const frames = a.candidates
+        .filter((c) => c.status !== 'dismissed')
+        .map((c) => ({ key: poseKey(c.bestS, a.sampleHz), atS: c.bestS }))
+        .filter((f) => !(a.poses && f.key in a.poses));
+      if (frames.length) capture.requestFramePoses(id, frames);
+    }
   }
 
   entry(key: string): SessionEntry | undefined {
@@ -107,16 +202,21 @@ export class SessionReview {
       history: historyFrom(app.sessions, app.holds, this.session.id),
       options: { now: new Date().toISOString() },
     });
-    if (seq === this.suggestSeq) this.suggestions = result;
+    if (seq === this.suggestSeq) {
+      this.suggestions = result.suggestions;
+      this.confirmAllPlan = result.confirmAll;
+    }
   }
 
   // ----- persistence helpers -----
 
   private async saveCandidates(videoId: string, candidates: ReviewCandidate[]) {
-    const a = { ...this.analyses[videoId]!, candidates: sortCandidates(candidates) };
-    this.analyses = { ...this.analyses, [videoId]: a };
-    await app.db.analyses.put(a);
-    app.setCandidates(videoId, a.candidates);
+    const sorted = sortCandidates(candidates);
+    this.analyses = { ...this.analyses, [videoId]: { ...this.analyses[videoId]!, candidates: sorted } };
+    // Read-modify-write: background frame poses stored meanwhile are kept.
+    const a = await app.updateAnalysis(videoId, (stored) => ({ ...stored, candidates: sorted }));
+    if (a) this.analyses = { ...this.analyses, [videoId]: a };
+    this.requestPoses(videoId);
   }
 
   /** Saves a hold and (re-)captures its still and clip when they no longer match. */
@@ -167,6 +267,7 @@ export class SessionReview {
       clipEndS: e.candidate.clipEndS,
       ...(templateEntryIndex !== undefined ? { templateEntryIndex } : {}),
       crop: e.hold?.crop ?? {},
+      ...this.poseFor(e),
     };
     await this.putHold(hold);
     await this.replaceCandidate(e.videoId, e.candidate.id, [{ ...e.candidate, status: 'labeled', holdId: hold.id }]);
@@ -393,13 +494,10 @@ export class SessionReview {
     const previous = this.candidates(videoId);
     await pipeline.reanalyze(videoId, params, onProgress);
     invalidateSamples(videoId);
-    const fresh = await app.db.analyses.get(videoId);
-    if (!fresh) return;
-    const candidates = reconcile(fresh.candidates, previous, this.holds);
-    const a = { ...fresh, candidates };
-    await app.db.analyses.put(a);
+    const a = await app.updateAnalysis(videoId, (fresh) => ({ ...fresh, candidates: reconcile(fresh.candidates, previous, this.holds) }));
+    if (!a) return;
     this.analyses = { ...this.analyses, [videoId]: a };
-    app.setCandidates(videoId, candidates);
+    this.requestPoses(videoId);
     await this.refreshSuggestions();
   }
 }

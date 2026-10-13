@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DetectionParams, Signals } from '../../src/detection';
-import { decodeFloat16 } from '../../src/ui/research/float16';
+import { decodeFloat16 } from '../../src/model';
 import type { ResearchAnalysis, ResearchExport, ResearchHold } from '../../src/ui/research/export';
 import type { LabReport } from '../../src/ui/research/lab';
 

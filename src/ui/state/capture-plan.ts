@@ -22,11 +22,12 @@ export function needsCapture(hold: Hold, assets: Asset[]): { still: boolean; cli
 }
 
 /**
- * Still to crop again: the hold's automatic crop was made by an older crop version (or none ran)
- * and it has a still. Manual crops are kept anyway; the automatic one is still updated.
+ * Still to crop again: the hold's automatic crop was made by an older crop version (or none ran),
+ * or its pose was never stored, and it has a still. Manual crops are kept anyway; the automatic one
+ * is still updated.
  */
 export function recropStill(hold: Hold, assets: Asset[], version: number): Asset | null {
-  if (hold.crop.autoVersion === version) return null;
+  if (hold.crop.autoVersion === version && hold.pose !== undefined) return null;
   return assets.find((a) => a.holdId === hold.id && a.kind === 'still') ?? null;
 }
 
