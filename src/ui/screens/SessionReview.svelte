@@ -329,6 +329,7 @@
 
   async function more(entry: SessionEntry) {
     const prev = review.previousOf(entry.key);
+    const next = review.nextOf(entry.key);
     const hasFile = app.files.has(entry.videoId);
     const hasStill = !!entry.hold && app.assets.some((a) => a.holdId === entry.hold!.id && a.kind === 'still');
     const f = frameOf(entry.videoId);
@@ -347,6 +348,7 @@
         { id: 'split', label: 'Split…' },
         { id: 'splitk', label: 'Split into several…' },
         ...(prev ? [{ id: 'merge', label: 'Merge with previous' }] : []),
+        ...(next ? [{ id: 'mergeNext', label: 'Merge into next' }] : []),
         ...(entry.candidate.status !== 'dismissed' ? [{ id: 'dismiss', label: 'Not a pose', kind: 'danger' as const }] : []),
         ...(hasFile ? [{ id: 'probe', label: 'Full-resolution frame' }] : []),
         { id: 'cancel', label: 'Cancel', kind: 'quiet' },
@@ -370,6 +372,9 @@
         break;
       case 'merge':
         await review.mergeWithPrevious(entry.key);
+        break;
+      case 'mergeNext':
+        await review.mergeIntoNext(entry.key);
         break;
       case 'dismiss':
         await review.dismiss(entry.key);

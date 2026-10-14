@@ -281,16 +281,27 @@ export class SessionReview {
     await this.refreshSuggestions();
   }
 
-  /** Previous candidate in the same video (any status except dismissed). */
-  previousOf(key: string): SessionEntry | undefined {
+  /** Neighbouring candidate in the same video (any status except dismissed), `dir` −1 = previous, 1 = next. */
+  private neighbourOf(key: string, dir: -1 | 1): SessionEntry | undefined {
     const i = this.entries.findIndex((e) => e.key === key);
     const e = this.entries[i];
-    for (let j = i - 1; j >= 0; j--) {
-      const p = this.entries[j]!;
-      if (p.videoId !== e?.videoId) return undefined;
-      if (p.candidate.status !== 'dismissed') return p;
+    if (!e) return undefined;
+    for (let j = i + dir; j >= 0 && j < this.entries.length; j += dir) {
+      const n = this.entries[j]!;
+      if (n.videoId !== e.videoId) return undefined;
+      if (n.candidate.status !== 'dismissed') return n;
     }
     return undefined;
+  }
+
+  /** Previous candidate in the same video (any status except dismissed). */
+  previousOf(key: string): SessionEntry | undefined {
+    return this.neighbourOf(key, -1);
+  }
+
+  /** Next candidate in the same video (any status except dismissed). */
+  nextOf(key: string): SessionEntry | undefined {
+    return this.neighbourOf(key, 1);
   }
 
   /**
@@ -300,17 +311,30 @@ export class SessionReview {
   async mergeWithPrevious(key: string) {
     const e = this.entry(key);
     const p = this.previousOf(key);
-    if (!e || !p) return;
-    const merged = mergeCandidates(p.candidate, e.candidate, this.signals(e.videoId));
-    // Only one hold survives: the previous card's if it has one.
-    const keepHold = p.hold ?? e.hold;
-    const dropHold = p.hold && e.hold ? e.hold : undefined;
+    if (e && p) await this.mergeInto(p, e, false);
+  }
+
+  /**
+   * Merges a card into the next visible one, e.g. a false hold during the preparation for a pose.
+   * The next card's hold (else this card's) survives, and its best frame stays.
+   */
+  async mergeIntoNext(key: string) {
+    const e = this.entry(key);
+    const n = this.nextOf(key);
+    if (e && n) await this.mergeInto(n, e, true);
+  }
+
+  /** `absorbed` disappears into `survivor`; only one hold survives: the survivor's if it has one. */
+  private async mergeInto(survivor: SessionEntry, absorbed: SessionEntry, keepBest: boolean) {
+    const merged = mergeCandidates(survivor.candidate, absorbed.candidate, this.signals(absorbed.videoId), keepBest);
+    const keepHold = survivor.hold ?? absorbed.hold;
+    const dropHold = survivor.hold && absorbed.hold ? absorbed.hold : undefined;
     if (dropHold) await this.deleteHold(dropHold.id);
     const next: ReviewCandidate = { ...merged, ...(keepHold ? { holdId: keepHold.id, status: 'labeled' as const } : {}) };
     if (keepHold) await this.putHold(holdFromCandidate(keepHold, next));
-    const absorbed = (c: ReviewCandidate) => c.status === 'dismissed' && c.startS >= next.startS && c.endS <= next.endS;
-    await this.saveCandidates(e.videoId, [
-      ...this.candidates(e.videoId).filter((c) => c.id !== e.candidate.id && c.id !== p.candidate.id && !absorbed(c)),
+    const inside = (c: ReviewCandidate) => c.status === 'dismissed' && c.startS >= next.startS && c.endS <= next.endS;
+    await this.saveCandidates(absorbed.videoId, [
+      ...this.candidates(absorbed.videoId).filter((c) => c.id !== absorbed.candidate.id && c.id !== survivor.candidate.id && !inside(c)),
       next,
     ]);
     await this.refreshSuggestions();

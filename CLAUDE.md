@@ -151,7 +151,8 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   choose frame, split,
   split into several, merge with previous (a label always survives: `mergeCandidates` is labeled if
   either side is, "Not a pose" only if both are; "Not a pose" candidates between the two are
-  absorbed), not a pose (the card disappears into its gap row), full-resolution frame, add missed hold),
+  absorbed), merge into next (the card disappears into the next one, e.g. a false hold during the
+  preparation: the next card's hold and best frame stay, `keepBest`), not a pose (the card disappears into its gap row), full-resolution frame, add missed hold),
   the session's video files (`#/session/<id>/videos`, `SessionVideos.svelte`, linked "N videos ›"
   top right of the review: order with ↑/↓ or "Sort by recording time" → `SessionReview.setVideoOrder`,
   recording time (`formatRecordedAt`, own UTC offset) and its source, place on the session timeline,

@@ -47,6 +47,15 @@ describe('mergeCandidates', () => {
     const m3 = mergeCandidates(cand('x', 0, 5, 2), cand('y', 6, 9, 7), signals(10, []));
     expect(m3.holdId).toBeUndefined();
   });
+  it('keeps the first candidate\'s best frame with keepBest', () => {
+    const sig = signals(60, [[10, 40]], [15]);
+    const prep = cand('p', 10, 20, 15, { status: 'labeled', holdId: 'h1' });
+    const pose = cand('q', 25, 40, 30, { status: 'labeled', holdId: 'h2' });
+    expect(mergeCandidates(pose, prep, sig).bestS).toBe(15);
+    const m = mergeCandidates(pose, prep, sig, true);
+    expect(m).toMatchObject({ id: 'q', startS: 10, endS: 40, bestS: 30, holdId: 'h2', status: 'labeled' });
+    expect(m.alternatesS).toEqual([15]);
+  });
   it('keeps a label; "Not a pose" only survives when both were dismissed', () => {
     const sig = signals(60, [[10, 40]]);
     const labeled = cand('l', 10, 20, 15, { status: 'labeled', holdId: 'h' });

@@ -33,15 +33,16 @@ export function editedId(prefix: string): string {
 }
 
 /**
- * Merges two candidates (in time order). The stiller best frame wins; the other best frame and
- * all alternates are kept as alternates. The merged candidate keeps `a`'s id and hold. A label
- * always survives (labeled + anything = labeled); "Not a pose" only when both were dismissed.
+ * Merges two candidates (in time order). The stiller best frame wins (`keepBest`: `a`'s best frame,
+ * e.g. when `b` was the preparation for `a`); the other best frame and all alternates are kept as
+ * alternates. The merged candidate keeps `a`'s id and hold. A label always survives (labeled +
+ * anything = labeled); "Not a pose" only when both were dismissed.
  */
-export function mergeCandidates(a: ReviewCandidate, b: ReviewCandidate, sig: SignalView): ReviewCandidate {
+export function mergeCandidates(a: ReviewCandidate, b: ReviewCandidate, sig: SignalView, keepBest = false): ReviewCandidate {
   const [first, second] = a.startS <= b.startS ? [a, b] : [b, a];
   const startS = Math.min(first.startS, second.startS);
   const endS = Math.max(first.endS, second.endS);
-  const keepA = motionAt(sig, a.bestS) <= motionAt(sig, b.bestS);
+  const keepA = keepBest || motionAt(sig, a.bestS) <= motionAt(sig, b.bestS);
   const winner = keepA ? a.bestS : b.bestS;
   const loser = keepA ? b.bestS : a.bestS;
   const fit = fitSpan(startS, endS, sig);
