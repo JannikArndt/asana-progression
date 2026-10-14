@@ -64,7 +64,7 @@ async function capture(req: Extract<CaptureRequest, { type: 'capture' }>) {
   current = abort;
   let cropperName = 'none';
   try {
-    const source = await openVideo(req.file);
+    const source = await openVideo(req.file, req.exactDecoder ? { exactDecoder: req.exactDecoder } : {});
     const cropper = await getCropper(req.cropper, req.baseUrl);
     cropperName = cropper.name;
     try {
@@ -72,7 +72,7 @@ async function capture(req: Extract<CaptureRequest, { type: 'capture' }>) {
         if (abort.signal.aborted) break;
         post({ type: 'hold-start', jobId, holdId: h.id });
         try {
-          const { assets, preview } = await captureHold(h, source, { clipQuality: req.quality, signal: abort.signal });
+          const { assets, preview, clipError } = await captureHold(h, source, { clipQuality: req.quality, signal: abort.signal, clip: h.clip });
           let detection = null;
           if (preview) {
             try {
@@ -84,6 +84,7 @@ async function capture(req: Extract<CaptureRequest, { type: 'capture' }>) {
             }
           }
           const wanted = assets.filter((a) => (a.kind === 'clip' ? h.clip : h.still));
+          if (!wanted.length && clipError) throw new Error(`Clip: ${clipError}`);
           const records: Asset[] = [];
           for (const a of wanted) records.push(await save(h.id, a));
           post({
@@ -95,6 +96,7 @@ async function capture(req: Extract<CaptureRequest, { type: 'capture' }>) {
             posture: detection?.posture ?? null,
             pose: compactPose(cropper, detection),
             cropper: cropper.name,
+            ...(clipError ? { clipError } : {}),
           });
         } catch (e) {
           post({ type: 'hold-error', jobId, holdId: h.id, message: e instanceof Error ? e.message : String(e) });
@@ -148,7 +150,7 @@ async function framePoses(req: Extract<CaptureRequest, { type: 'frame-poses' }>)
   try {
     const cropper = await getCropper(req.cropper, req.baseUrl);
     if (cropper.name === 'none') throw new Error('No pose model');
-    const source = await openVideo(req.file);
+    const source = await openVideo(req.file, req.exactDecoder ? { exactDecoder: req.exactDecoder } : {});
     try {
       for (const f of [...req.frames].sort((a, b) => a.atS - b.atS)) {
         let detection = null;

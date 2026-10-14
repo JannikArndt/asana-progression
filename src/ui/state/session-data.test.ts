@@ -15,6 +15,7 @@ import {
   groupByDay,
   historyFrom,
   itemKey,
+  missingPoseFrames,
   orphanVideos,
   parseItemKey,
   sameDaySessions,
@@ -438,5 +439,18 @@ describe('session previews', () => {
     expect(sessionTinyFrame(ses, { v1: { sampleCount: 100 }, v2: { sampleCount: 401 } })).toEqual({ videoId: 'v2', index: 200 });
     expect(sessionTinyFrame(ses, { v1: { sampleCount: 10 } })).toEqual({ videoId: 'v1', index: 5 });
     expect(sessionTinyFrame(ses, {})).toBeNull();
+  });
+});
+
+describe('missingPoseFrames', () => {
+  it('lists best frames without a stored pose, once each, skipping "Not a pose"', () => {
+    const a = analysis('v1', [cand('a', 0), cand('b', 20, 'labeled', 'h1'), cand('c', 40, 'dismissed'), cand('d', 60), { ...cand('e', 0), id: 'e' }]);
+    expect(missingPoseFrames(a)).toEqual([
+      { key: '20', atS: 5 },
+      { key: '100', atS: 25 },
+      { key: '260', atS: 65 },
+    ]);
+    const posed = { ...a, poses: { '20': null } };
+    expect(missingPoseFrames(posed, true)).toEqual([{ key: '260', atS: 65 }]);
   });
 });

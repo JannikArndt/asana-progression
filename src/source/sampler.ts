@@ -54,7 +54,7 @@ export async function resolveDecoderConfig(
 /** How often held frames are converted while the decoder flushes. */
 const FLUSH_DRAIN_MS = 10;
 
-function waitForDequeue(decoder: VideoDecoder): Promise<void> {
+export function waitForDequeue(decoder: VideoDecoder): Promise<void> {
   return new Promise((resolve) => {
     let done = false;
     const target = decoder as Partial<EventTarget>;

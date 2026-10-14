@@ -90,7 +90,7 @@ export default defineConfig({
       provider: 'v8',
       // Browser-only code (WebCodecs sampler, UI wiring) is covered by the Playwright smoke tests.
       include: ['src/detection/**/*.ts', 'src/labeling/**/*.ts', 'src/model/**/*.ts', 'src/storage/**/*.ts', 'src/source/**/*.ts', 'src/ui/components/timeline.ts', 'src/ui/components/session-timeline.ts', 'src/ui/components/sheet-gesture.ts', 'src/ui/state/session-data.ts', 'src/ui/research/**/*.ts'],
-      exclude: ['**/*.test.ts', '**/types.ts', '**/index.ts', '**/__fixtures__/**', 'src/source/sampler.ts'],
+      exclude: ['**/*.test.ts', '**/types.ts', '**/index.ts', '**/__fixtures__/**', 'src/source/sampler.ts', 'src/source/exact.ts'],
       reporter: ['text-summary', 'text'],
       thresholds: {
         'src/detection/**': { lines: 98, branches: 90 },

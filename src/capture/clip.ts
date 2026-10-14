@@ -125,17 +125,30 @@ async function encodeClip(
 /**
  * Video clip of the hold's clip window as MP4. 'original' copies the encoded packets (exact
  * quality, key-frame snapped range); 720p/1080p re-encode with H.264 and fall back to 'original'
- * when the encoder is unavailable.
+ * when the encoder is unavailable or fails.
  */
 export class ClipStrategy implements CaptureStrategy {
   readonly kind = 'clip' as const;
 
   async capture(hold: HoldSpan, source: VideoSource, opts: CaptureOptions): Promise<CapturedAsset[]> {
     opts.signal?.throwIfAborted();
+    let encodeError: unknown = null;
     if (opts.clipQuality !== 'original') {
-      const encoded = await encodeClip(hold, source, opts.clipQuality, opts.signal);
-      if (encoded) return [encoded];
+      try {
+        const encoded = await encodeClip(hold, source, opts.clipQuality, opts.signal);
+        if (encoded) return [encoded];
+      } catch (e) {
+        // An encoder that accepted the configuration can still fail on the frames: copy instead.
+        if (opts.signal?.aborted) throw e;
+        encodeError = e;
+      }
     }
-    return [await copyClip(hold, source, opts.signal)];
+    try {
+      return [await copyClip(hold, source, opts.signal)];
+    } catch (e) {
+      if (!encodeError) throw e;
+      const msg = (x: unknown) => (x instanceof Error ? x.message : String(x));
+      throw new Error(`${opts.clipQuality} encoding failed (${msg(encodeError)}); copying failed too (${msg(e)})`);
+    }
   }
 }

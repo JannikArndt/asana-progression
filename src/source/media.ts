@@ -14,6 +14,7 @@ import { blobReader, readMvhdCreationTime } from './isobmff';
 import { parseQuickTimeDate, toLocalIso } from './quicktime-date';
 import { locationFromTags } from './iso6709';
 import { resolveDecoderConfig, sampleTrack } from './sampler';
+import { exactFrame, exactFrames } from './exact';
 import type {
   DecoderSupport,
   ExactFrame,
@@ -134,12 +135,27 @@ export async function readMeta(file: Blob, input: Input, track: InputVideoTrack)
 
 class MediabunnyVideoSource implements VideoSource {
   private frameSink: VideoSampleSink | null = null;
+  private own: Promise<VideoDecoderConfig | null> | null = null;
 
   constructor(
     readonly meta: VideoMeta,
     private readonly input: Input,
     private readonly track: InputVideoTrack,
+    private readonly opts: OpenOptions = {},
   ) {}
+
+  /**
+   * Decoder config for our own exact-frame decoder: only when Mediabunny's decoder rejects the
+   * track's codec string (or `exactDecoder: 'own'`) and the browser accepts a variant of it.
+   */
+  private ownConfig(): Promise<VideoDecoderConfig | null> {
+    this.own ??= (async () => {
+      if (this.opts.exactDecoder !== 'own' && (await this.track.canDecode())) return null;
+      const r = await resolveDecoderConfig(this.track);
+      return r.supported ? r.config : null;
+    })();
+    return this.own;
+  }
 
   async decoderSupport(): Promise<DecoderSupport> {
     const r = await resolveDecoderConfig(this.track);
@@ -154,6 +170,7 @@ class MediabunnyVideoSource implements VideoSource {
           }
         : null,
       variants: r.variants,
+      exactFrames: await this.track.canDecode(),
       ...(r.error ? { error: r.error } : {}),
     };
   }
@@ -163,6 +180,11 @@ class MediabunnyVideoSource implements VideoSource {
   }
 
   async frameAt(timestampS: number): Promise<ExactFrame | null> {
+    const own = await this.ownConfig();
+    if (own) {
+      const frame = await exactFrame(this.track, own, timestampS);
+      return frame ? { frame, rotation: this.meta.rotation, timestampS: frame.timestamp / 1e6 } : null;
+    }
     this.frameSink ??= new VideoSampleSink(this.track);
     const sample = await this.frameSink.getSample(timestampS);
     if (!sample) return null;
@@ -184,6 +206,11 @@ class MediabunnyVideoSource implements VideoSource {
   }
 
   async *frames(startS: number, endS: number): AsyncGenerator<TimedFrame, void, void> {
+    const own = await this.ownConfig();
+    if (own) {
+      yield* exactFrames(this.track, own, this.meta.rotation, startS, endS);
+      return;
+    }
     const sink = new VideoSampleSink(this.track);
     for await (const sample of sink.samples(startS, endS)) {
       try {
@@ -207,13 +234,18 @@ class MediabunnyVideoSource implements VideoSource {
 const FORMATS = [QTFF, MP4, WEBM, MATROSKA];
 
 /** Opens a video file (MP4/MOV/WebM/…) for reading. Reads lazily; never loads the whole file. */
-export async function openVideo(file: Blob): Promise<VideoSource> {
+export interface OpenOptions {
+  /** 'own': exact frames always from our own decoder (debug switch; normally only when Mediabunny's is rejected). */
+  exactDecoder?: 'auto' | 'own';
+}
+
+export async function openVideo(file: Blob, opts: OpenOptions = {}): Promise<VideoSource> {
   const input = new Input({ source: new BlobSource(file), formats: FORMATS });
   try {
     const track = await input.getPrimaryVideoTrack();
     if (!track) throw new Error('The file has no video track');
     const meta = await readMeta(file, input, track);
-    return new MediabunnyVideoSource(meta, input, track);
+    return new MediabunnyVideoSource(meta, input, track, opts);
   } catch (e) {
     input.dispose();
     throw e;

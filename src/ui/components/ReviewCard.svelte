@@ -20,6 +20,8 @@
     selected: boolean;
     thumb?: Asset | undefined;
     captureStatus?: CaptureStatus | undefined;
+    /** Message of a failed capture (with status 'done': the still was saved, the clip failed). */
+    captureError?: string | undefined;
     rep?: RepInfo | undefined;
     /** Holds the template expects in place of this card (≥ 2 offers a split). */
     expected?: number | undefined;
@@ -33,7 +35,7 @@
     onpick: () => void;
     onmore: () => void;
   }
-  let { entry, number, offsetS = 0, suggestion, nameOf, frame, selected, thumb, captureStatus, rep, expected, onsplit, onframe, oncrop, onfullframe, onselect, onconfirm, onpick, onmore }: Props = $props();
+  let { entry, number, offsetS = 0, suggestion, nameOf, frame, selected, thumb, captureStatus, captureError, rep, expected, onsplit, onframe, oncrop, onfullframe, onselect, onconfirm, onpick, onmore }: Props = $props();
   const statusText: Record<CaptureStatus, string> = {
     queued: 'Waiting to save still…',
     capturing: 'Saving still and clip…',
@@ -132,9 +134,15 @@
         {#if rep && rep.of > 1}<span class="rep tabular" aria-label="rep {rep.rep} of {rep.of}">{rep.rep}/{rep.of}</span>{/if}
       </button>
       {#if captureStatus && statusText[captureStatus]}
-        <span class="capture {captureStatus}" data-capture={captureStatus}>{statusText[captureStatus]}</span>
+        <span class="capture {captureStatus}" data-capture={captureStatus}
+          >{statusText[captureStatus]}{captureStatus === 'error' && captureError ? `: ${captureError}` : ''}</span
+        >
       {:else if captureStatus === 'done'}
-        <span class="visually-hidden" data-capture="done">Still saved</span>
+        {#if captureError}
+          <span class="capture" data-capture="done">Still saved; {captureError.replace(/^Clip: /, 'the clip failed: ')}</span>
+        {:else}
+          <span class="visually-hidden" data-capture="done">Still saved</span>
+        {/if}
       {/if}
     {:else}
       <div class="row">
@@ -327,6 +335,7 @@
   .capture {
     font-size: var(--text-xs);
     color: var(--color-text-3);
+    overflow-wrap: anywhere;
   }
 
   .capture.error,

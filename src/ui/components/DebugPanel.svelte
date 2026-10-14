@@ -1,6 +1,6 @@
 <script lang="ts">
   import { buildAnalysisExport, DEFAULT_PARAMS, isChoiceSpec, needsResample, normalizeParams, PARAM_SPECS, type DetectionParams } from '../../detection';
-  import { fingerprint, openVideo, type DecoderSupport, type VideoMeta } from '../../source';
+  import type { DecoderSupport, VideoMeta } from '../../source';
   import { deleteFile, sampleFileName } from '../../storage';
   import type { Analysis, Video } from '../../model';
   import { app } from '../state/app.svelte';
@@ -12,6 +12,7 @@
   import { assessHandover, copyText, deviceInfo, formatBytes, shareOrDownload, videoDiagnostics, withoutLocation } from '../diagnostics';
   import { formatDuration } from './timeline';
   import { formatCoords } from '../state/session-data';
+  import { attachPicked } from '../state/hold-actions';
 
   interface Props {
     video: Video;
@@ -109,19 +110,9 @@
     if (!file) return;
     busy = 'Checking file…';
     try {
-      const src = await openVideo(file);
-      const fp = await fingerprint(file, src.meta.durationS);
-      src.close();
-      if (fp !== video.fingerprint) {
-        message = 'This is a different video (fingerprint does not match).';
-        return;
-      }
-      app.attachFile(video.id, file);
-      capture.request(app.holds.filter((h) => h.videoId === video.id));
-      message = 'File attached for this session.';
-      void checkSupport();
-    } catch (e) {
-      message = `Cannot read file: ${String(e)}`;
+      const r = await attachPicked([file], [video]);
+      message = r.message;
+      if (r.attached.some((v) => v.id === video.id)) void checkSupport();
     } finally {
       busy = null;
     }
@@ -131,7 +122,7 @@
     const report = {
       app: { version: __APP_VERSION__, builtAt: __BUILT_AT__ },
       device: deviceInfo(),
-      ...videoDiagnostics(video, analysis, support),
+      ...videoDiagnostics(video, analysis, support, capture.diagnostics(video.id, analysis)),
       hdrProbe: await app.db.settings.get('diag.hdrProbe'),
       quotaProbe: await app.db.settings.get('diag.quotaProbe'),
     };

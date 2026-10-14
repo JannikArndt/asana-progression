@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 
 const video = fileURLToPath(new URL('../fixtures/synthetic-practice-vp9.mp4', import.meta.url));
+const otherVideo = fileURLToPath(new URL('../fixtures/h264-bframes.mp4', import.meta.url));
 
 async function importVideo(page: Page, template: 'Primary series' | 'None' = 'Primary series') {
   await page.locator('input[type=file]').first().setInputFiles(video);
@@ -197,6 +198,44 @@ test('import → review → asana', async ({ page }) => {
   // "Cancel" of a question is the sheet's ✕ in the header.
   await page.getByRole('dialog').locator('header').getByRole('button', { name: 'Close' }).click();
   await expect(page.getByRole('dialog')).toBeHidden();
+
+  expect(errors).toEqual([]);
+});
+
+test('re-selecting files: one picker, files matched by content, the date for the Photos search', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('./');
+  // Exact frames from the app's own decoder: the fallback when Mediabunny rejects a codec string.
+  await page.evaluate(() => localStorage.setItem('asana.debug.capture', JSON.stringify({ cropper: 'none', decoder: 'own' })));
+  await importVideo(page);
+  await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
+  const first = cards(page).nth(0);
+  await first.getByRole('button', { name: 'Confirm Adho Mukha Svanasana' }).click();
+  await expect(first.locator('[data-capture=done]')).toHaveCount(1, { timeout: 60_000 });
+
+  // After a reload the file is gone: a new label asks for it, with the date to search Photos for.
+  await page.reload();
+  const second = cards(page).nth(1);
+  await second.getByRole('button', { name: /^Confirm / }).click();
+  const notice = page.locator('.notice', { hasText: 'again to save full-resolution stills' });
+  await expect(notice).toBeVisible();
+  await expect(notice.getByText('Search Photos for')).toBeVisible();
+  await expect(notice.getByRole('button', { name: /^Copy \w+ \d+, \d{4}$/ })).toBeVisible();
+  await expect(notice.locator('[data-needed-video]')).toHaveCount(1);
+  await expect(second.locator('[data-capture=needs-file]')).toHaveCount(1);
+
+  // Several files at once, in any order: the right one is attached, the other one named.
+  await notice.locator('input[type=file]').setInputFiles([otherVideo, video]);
+  await expect(page.getByText('Selected synthetic-practice-vp9.mp4. h264-bframes.mp4 is not one of the imported videos.')).toBeVisible();
+  await expect(page.locator('[data-needed-video]')).toHaveCount(0);
+  await expect(second.locator('[data-capture=done]')).toHaveCount(1, { timeout: 60_000 });
+  await expect(second.locator('.thumb img, img').first()).toBeVisible();
+
+  // The videos page knows the file is selected now.
+  await page.getByRole('link', { name: '1 video ›' }).click();
+  await expect(page.getByText('File not selected')).toHaveCount(0);
+  await expect(page.locator('[data-needed-video]')).toHaveCount(0);
 
   expect(errors).toEqual([]);
 });

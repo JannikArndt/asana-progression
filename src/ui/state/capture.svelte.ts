@@ -1,10 +1,11 @@
 import { OpfsAssetStore } from '../../storage';
 import type { ClipQuality } from '../../capture';
-import type { Asset, CompactPose, Hold } from '../../model';
+import type { Analysis, Asset, CompactPose, Hold } from '../../model';
 import type { CaptureEvent, CaptureRequest } from '../pipeline/capture-protocol';
 import { app } from './app.svelte';
 import { CROP_VERSION, type BodyBox, type PoseDetection } from '../../crop';
 import { needsCapture, recropStill, replacedAssets, withAutoCrop } from './capture-plan';
+import { captureDiagnostics, type CaptureDiagnostics } from '../diagnostics';
 
 export type CaptureStatus = 'queued' | 'capturing' | 'done' | 'error' | 'needs-file';
 
@@ -40,13 +41,23 @@ export async function deleteAssets(list: Asset[]): Promise<void> {
   app.removeAssets(list.map((a) => a.id));
 }
 
-export function debugCropper(): 'mediapipe' | 'none' {
+function debugCapture(): { cropper?: string; decoder?: string } {
   try {
     const raw = localStorage.getItem('asana.debug.capture');
-    return raw && (JSON.parse(raw) as { cropper?: string }).cropper === 'none' ? 'none' : 'mediapipe';
+    const v: unknown = raw ? JSON.parse(raw) : null;
+    return v && typeof v === 'object' ? (v as { cropper?: string; decoder?: string }) : {};
   } catch {
-    return 'mediapipe';
+    return {};
   }
+}
+
+export function debugCropper(): 'mediapipe' | 'none' {
+  return debugCapture().cropper === 'none' ? 'none' : 'mediapipe';
+}
+
+/** Debug switch `"decoder": "own"`: exact frames from our own decoder (the fallback when Mediabunny's is rejected). */
+function debugDecoder(): { exactDecoder?: 'own' } {
+  return debugCapture().decoder === 'own' ? { exactDecoder: 'own' } : {};
 }
 
 /** Crop version to record for a pose detection run by `cropper` (none for the null cropper). */
@@ -62,6 +73,8 @@ function cropVersion(cropper: string): number | null {
 class CaptureQueue {
   status = $state.raw<Record<string, CaptureStatus>>({});
   errors = $state.raw<Record<string, string>>({});
+  /** Last failure of frame poses, by video (for diagnostics). */
+  frameErrors = $state.raw<Record<string, string>>({});
   cropper = $state<string | null>(null);
   private pending = new Map<string, Hold>();
   private recropping = new Map<string, Asset>();
@@ -78,6 +91,8 @@ class CaptureQueue {
   }
 
   private set(holdId: string, s: CaptureStatus, error?: string) {
+    // A new attempt starts without the previous attempt's message.
+    if (s === 'queued') error ??= '';
     this.status = { ...this.status, [holdId]: s };
     if (error !== undefined) this.errors = { ...this.errors, [holdId]: error };
   }
@@ -113,6 +128,12 @@ class CaptureQueue {
       }
     }
     if (added) void this.pump();
+  }
+
+  /** Capture state of a video's holds for a diagnostics report. */
+  diagnostics(videoId: string, analysis: Analysis | null | undefined): CaptureDiagnostics {
+    const holds = app.holds.filter((h) => h.videoId === videoId);
+    return captureDiagnostics(holds, this.status, this.errors, analysis, app.files.has(videoId), this.frameErrors[videoId]);
   }
 
   /** Holds waiting for their video file, by video id. */
@@ -167,7 +188,7 @@ class CaptureQueue {
             break;
           case 'hold-done':
             this.cropper = ev.cropper;
-            chain.push(this.store(ev).then(() => this.set(ev.holdId, 'done')));
+            chain.push(this.store(ev).then(() => this.set(ev.holdId, 'done', ev.clipError ? `Clip: ${ev.clipError}` : '')));
             break;
           case 'hold-error':
             this.set(ev.holdId, 'error', ev.message);
@@ -193,6 +214,7 @@ class CaptureQueue {
         }),
         quality,
         cropper: debugCropper(),
+        ...debugDecoder(),
         baseUrl: import.meta.env.BASE_URL,
       };
       worker.postMessage(req);
@@ -290,10 +312,11 @@ class CaptureQueue {
         flush();
         for (const f of todo) inflight.delete(f.key);
         if (ev.message) console.warn('[capture] frame poses failed', ev.message);
+        this.frameErrors = { ...this.frameErrors, [videoId]: ev.message ?? '' };
       }
     };
     worker.addEventListener('message', listener);
-    const req: CaptureRequest = { type: 'frame-poses', jobId, file, videoId, frames: todo, cropper, baseUrl: import.meta.env.BASE_URL };
+    const req: CaptureRequest = { type: 'frame-poses', jobId, file, videoId, frames: todo, cropper, ...debugDecoder(), baseUrl: import.meta.env.BASE_URL };
     worker.postMessage(req);
   }
 

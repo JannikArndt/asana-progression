@@ -1,9 +1,27 @@
 <script lang="ts">
   import { updates } from '../update.svelte';
+  import { app } from '../state/app.svelte';
+  import { dialog } from '../state/dialog.svelte';
 
   let waiting = $state(false);
 
-  function apply() {
+  async function apply() {
+    if (!updates.isQuiet()) {
+      waiting = true;
+      return;
+    }
+    if (app.files.size) {
+      const n = app.files.size;
+      const choice = await dialog.ask({
+        title: 'Update now?',
+        message: `The app reloads, and the ${n === 1 ? 'selected video has' : `${n} selected videos have`} to be selected again for stills, clips and poses.`,
+        options: [
+          { id: 'update', label: 'Update now', kind: 'primary' },
+          { id: 'cancel', label: 'Later', kind: 'quiet' },
+        ],
+      });
+      if (choice !== 'update') return;
+    }
     waiting = !updates.applyNow();
   }
 </script>
