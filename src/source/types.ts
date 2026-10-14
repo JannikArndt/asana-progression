@@ -114,6 +114,11 @@ export interface DecoderSupport {
   config: { codec: string; codedWidth?: number; codedHeight?: number } | null;
   /** isConfigSupported() result per tried codec string (e.g. hvc1 and hev1 variants). */
   variants?: Record<string, boolean>;
+  /**
+   * Whether Mediabunny's own decoder (exact frames for stills, clips and frame poses) accepts the
+   * track: it uses the track's codec string as is, while analysis uses the first accepted variant.
+   */
+  exactFrames?: boolean;
   error?: string;
 }
 

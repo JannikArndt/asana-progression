@@ -1,5 +1,5 @@
 export type * from './types';
-export { openVideo } from './media';
+export { openVideo, type OpenOptions } from './media';
 export { fingerprint } from './fingerprint';
 export { parseQuickTimeDate, toLocalIso } from './quicktime-date';
 export { describeFrame, toneMapHlgFrame, type FrameDescription } from './hdr';

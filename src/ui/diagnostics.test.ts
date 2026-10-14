@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { assessHandover, formatBytes, videoDiagnostics, videoForReport, withoutLocation } from './diagnostics';
+import { assessHandover, captureDiagnostics, formatBytes, videoDiagnostics, videoForReport, withoutLocation } from './diagnostics';
+import type { Hold } from '../model';
 import type { VideoMeta } from '../source';
 
 const base: VideoMeta = {
@@ -76,5 +77,30 @@ describe('videoDiagnostics', () => {
     expect(d.source).toBeNull();
     expect(d.handover).toBeNull();
     expect(d.analysis).toBeNull();
+  });
+});
+
+describe('captureDiagnostics', () => {
+  const hold = (id: string, bestS: number) => ({ id, videoId: 'v', bestS }) as Hold;
+  it('counts capture states and lists the failures in time order', () => {
+    const d = captureDiagnostics(
+      [hold('b', 30.123), hold('a', 10), hold('c', 50)],
+      { a: 'error', b: 'done' },
+      { a: 'No video frame at 10.00 s', b: 'Clip: encoder failed', c: '' },
+      { candidates: [{ status: 'open', bestS: 10 }], poses: {}, sampleHz: 4 } as never,
+      false,
+      'No pose model',
+    );
+    expect(d).toEqual({
+      fileSelected: false,
+      holds: { error: 1, done: 1, unknown: 1 },
+      errors: [
+        { bestS: 10, status: 'error', message: 'No video frame at 10.00 s' },
+        { bestS: 30.12, status: 'done', message: 'Clip: encoder failed' },
+      ],
+      framePoses: { missing: 1, error: 'No pose model' },
+    });
+    expect(videoDiagnostics({ id: 'v', fileName: 'x', meta: undefined } as never, null, null, d).capture).toBe(d);
+    expect(captureDiagnostics([], {}, {}, null, true).framePoses).toEqual({ missing: 0, error: null });
   });
 });

@@ -12,7 +12,6 @@
   import { combinedSignal, detailLength, firstBelow, followWindow, groupSegments, videoOffsets, windowAround, type Range } from '../components/session-timeline';
   import { formatDay } from '../format';
   import { expectedHolds, nextEntries, type Label } from '../../labeling';
-  import type { Video } from '../../model';
   import { holdReps } from '../../progression';
   import { app } from '../state/app.svelte';
   import { pipeline } from '../pipeline/controller.svelte';
@@ -20,9 +19,10 @@
   import { routeHash, router } from '../state/router.svelte';
   import { dialog } from '../state/dialog.svelte';
   import { SessionReview } from '../state/review.svelte';
-  import { coverageRows, formatCoords, placeLabel, placeNames, sessionCoords, sessionSpanS, type GapPart, type SessionEntry } from '../state/session-data';
-  import { capture } from '../state/capture.svelte';
-  import { reattachVideo, setManualCrop } from '../state/hold-actions';
+  import { coverageRows, formatCoords, missingPoseFrames, placeLabel, placeNames, sessionCoords, sessionSpanS, type GapPart, type SessionEntry } from '../state/session-data';
+  import { capture, debugCropper } from '../state/capture.svelte';
+  import { setManualCrop } from '../state/hold-actions';
+  import VideoFinder from '../components/VideoFinder.svelte';
 
   interface Props {
     id: string;
@@ -504,17 +504,29 @@
     }
   }
 
-  const waiting = $derived(capture.waitingForFile(review.holds));
-  let attachError = $state<string | null>(null);
-
-  async function reattach(e: Event, video: Video) {
-    const input = e.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file) return;
-    attachError = await reattachVideo(video, file);
-    if (!attachError) review.requestPoses(video.id);
-  }
+  /**
+   * Videos whose file is needed: for stills and clips of labeled holds, or for the poses of open
+   * cards (suggestions and "Confirm all" use them; not with the debug null cropper).
+   */
+  const needFile = $derived.by(() => {
+    const stills = capture.waitingForFile(review.holds);
+    const poseModel = debugCropper() !== 'none';
+    const poses = new Set(
+      review.videos.filter((v) => poseModel && review.analyses[v.id] && missingPoseFrames(review.analyses[v.id]!, true).length).map((v) => v.id),
+    );
+    return { stills, poses, videos: review.videos.filter((v) => !app.files.has(v.id) && (stills.has(v.id) || poses.has(v.id))) };
+  });
+  let attachMessage = $state<string | null>(null);
+  const needText = $derived.by(() => {
+    const { videos, stills } = needFile;
+    const one = videos.length === 1;
+    const files = one ? 'the video' : `the ${videos.length} videos`;
+    const forStills = videos.some((v) => stills.has(v.id));
+    const forPoses = videos.some((v) => needFile.poses.has(v.id));
+    if (forStills && forPoses) return `Select ${files} again to save full-resolution stills and clips of the labeled holds and to read the poses of the open cards.`;
+    if (forStills) return `Select ${files} again to save full-resolution stills and clips of the labeled holds.`;
+    return `Select ${files} again to read the poses of the open cards (better suggestions and “Confirm all”).`;
+  });
 
   const scrubEntry = $derived(scrub?.key ? review.entry(scrub.key) : undefined);
   const pickerEntry = $derived(pickerKey ? review.entry(pickerKey) : undefined);
@@ -585,16 +597,13 @@
       </div>
     {/if}
 
-    {#if waiting.size || unanalysed.length}
+    {#if needFile.videos.length || attachMessage || unanalysed.length}
       <div class="card notice">
-        {#each review.videos.filter((v) => waiting.has(v.id)) as video (video.id)}
-          <p class="small">Select <strong>{video.fileName}</strong> again to save full-resolution stills and clips of the labeled holds.</p>
-          <label class="btn">
-            Select video
-            <input class="visually-hidden" type="file" accept="video/*" onchange={(e) => reattach(e, video)} />
-          </label>
-        {/each}
-        {#if attachError}<p class="small error">{attachError}</p>{/if}
+        {#if needFile.videos.length}
+          <p class="small">{needText}</p>
+          <VideoFinder videos={needFile.videos} onresult={(m) => (attachMessage = m)} />
+        {/if}
+        {#if attachMessage}<p class="small" aria-live="polite">{attachMessage}</p>{/if}
         {#each unanalysed as video (video.id)}
           <p class="small muted">{video.fileName} is not analysed yet. Import the file again to process it.</p>
         {/each}
@@ -668,6 +677,7 @@
                 selected={selectedKey === entry.key}
                 thumb={entry.hold ? app.assets.find((a) => a.holdId === entry.hold!.id && a.kind === 'thumb') : undefined}
                 captureStatus={entry.hold ? capture.status[entry.hold.id] : undefined}
+                captureError={entry.hold ? capture.errors[entry.hold.id] || undefined : undefined}
                 rep={entry.hold ? reps.get(entry.hold.id) : undefined}
                 expected={expectedAt(entry)}
                 onsplit={(k) => review.splitInto(entry.key, k)}
@@ -829,10 +839,6 @@
 
   .notice .btn {
     align-self: flex-start;
-  }
-
-  .error {
-    color: var(--color-danger);
   }
 
   .controls {

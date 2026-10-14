@@ -1,4 +1,5 @@
-import type { Analysis, Video } from '../model';
+import type { Analysis, Hold, Video } from '../model';
+import { missingPoseFrames } from './state/session-data';
 import type { DecoderSupport, VideoMeta } from '../source';
 
 export interface HandoverAssessment {
@@ -41,7 +42,7 @@ export function videoForReport<T extends { meta?: Record<string, unknown> }>(v: 
  * Diagnostics of one video (no location): stored record, source metadata, handover verdict,
  * decoder support (null unless checked with the file attached), processing stats and analysis.
  */
-export function videoDiagnostics(video: Video, analysis: Analysis | null | undefined, decoderSupport: DecoderSupport | null = null) {
+export function videoDiagnostics(video: Video, analysis: Analysis | null | undefined, decoderSupport: DecoderSupport | null = null, capture: CaptureDiagnostics | null = null) {
   const meta = video.meta as unknown as VideoMeta | undefined;
   return {
     video: { ...video, meta: undefined },
@@ -52,6 +53,42 @@ export function videoDiagnostics(video: Video, analysis: Analysis | null | undef
     analysis: analysis
       ? { samples: analysis.sampleCount, frame: `${analysis.frameWidth}×${analysis.frameHeight}`, candidates: analysis.candidates.length, threshold: analysis.threshold, singleStill: analysis.singleStill }
       : null,
+    capture,
+  };
+}
+
+export interface CaptureDiagnostics {
+  /** The video file is selected in this page session. */
+  fileSelected: boolean;
+  /** Labeled holds of the video, by capture status (this page session; "unknown" = not requested yet). */
+  holds: Record<string, number>;
+  /** Failed captures and failed clips (the still was saved): hold best-frame time and message. */
+  errors: Array<{ bestS: number; status: string; message: string }>;
+  /** Candidate best frames without a pose, and the last frame-pose failure. */
+  framePoses: { missing: number; error: string | null };
+}
+
+/** Capture state of a video's holds for a diagnostics report (statuses and messages live in the capture queue). */
+export function captureDiagnostics(
+  holds: Hold[],
+  status: Record<string, string>,
+  errors: Record<string, string>,
+  analysis: Analysis | null | undefined,
+  fileSelected: boolean,
+  frameError?: string,
+): CaptureDiagnostics {
+  const counts: Record<string, number> = {};
+  const failed: CaptureDiagnostics['errors'] = [];
+  for (const h of [...holds].sort((a, b) => a.bestS - b.bestS)) {
+    const st = status[h.id] ?? 'unknown';
+    counts[st] = (counts[st] ?? 0) + 1;
+    if (errors[h.id]) failed.push({ bestS: Math.round(h.bestS * 100) / 100, status: st, message: errors[h.id]! });
+  }
+  return {
+    fileSelected,
+    holds: counts,
+    errors: failed,
+    framePoses: { missing: analysis ? missingPoseFrames(analysis).length : 0, error: frameError || null },
   };
 }
 

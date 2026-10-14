@@ -11,6 +11,8 @@ export type CaptureRequest =
       holds: Array<HoldSpan & { still: boolean; clip: boolean }>;
       quality: ClipQuality;
       cropper: 'mediapipe' | 'none';
+      /** Debug: exact frames from our own decoder. */
+      exactDecoder?: 'own';
       baseUrl: string;
     }
   | {
@@ -29,6 +31,7 @@ export type CaptureRequest =
       videoId: string;
       frames: Array<{ key: string; atS: number }>;
       cropper: 'mediapipe' | 'none';
+      exactDecoder?: 'own';
       baseUrl: string;
     }
   | {
@@ -55,6 +58,8 @@ export type CaptureEvent =
       pose?: CompactPose | null;
       /** Name of the cropper that ran ("mediapipe-pose" or "none"). */
       cropper: string;
+      /** The clip failed (the still and thumbnail were saved). */
+      clipError?: string;
     }
   | { type: 'recrop-done'; jobId: number; holdId: string; crop: BodyBox | null; pose?: CompactPose | null; cropper: string }
   | { type: 'frame-pose'; jobId: number; videoId: string; key: string; pose: CompactPose | null }

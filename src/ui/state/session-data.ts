@@ -1,6 +1,6 @@
 /** Pure helpers joining sessions, videos, analyses and holds (tested; no I/O). */
 import type { HistoryEntry, ReviewItem } from '../../labeling';
-import type { Analysis, CompactPose, Hold, ReviewCandidate, Session, SessionLocation, Video } from '../../model';
+import { poseKey, type Analysis, type CompactPose, type Hold, type ReviewCandidate, type Session, type SessionLocation, type Video } from '../../model';
 import type { GeoLocation } from '../../source';
 
 export function dayOf(iso: string | null | undefined): string {
@@ -531,4 +531,21 @@ export function sessionTinyFrame(session: Session, summaries: Record<string, { s
     if (n > 0 && (!best || n > best.count)) best = { videoId: id, count: n };
   }
   return best ? { videoId: best.videoId, index: Math.floor(best.count / 2) } : null;
+}
+
+/**
+ * Best frames of an analysis without a stored pose (`poseKey`, time): of every candidate that is
+ * not "Not a pose", or (`openOnly`) of the unlabeled ones, which need it for suggestions.
+ */
+export function missingPoseFrames(a: Pick<Analysis, 'candidates' | 'poses' | 'sampleHz'>, openOnly = false): Array<{ key: string; atS: number }> {
+  const seen = new Set<string>();
+  const out: Array<{ key: string; atS: number }> = [];
+  for (const c of a.candidates) {
+    if (c.status === 'dismissed' || (openOnly && c.status !== 'open')) continue;
+    const key = poseKey(c.bestS, a.sampleHz);
+    if ((a.poses && key in a.poses) || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key, atS: c.bestS });
+  }
+  return out;
 }

@@ -8,7 +8,9 @@
   import { formatDay } from '../format';
   import { app } from '../state/app.svelte';
   import { capture, type PoseResult } from '../state/capture.svelte';
-  import { reattachVideo } from '../state/hold-actions';
+  import { attachPicked } from '../state/hold-actions';
+  import { photosSearchDate, recordedClock } from '../state/file-match';
+  import { copyText } from '../diagnostics';
   import { dismissOffset, dismissProgress, gestureAxis, isTap, shouldDismiss, type Axis } from './viewer-gestures';
 
   interface Props {
@@ -102,13 +104,24 @@
     void capture.pose(still).then((r) => (poses = { ...poses, [key]: r }));
   });
 
+  let attachMessage = $state<string | null>(null);
+  let attaching = $state(false);
+  let copied = $state(false);
+  const searchDate = $derived(video ? photosSearchDate(video.recordedAt ?? video.importedAt) : '');
+
   async function reattach(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
+    const files = [...(input.files ?? [])];
     input.value = '';
-    if (file && video) attachError = await reattachVideo(video, file);
+    if (!files.length || !video) return;
+    attaching = true;
+    try {
+      const r = await attachPicked(files, [video]);
+      attachMessage = r.attached.some((v) => v.id === video?.id) ? null : r.message;
+    } finally {
+      attaching = false;
+    }
   }
-  let attachError = $state<string | null>(null);
 
   onMount(() => {
     const ro = new ResizeObserver(() => {
@@ -311,12 +324,17 @@
       {/if}
       {#if video}
         <div class="reattach">
-          <span>Select {video.fileName} to save the still of this hold.</span>
-          <label class="btn small">
-            Select video
-            <input class="visually-hidden" type="file" accept="video/*" onchange={reattach} />
+          <span>Select {video.fileName} to save the still of this hold (recorded {[formatDay(video.recordedAt ?? video.importedAt), recordedClock(video.recordedAt)].filter(Boolean).join(', ')}).</span>
+          {#if searchDate}
+            <button class="btn small" type="button" onclick={async () => (copied = await copyText(searchDate))} aria-label="Copy {searchDate} for the Photos search">
+              {copied ? 'Copied' : `Copy “${searchDate}”`}
+            </button>
+          {/if}
+          <label class="btn small" aria-disabled={attaching}>
+            {attaching ? 'Checking…' : 'Select video'}
+            <input class="visually-hidden" type="file" accept="video/*" multiple disabled={attaching} onchange={reattach} />
           </label>
-          {#if attachError}<span class="error" role="alert">{attachError}</span>{/if}
+          {#if attachMessage}<span class="error" role="alert">{attachMessage}</span>{/if}
         </div>
       {:else if status === 'queued' || status === 'capturing'}
         <p class="saving">Saving the still…</p>

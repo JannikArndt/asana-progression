@@ -37,7 +37,7 @@ API). `src/architecture.test.ts` enforces the allowed dependencies:
 | `model` | Shared data model (types), `newId`, catalog seed + Primary series template, `CompactPose` codec (`encodePose`/`decodePose`, `poseKey`) + float16 | `detection` types |
 | `storage` | `MetadataStore` (IndexedDB, one repository per entity), OPFS sample files, quota helpers | `model` |
 | `labeling` | Suggestion engine; review edits on candidates (merge, split, add missed, nudge, reconcile); catalog search; scoring detection against labeled holds in review edits (`evaluate.ts`, `matchDetection`); pose classifier (`pose.ts`) + whole-session template alignment (`align.ts`) | `model`, `detection` (best-frame helpers on signals, `findCandidates`) |
-| `capture` | Still (exact frame → JPEG q 0.9 + 512 px thumb + preview for the cropper; `framePreview` = the preview alone) and clip (720p/1080p H.264 re-encode via WebCodecs, or `original` = stream copy snapped to key frames; falls back to `original` when AVC encoding is unavailable) | `source`, `model` |
+| `capture` | Still (exact frame → JPEG q 0.9 + 512 px thumb + preview for the cropper; `framePreview` = the preview alone) and clip (720p/1080p H.264 re-encode via WebCodecs, or `original` = stream copy snapped to key frames; falls back to `original` when AVC encoding is unavailable or fails; a failed clip never costs the still) | `source`, `model` |
 | `crop` | `Cropper` interface; MediaPipe Pose Landmarker (lite, CPU, lazy, Cache Storage `mediapipe-pose-v1` for offline) → body box + coarse posture class (+ image landmarks with z, world landmarks); `nullCropper` fallback | `model` |
 | `progression` | Views over holds + assets: items per asana (oldest first), display crop, tile aspect, grid density, swipe, flipbook timing | `model` |
 | `ui` | Screens, components, workers, research export + detection lab (`ui/research/`); the **only** place modules are wired together | public APIs of all modules |
@@ -155,7 +155,8 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   the session's video files (`#/session/<id>/videos`, `SessionVideos.svelte`, linked "N videos ›"
   top right of the review: order with ↑/↓ or "Sort by recording time" → `SessionReview.setVideoOrder`,
   recording time (`formatRecordedAt`, own UTC offset) and its source, place on the session timeline,
-  "Select file", Debug panel per video, "Copy diagnostics of all videos" via `videoDiagnostics`),
+  the re-select notice for files not selected in this page session, Debug panel per video, "Copy
+  diagnostics of all videos" via `videoDiagnostics`),
   asana progression
   (`#/asana/<id>`). `#/video/<id>` redirects to the session. Splitting a practice into several
   videos is a technical matter: the review shows asanas only, file details live on the videos page.
@@ -183,13 +184,41 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
 - Labeled holds keep `templateEntryIndex`; `alignToTemplate` re-maps it whenever the session's
   template was switched or edited, so suggestions never follow stale indices.
 
+### Re-selecting video files
+
+`File` objects live only for the page session (`app.files`), so after a reload or an update the
+files are needed again for stills, clips and frame poses. One flow everywhere (review notice,
+videos page, asana page; `components/VideoFinder.svelte`; the hold viewer and Debug panel use
+`attachPicked` directly):
+
+- One picker (`multiple`) for all needed videos, any order and any session:
+  `hold-actions.attachPicked` → `file-match.matchFiles`. Fast path: only videos of the file's
+  size are fingerprinted, with their stored duration (8 MiB read, no demuxing); otherwise the file
+  is opened: its own fingerprint, else a video with the same length (± 0.5 s) and the same
+  recording minute or file-name stem is a "converted copy" (the Photos picker re-encodes unless
+  its Format is "Current"), used only after a dialog. Each video takes one file. One line reports
+  the result (`attachSummary`: selected, of another session, not imported, not readable); hosts show
+  it also after the notice is gone. `afterAttach` requests captures and missing frame poses.
+- To find the files: per recording day the date to type into the Photos search, copyable
+  (`photosSearchDate`: the recording's own date in the device language, e.g. "October 14, 2026";
+  Apple: Photos search takes dates and narrows by media type such as "Video"), and per video its
+  first analysis frame, wall-clock time (`recordedClock`) and length (`formatTime`, like Photos).
+- The review asks for files for stills of labeled holds **and** for the poses of open cards
+  (`missingPoseFrames(a, true)`, not with the debug null cropper), with matching wording.
+
 ### Capture and crop (milestone 3)
 
 - `ui/state/capture.svelte.ts` (`CaptureQueue`) captures in `ui/pipeline/capture.worker.ts`, one
   video at a time, for every labeled hold whose still/thumb/clip is missing or stale
   (`capture-plan.ts`: best frame or clip window changed, clip quality changed). Needs the video
-  file picked in this page session; otherwise the hold shows "re-attach" (review banner checks the
-  fingerprint).
+  file picked in this page session; otherwise the hold shows "needs-file" and the screen offers
+  the re-select notice (see "Re-selecting video files").
+- `captureHold` captures the still first; a failing clip returns `clipError` instead of throwing
+  (the still and thumb are saved, the card says "Still saved; the clip failed: …"), a clip that
+  is not wanted is not captured. 720p/1080p encoding that throws falls back to the stream copy.
+  Failed captures show their message on the card ("Saving the still failed: …");
+  `capture.diagnostics(videoId, analysis)` adds a `capture` section (hold statuses, messages,
+  missing frame poses, last frame-pose error) to both diagnostics reports.
 - Files live in OPFS under `assets/<assetId>.<ext>` (`OpfsAssetStore`, written in the worker with
   sync access handles); records in the `assets` store. Replaced assets are deleted.
 - The cropper runs on the 640 px preview; `crop.auto` = body box + padding. BlazePose has no
@@ -233,7 +262,8 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   come from optional callback props.
 - MediaPipe wasm loader/binary are emitted by the `mediapipe-wasm` Vite plugin at
   `<base>mediapipe/`, the model is `public/models/pose_landmarker_lite.task` (Apache-2.0).
-  Debug switch: `localStorage['asana.debug.capture'] = '{"cropper":"none"}'` (used by e2e).
+  Debug switch: `localStorage['asana.debug.capture'] = '{"cropper":"none"}'` (used by e2e);
+  `"decoder":"own"` takes exact frames from the app's own decoder (`source/exact.ts`, below).
 - Safari tone-maps HLG in the decoder, so stills are SDR; only `original` clips keep HDR.
 
 ### Progression (milestone 4)
@@ -433,9 +463,15 @@ recompute candidates/preMerge with the defaults before committing a fixture.
   when absent. Fixtures `location-keys.mov`, `location-udta.mov`.
 - Fingerprint: SHA-256(first 4 MiB ‖ last 4 MiB ‖ size ‖ duration ms).
 - Re-import of a known fingerprint always asks: "Reuse labels and re-capture assets" /
-  "Import as a new session" / "Cancel" (an unfinished job asks Resume / Start over / Cancel).
+  "Import as a new session" / "Cancel" (an unfinished job asks Resume / Start over / Cancel);
+  with more files in the selection the answer applies to its other known files too.
 - Mediabunny reports HEVC codec strings as `hev1.…`; `resolveDecoderConfig` tries both `hev1`
-  and `hvc1` with `VideoDecoder.isConfigSupported` and uses the first accepted one.
+  and `hvc1` with `VideoDecoder.isConfigSupported` and uses the first accepted one. Exact frames
+  (stills, clips, frame poses) normally come from Mediabunny's `VideoSampleSink`, which uses the
+  track's codec string as is; when `track.canDecode()` is false but a variant is accepted,
+  `frameAt`/`frames` use our own `VideoDecoder` on the resolved config (`source/exact.ts`: from the
+  key packet before t, presentation-order output like the sampler). `decoderSupport().exactFrames`
+  reports `canDecode()` in the diagnostics.
 - HDR probe (Video → hold → "Full frame"): draws the exact frame into an sRGB and a Display-P3
   canvas, a software HLG→SDR tone map when the frame is readable as `I420P10`, and a native
   `<video>` for reference; reports pixel format, colour space and luma range; the user's verdict is
@@ -464,7 +500,9 @@ on `main` only and needs both. Vite `base: '/asana-progression/'`.
 On `visibilitychange` → visible the app fetches it with `cache: 'no-store'`; a new version shows a
 subtle "Update available" pill. Reload happens only when quiet (no analysis, capture, backup
 export/import or prepared backup file — register via `updates.addQuietCheck`; labels are never
-unsaved): when the page is hidden, or on tap.
+unsaved): when the page is hidden, or on tap. The automatic reload (page hidden) also waits while
+a video file is selected (`updates.addHiddenCheck`: switching to Photos to find the next file hides
+the page, and a reload drops the files); the tap then asks "Update now?" first.
 
 ## Design
 
@@ -574,6 +612,13 @@ Fill in from the user's device reports (Settings → "Copy diagnostics report", 
    alignment-based suggestions, "Confirm all" (see Labeling, "Pose alignment").
 
 Open (needs the user):
+
+- Full-resolution stills failed on two portrait HEVC HLG Photos renders (888×1244 and 882×1116,
+  `rotation` 90, iOS Safari 27). The report had no capture message (file not selected, so no
+  `decoderSupport` either). Since then a clip failure keeps the still, encode failures fall back
+  to the copy, the card shows the message, and the report has `capture` and
+  `decoderSupport.exactFrames`; if Mediabunny rejected `hev1`, `source/exact.ts` now decodes
+  them. Re-check on the iPhone: select the files, then "Copy diagnostics of all videos".
 
 - On the iPhone: frame-pose time per candidate (estimated 0.2–0.4 s on a 4K HEVC file) and the
   pose suggestions / "Confirm all" on a new session.

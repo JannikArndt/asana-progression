@@ -36,6 +36,8 @@
     // A prepared backup file would be lost, e.g. while the share sheet hides the page.
     updates.addQuietCheck(() => !backup.exporting && !backup.importing && !backup.ready);
     updates.addQuietCheck(() => !research.busy && !research.ready);
+    // Selected video files are lost on reload: switching to Photos to find the next file hides the page.
+    updates.addHiddenCheck(() => app.files.size === 0);
     updates.start();
     void updates.check();
   });

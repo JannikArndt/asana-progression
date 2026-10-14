@@ -7,10 +7,11 @@
   import type { Video } from '../../model';
   import type { VideoMeta } from '../../source';
   import { app } from '../state/app.svelte';
+  import { capture } from '../state/capture.svelte';
   import { router } from '../state/router.svelte';
   import { SessionReview } from '../state/review.svelte';
   import { moveItem, orderVideoIds } from '../state/session-data';
-  import { reattachVideo } from '../state/hold-actions';
+  import VideoFinder from '../components/VideoFinder.svelte';
   import { copyText, deviceInfo, videoDiagnostics } from '../diagnostics';
 
   interface Props {
@@ -24,8 +25,8 @@
    */
   const review = new SessionReview();
   let debugOpen = $state<Record<string, boolean>>({});
-  let attachError = $state<Record<string, string | null>>({});
   let message = $state<string | null>(null);
+  let attachMessage = $state<string | null>(null);
 
   $effect(() => {
     if (app.ready) void review.load(id);
@@ -37,6 +38,8 @@
   const ids = $derived(review.videos.map((v) => v.id));
   const byRecording = $derived(orderVideoIds(ids, review.videos));
   const sorted = $derived(byRecording.join('\n') === ids.join('\n'));
+  /** Analysed videos whose file is not selected in this page session. */
+  const missing = $derived(review.videos.filter((v) => review.analyses[v.id] && !app.files.has(v.id)));
 
   const recordedFrom: Record<string, string> = { quicktime: 'camera time', mvhd: 'container time, can be the export time', file: 'file date' };
   function sourceOf(video: Video): string | null {
@@ -58,16 +61,6 @@
     await review.setVideoOrder(moveItem(ids, index, delta));
   }
 
-  async function reattach(e: Event, video: Video) {
-    const input = e.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file) return;
-    const error = await reattachVideo(video, file);
-    attachError = { ...attachError, [video.id]: error };
-    if (!error) review.requestPoses(video.id);
-  }
-
   async function supportOf(videoId: string) {
     const src = app.source(videoId);
     if (!src) return null;
@@ -85,7 +78,9 @@
       app: { version: __APP_VERSION__, builtAt: __BUILT_AT__ },
       device: deviceInfo(),
       session: { id: session.id, date: session.date, videoIds: session.videoIds, templateId: session.templateId ?? null },
-      videos: await Promise.all(review.videos.map(async (v) => videoDiagnostics(v, review.analyses[v.id], await supportOf(v.id)))),
+      videos: await Promise.all(
+        review.videos.map(async (v) => videoDiagnostics(v, review.analyses[v.id], await supportOf(v.id), capture.diagnostics(v.id, review.analyses[v.id]))),
+      ),
       hdrProbe: await app.db.settings.get('diag.hdrProbe'),
       quotaProbe: await app.db.settings.get('diag.quotaProbe'),
     };
@@ -113,6 +108,19 @@
       {#if !sorted}
         <button class="btn sort" type="button" onclick={() => review.setVideoOrder(byRecording)}>Sort by recording time</button>
       {/if}
+    {/if}
+
+    {#if missing.length || attachMessage}
+      <div class="card notice">
+        {#if missing.length}
+          <p class="small">
+            {missing.length === 1 ? 'One video is' : `${missing.length} videos are`} not selected since the app was opened. Full-resolution stills, clips and
+            poses need the files.
+          </p>
+          <VideoFinder videos={missing} onresult={(m) => (attachMessage = m)} />
+        {/if}
+        {#if attachMessage}<p class="small" aria-live="polite">{attachMessage}</p>{/if}
+      </div>
     {/if}
 
     <ol class="list">
@@ -150,16 +158,7 @@
             {/if}
           </div>
 
-          {#if !app.files.has(video.id)}
-            <div class="attach">
-              <label class="btn">
-                Select file
-                <input class="visually-hidden" type="file" accept="video/*" onchange={(e) => reattach(e, video)} />
-              </label>
-              <span class="small faint">Needed for full-resolution stills and clips.</span>
-            </div>
-            {#if attachError[video.id]}<p class="small error">{attachError[video.id]}</p>{/if}
-          {/if}
+          {#if analysis && !app.files.has(video.id)}<p class="small faint">File not selected</p>{/if}
 
           <button
             class="disclosure"
@@ -220,10 +219,6 @@
 
   .small {
     font-size: var(--text-s);
-  }
-
-  .error {
-    color: var(--color-danger);
   }
 
   .sort {
@@ -297,11 +292,16 @@
     opacity: 0.4;
   }
 
-  .attach {
+  .notice {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
+    flex-direction: column;
     gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .notice p,
+  .item > p {
+    margin: 0;
   }
 
   .disclosure {

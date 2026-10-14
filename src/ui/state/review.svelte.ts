@@ -24,6 +24,7 @@ import {
   combineSessions,
   historyFrom,
   itemKey,
+  missingPoseFrames,
   parseItemKey,
   sameDaySessions,
   sessionEntries,
@@ -167,10 +168,7 @@ export class SessionReview {
   requestPoses(videoId?: string) {
     for (const [id, a] of Object.entries(this.analyses)) {
       if (videoId && id !== videoId) continue;
-      const frames = a.candidates
-        .filter((c) => c.status !== 'dismissed')
-        .map((c) => ({ key: poseKey(c.bestS, a.sampleHz), atS: c.bestS }))
-        .filter((f) => !(a.poses && f.key in a.poses));
+      const frames = missingPoseFrames(a);
       if (frames.length) capture.requestFramePoses(id, frames);
     }
   }

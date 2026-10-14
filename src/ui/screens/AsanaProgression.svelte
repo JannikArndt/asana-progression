@@ -15,8 +15,9 @@
   import { app } from '../state/app.svelte';
   import { router } from '../state/router.svelte';
   import { capture } from '../state/capture.svelte';
-  import { chooseBestFrame, reattachVideo, setManualCrop } from '../state/hold-actions';
-  import { asanaFamilies, familyLetter, type Video } from '../../model';
+  import { chooseBestFrame, setManualCrop } from '../state/hold-actions';
+  import VideoFinder from '../components/VideoFinder.svelte';
+  import { asanaFamilies, familyLetter } from '../../model';
   import { formatDay } from '../format';
 
   interface Props {
@@ -113,14 +114,7 @@
     return app.videos.filter((v) => ids.has(v.id));
   });
   const waitingHolds = $derived(items.filter((i) => capture.status[i.hold.id] === 'needs-file').length);
-  let attachError = $state<string | null>(null);
-
-  async function reattach(e: Event, video: Video) {
-    const input = e.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-    if (file) attachError = await reattachVideo(video, file);
-  }
+  let attachMessage = $state<string | null>(null);
 
   const QUALITY: Record<string, string> = { '720p': '720p', '1080p': '1080p', original: 'Original' };
 
@@ -232,20 +226,17 @@
       </div>
     </div>
 
-    {#if waiting.length}
+    {#if waiting.length || attachMessage}
       <div class="card notice">
-        <p class="small">
-          {waitingHolds}
-          {waitingHolds === 1 ? 'hold has' : 'holds have'} no full-resolution still yet. Select the video{waiting.length === 1 ? '' : 's'} to capture
-          {waitingHolds === 1 ? 'it' : 'them'}:
-        </p>
-        {#each waiting as video (video.id)}
-          <label class="btn">
-            {video.fileName} · {formatDay(video.recordedAt ?? video.importedAt)}
-            <input class="visually-hidden" type="file" accept="video/*" onchange={(e) => reattach(e, video)} />
-          </label>
-        {/each}
-        {#if attachError}<p class="small error" role="alert">{attachError}</p>{/if}
+        {#if waiting.length}
+          <p class="small">
+            {waitingHolds}
+            {waitingHolds === 1 ? 'hold has' : 'holds have'} no full-resolution still yet. Select the video{waiting.length === 1 ? '' : 's'} to capture
+            {waitingHolds === 1 ? 'it' : 'them'}.
+          </p>
+          <VideoFinder videos={waiting} onresult={(m) => (attachMessage = m)} />
+        {/if}
+        {#if attachMessage}<p class="small" aria-live="polite">{attachMessage}</p>{/if}
       </div>
     {/if}
 
@@ -532,18 +523,6 @@
 
   .notice p {
     margin: 0;
-  }
-
-  .notice .btn {
-    align-self: flex-start;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .error {
-    color: var(--color-danger);
   }
 
   .note {

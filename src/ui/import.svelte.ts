@@ -7,7 +7,7 @@ import { dialog } from './state/dialog.svelte';
 import { router } from './state/router.svelte';
 import { invalidateSamples } from './state/samples';
 import { pipeline } from './pipeline/controller.svelte';
-import { capture } from './state/capture.svelte';
+import { afterAttach } from './state/hold-actions';
 import { formatTime } from './components/timeline';
 
 export const importQueue = $state({ index: 0, total: 0 });
@@ -54,6 +54,26 @@ async function chooseTemplate(meta: VideoMeta): Promise<string | undefined | nul
   return choice.startsWith('t:') ? choice.slice(2) : undefined;
 }
 
+/** "Reuse labels" / "Import as a new session" / "Cancel" for a file imported before (`more`: the answer applies to later such files too). */
+function askKnownVideo(file: File, existing: Video, more: boolean): Promise<string> {
+  return dialog.ask({
+    title: 'This video was imported before',
+    message:
+      `${file.name} matches “${existing.fileName}” recorded ${dateLabel(existing.recordedAt)}.` +
+      (more ? ' The answer also applies to the other videos of this selection that were imported before.' : ''),
+    options: [
+      {
+        id: 'reuse',
+        label: 'Reuse labels and re-capture assets',
+        detail: 'Keeps the existing analysis and attaches this file for full-resolution frames.',
+        kind: 'primary',
+      },
+      { id: 'new', label: 'Import as a new session', detail: 'Analyses the video again as a separate entry.' },
+      { id: 'cancel', label: 'Cancel', kind: 'quiet' },
+    ],
+  });
+}
+
 /** Import flow: probe → fingerprint → duplicate/resume dialog → session → quota check → process. */
 export async function importFiles(files: File[]): Promise<void> {
   // A file picked right after launch: templates and sessions must be loaded for the questions below.
@@ -67,6 +87,8 @@ export async function importFiles(files: File[]): Promise<void> {
   const batchVideos = new Map<string, string>();
   const sessionContaining = async (videoId: string | undefined): Promise<Session | undefined> =>
     videoId ? (await db.sessions.findBy('videoIds', videoId))[0] : undefined;
+  /** The answer for a file imported before, kept for the other such files of this selection. */
+  let knownChoice: string | null = null;
   for (const [i, file] of files.entries()) {
     importQueue.index = i;
     let meta: VideoMeta;
@@ -124,25 +146,14 @@ export async function importFiles(files: File[]): Promise<void> {
     } else {
       const existing = (await db.videos.findBy('fingerprint', fp))[0];
       if (existing) {
-        const choice = await dialog.ask({
-          title: 'This video was imported before',
-          message: `${file.name} matches “${existing.fileName}” recorded ${dateLabel(existing.recordedAt)}.`,
-          options: [
-            {
-              id: 'reuse',
-              label: 'Reuse labels and re-capture assets',
-              detail: 'Keeps the existing analysis and attaches this file for full-resolution frames.',
-              kind: 'primary',
-            },
-            { id: 'new', label: 'Import as a new session', detail: 'Analyses the video again as a separate entry.' },
-            { id: 'cancel', label: 'Cancel', kind: 'quiet' },
-          ],
-        });
+        const more = i < files.length - 1;
+        const choice: string = knownChoice ?? (await askKnownVideo(file, existing, more));
+        if (more) knownChoice ??= choice;
         if (choice === 'cancel') continue;
         if (choice === 'new') asNewSession = true;
         if (choice === 'reuse') {
           app.attachFile(existing.id, file, meta);
-          capture.request(app.holds.filter((h) => h.videoId === existing.id));
+          await afterAttach(existing.id);
           if (await db.analyses.get(existing.id)) {
             lastVideoId = existing.id;
             continue;
