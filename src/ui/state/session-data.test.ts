@@ -25,6 +25,10 @@ import {
   toReviewItems,
   sessionSpanS,
   videoLocation,
+  recordedAtSource,
+  weakRecordedAt,
+  datetimeInputValue,
+  recordedAtFromInput,
   distanceM,
   placeNameNear,
   unnamedNear,
@@ -452,5 +456,38 @@ describe('missingPoseFrames', () => {
     ]);
     const posed = { ...a, poses: { '20': null } };
     expect(missingPoseFrames(posed, true)).toEqual([{ key: '260', atS: 65 }]);
+  });
+});
+
+describe('recording times', () => {
+  const v = (recordedAt: string | null, source?: string) => ({ recordedAt, meta: source === undefined ? undefined : { recordedAtSource: source } });
+
+  it('treats container, file and unknown times as not the recording date', () => {
+    expect(recordedAtSource(v('2025-08-28T07:04:43+02:00', 'udta'))).toBe('udta');
+    expect(recordedAtSource(v('x'))).toBeNull();
+    expect(weakRecordedAt(v('2025-08-28T07:04:43+02:00', 'quicktime'))).toBe(false);
+    expect(weakRecordedAt(v('2025-08-28T07:04:43+02:00', 'udta'))).toBe(false);
+    expect(weakRecordedAt(v('2025-08-28T07:04:43+02:00', 'manual'))).toBe(false);
+    expect(weakRecordedAt(v('2026-10-10T11:20:06.000Z', 'mvhd'))).toBe(true);
+    expect(weakRecordedAt(v('2026-10-10T13:20:06+02:00', 'file'))).toBe(true);
+    expect(weakRecordedAt(v('2026-10-10T13:20:06+02:00'))).toBe(true);
+    expect(weakRecordedAt(v(null, 'quicktime'))).toBe(true);
+  });
+
+  it('round-trips the datetime-local value in the recording\'s own time zone', () => {
+    expect(datetimeInputValue('2025-08-28T07:04:43+02:00')).toBe('2025-08-28T07:04');
+    expect(datetimeInputValue('2025-08-28T07:04:43.120-0500')).toBe('2025-08-28T07:04');
+    expect(datetimeInputValue(null)).toBe('');
+    expect(datetimeInputValue('nonsense')).toBe('');
+    const utc = new Date(Date.UTC(2026, 9, 10, 11, 20));
+    const p = (n: number) => String(n).padStart(2, '0');
+    expect(datetimeInputValue(utc.toISOString())).toBe(`${utc.getFullYear()}-${p(utc.getMonth() + 1)}-${p(utc.getDate())}T${p(utc.getHours())}:${p(utc.getMinutes())}`);
+    expect(recordedAtFromInput('2025-08-28T06:30', '2025-08-29T07:04:43+02:00')).toBe('2025-08-28T06:30:00+02:00');
+    expect(recordedAtFromInput('2025-08-28T06:30', '2025-08-29T07:04:43-0530')).toBe('2025-08-28T06:30:00-05:30');
+    const local = recordedAtFromInput('2025-08-28T06:30', '2026-10-10T11:20:06.000Z')!;
+    expect(local).toMatch(/^2025-08-28T06:30:00[+-]\d\d:\d\d$/);
+    expect(new Date(local).getTime()).toBe(new Date(2025, 7, 28, 6, 30).getTime());
+    expect(recordedAtFromInput('2025-08-28T06:30', null)).toMatch(/^2025-08-28T06:30:00[+-]/);
+    expect(recordedAtFromInput('', null)).toBeNull();
   });
 });

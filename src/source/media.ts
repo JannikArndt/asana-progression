@@ -80,12 +80,16 @@ export async function readMeta(file: Blob, input: Input, track: InputVideoTrack)
   const raw = (tags as { raw?: Record<string, unknown> }).raw ?? {};
   const qtRaw = str(raw['com.apple.quicktime.creationdate']);
   const qt = parseQuickTimeDate(qtRaw);
+  const day = parseQuickTimeDate(str(raw['©day']) ?? str(raw['rldt']));
   const lastModified = typeof f.lastModified === 'number' ? f.lastModified : Date.now();
   let recordedAt: string | null;
   let recordedAtSource: VideoMeta['recordedAtSource'];
   if (qt) {
     recordedAt = qt.iso;
     recordedAtSource = 'quicktime';
+  } else if (day) {
+    recordedAt = day.iso;
+    recordedAtSource = 'udta';
   } else if (mvhd) {
     recordedAt = mvhd;
     recordedAtSource = 'mvhd';
