@@ -4,14 +4,24 @@
 import { chromium } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 
+// Utthita Trikonasana (triangle pose) in off-white on the sage accent, full bleed: iOS rounds the
+// corners itself; the maskable variant keeps the figure inside the 80 % safe zone.
 const svg = (size, pad) => `
 <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#f7f5f1"/>
-  <g transform="translate(256 256) scale(${1 - pad}) translate(-256 -256)">
-    <circle cx="256" cy="256" r="168" fill="#5c7d71"/>
-    <circle cx="256" cy="178" r="22" fill="#f7f5f1"/>
-    <path d="M168 318 Q256 230 344 318" fill="none" stroke="#f7f5f1" stroke-width="18" stroke-linecap="round"/>
-    <path d="M256 214 L256 276" fill="none" stroke="#f7f5f1" stroke-width="18" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6f9285"/>
+      <stop offset="1" stop-color="#46645a"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <g transform="translate(256 256) scale(${1 - pad}) translate(-256 -256) translate(6 -12)">
+    <g fill="none" stroke="#f7f5f1" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M150 428 L276 292 L392 428"/>
+      <path d="M276 292 L188 236"/>
+      <path d="M188 112 L188 368"/>
+    </g>
+    <circle cx="136" cy="203" r="31" fill="#f7f5f1"/>
   </g>
 </svg>`;
 

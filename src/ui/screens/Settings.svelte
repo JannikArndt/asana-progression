@@ -21,6 +21,7 @@
   import { backup } from '../state/backup.svelte';
   import { capture } from '../state/capture.svelte';
   import { research } from '../state/research.svelte';
+  import { theme } from '../theme.svelte';
 
   let est = $state<StorageEstimateInfo | null>(null);
   let opfs = $state<number | null>(null);
@@ -203,6 +204,15 @@
     <button class="btn quiet back" type="button" onclick={() => router.go({ name: 'home' })}>‹ Videos</button>
   </header>
   <h2>Settings</h2>
+
+  <section class="group">
+    <h3 class="section-title">Appearance</h3>
+    <div class="segmented" role="radiogroup" aria-label="Appearance">
+      {#each [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']] as const as [p, label] (p)}
+        <button type="button" role="radio" aria-checked={theme.pref === p} class:on={theme.pref === p} onclick={() => theme.set(p)}>{label}</button>
+      {/each}
+    </div>
+  </section>
 
   <section class="group">
     <h3 class="section-title">Catalog</h3>
@@ -469,7 +479,7 @@
   }
 
   .segmented button.on {
-    background: var(--color-surface);
+    background: var(--color-raised);
     color: var(--color-text);
   }
 

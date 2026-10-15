@@ -309,7 +309,7 @@
   }
 
   .segmented button.on {
-    background: var(--color-surface);
+    background: var(--color-raised);
     color: var(--color-text);
   }
 </style>

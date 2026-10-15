@@ -324,7 +324,7 @@
   .handle::before {
     content: '';
     position: absolute;
-    border: 0 solid var(--color-on-accent);
+    border: 0 solid var(--color-on-photo);
   }
 
   .handle.nw::before,

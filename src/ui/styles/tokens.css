@@ -5,6 +5,8 @@
   /* Colour: off-white ground, near-black text, one muted accent (sage). */
   --color-bg: #f7f5f1;
   --color-surface: #ffffff;
+  /* The selected segment of a segmented control (raised above its tinted track). */
+  --color-raised: #ffffff;
   --color-text: #1d1c1a;
   --color-text-2: #67645e;
   --color-text-3: #9b978f;
@@ -22,6 +24,8 @@
   /* Translucent controls on top of photos (viewer action bar) and the pose overlay's skeleton. */
   --color-glass: rgba(20, 19, 17, 0.62);
   --color-pose: #b9d3c8;
+  /* Text, handles and landmarks drawn on photos and dark overlays (white in both themes). */
+  --color-on-photo: #ffffff;
 
   /* Spacing (4 px grid). */
   --space-1: 4px;
@@ -63,4 +67,44 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* Dark theme: the same calm palette on a warm near-black ground. Follows the system unless the
+   user picked Light or Dark in Settings (`data-theme` on <html>, see ui/theme.svelte.ts). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --color-bg: #151412;
+    --color-surface: #211f1c;
+    --color-raised: #3a3732;
+    --color-text: #ece9e3;
+    --color-text-2: #a9a59d;
+    --color-text-3: #7a766e;
+    --color-hairline: rgba(236, 233, 227, 0.13);
+    --color-neutral-tint: rgba(236, 233, 227, 0.08);
+    --color-accent: #84a99a;
+    --color-accent-strong: #a3c4b6;
+    --color-accent-tint: rgba(132, 169, 154, 0.24);
+    --color-on-accent: #101512;
+    --color-danger: #e08a74;
+    --color-scrim: rgba(0, 0, 0, 0.5);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg: #151412;
+  --color-surface: #211f1c;
+  --color-raised: #3a3732;
+  --color-text: #ece9e3;
+  --color-text-2: #a9a59d;
+  --color-text-3: #7a766e;
+  --color-hairline: rgba(236, 233, 227, 0.13);
+  --color-neutral-tint: rgba(236, 233, 227, 0.08);
+  --color-accent: #84a99a;
+  --color-accent-strong: #a3c4b6;
+  --color-accent-tint: rgba(132, 169, 154, 0.24);
+  --color-on-accent: #101512;
+  --color-danger: #e08a74;
+  --color-scrim: rgba(0, 0, 0, 0.5);
 }

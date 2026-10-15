@@ -36,7 +36,7 @@
 
   .box {
     fill: none;
-    stroke: var(--color-on-accent);
+    stroke: var(--color-on-photo);
     stroke-width: 1.5;
     stroke-dasharray: 6 5;
     opacity: 0.85;
@@ -51,7 +51,7 @@
 
   .joint {
     fill: var(--color-accent);
-    stroke: var(--color-on-accent);
+    stroke: var(--color-on-photo);
     stroke-width: 1.5;
   }
 

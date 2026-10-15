@@ -141,7 +141,7 @@ button {
   display: flex;
   flex-direction: column;
   background: var(--color-overlay);
-  color: var(--color-on-accent);
+  color: var(--color-on-photo);
   padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
 }
 
