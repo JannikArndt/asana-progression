@@ -204,6 +204,9 @@ videos page, asana page; `components/VideoFinder.svelte`; the hold viewer and De
   (`photosSearchDate`: the recording's own date in the device language, e.g. "October 14, 2026";
   Apple: Photos search takes dates and narrows by media type such as "Video"), and per video its
   first analysis frame, wall-clock time (`recordedClock`) and length (`formatTime`, like Photos).
+  Photos searches by the recording date, so a video whose time is only a container or file date
+  (`weakRecordedAt`: an export, or a copy the Photos picker converted) gets no search date but
+  "Recording date unknown … Set date…" (`RecordedAtSheet`); the hold viewer offers no copy then.
 - The review asks for files for stills of labeled holds **and** for the poses of open cards
   (`missingPoseFrames(a, true)`, not with the debug null cropper), with matching wording.
 
@@ -457,8 +460,13 @@ recompute candidates/preMerge with the defaults before committing a fixture.
 
 - Import via `<input type="file" accept="video/*" multiple>`.
 - recordedAt: `com.apple.quicktime.creationdate` (keeps the UTC offset; parsed by hand because
-  "+0200" is not portable for `Date`) → `mvhd` creation_time (can be the export time) →
-  `file.lastModified`. Always editable later.
+  "+0200" is not portable for `Date`) → udta `©day` / `rldt` (`recordedAtSource: 'udta'`, fixture
+  `date-udta.mov`) → `mvhd` creation_time (can be the export or re-encode time) →
+  `file.lastModified`. Only the first two (and `'manual'`) are the recording date
+  (`session-data.weakRecordedAt`). Editable on the videos page (tap the time →
+  `RecordedAtSheet`, `datetime-local` in the recording's own UTC offset, `app.setRecordedAt`; the
+  session's date follows when it was this video's time). Attaching a file whose stored time is
+  weak takes the camera date from the file when it has one (`backfillRecordedAt`).
 - location: ISO 6709 (`parseIso6709`: decimal degrees or DDMM/DDMMSS, optional altitude and
   `CRS…` suffix) from `com.apple.quicktime.location.ISO6709` (keys/ilst) → udta `©xyz`; null
   when absent. Fixtures `location-keys.mov`, `location-udta.mov`.

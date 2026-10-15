@@ -75,6 +75,14 @@ describe('openVideo (iPhone-like HEVC Main 10 HLG, rotated)', () => {
     udta.close();
   });
 
+  it('takes the udta ©day date before the container time (an export time)', async () => {
+    const v = await openVideo(fixture('date-udta.mov'));
+    expect(v.meta.recordedAt).toBe('2025-08-28T07:04:43+02:00');
+    expect(v.meta.recordedAtSource).toBe('udta');
+    expect(v.meta.mvhdCreationTime).toContain('2026-10-10');
+    v.close();
+  });
+
   it('rejects files without video', async () => {
     await expect(openVideo(new File([new Uint8Array(100)], 'x.bin'))).rejects.toThrow();
   });

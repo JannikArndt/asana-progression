@@ -1,11 +1,14 @@
 <script lang="ts">
   import TinyFrame from './TinyFrame.svelte';
+  import RecordedAtSheet from './RecordedAtSheet.svelte';
   import { formatTime } from './timeline';
   import { copyText } from '../diagnostics';
   import type { Video } from '../../model';
   import { app } from '../state/app.svelte';
   import { attachPicked } from '../state/hold-actions';
   import { photosSearchDate, recordedClock } from '../state/file-match';
+  import { weakRecordedAt } from '../state/session-data';
+  import { formatDay } from '../format';
 
   interface Props {
     /** The videos whose files are needed. */
@@ -25,8 +28,10 @@
    */
   const days = $derived.by(() => {
     const out: Array<{ query: string; videos: Video[] }> = [];
-    for (const v of videos) {
-      const query = photosSearchDate(v.recordedAt ?? v.importedAt);
+    // The app's copy: a recording time set here shows at once.
+    for (const v of videos.map((x) => app.videos.find((y) => y.id === x.id) ?? x)) {
+      // Only the camera's date finds the video in Photos; an export or file date is no help.
+      const query = weakRecordedAt(v) ? '' : photosSearchDate(v.recordedAt);
       const day = out.find((d) => d.query === query);
       if (day) day.videos.push(v);
       else out.push({ query, videos: [v] });
@@ -35,6 +40,8 @@
   });
 
   let busy = $state(false);
+  /** Video whose recording time is being set (null = sheet closed). */
+  let dating = $state<Video | null>(null);
   let copied = $state<string | null>(null);
 
   async function copy(query: string) {
@@ -58,7 +65,12 @@
 
 <div class="finder">
   {#each days as day (day.query)}
-    {#if day.query}
+    {#if !day.query}
+      <p class="small muted">
+        Recording date unknown: the {day.videos.length === 1 ? 'file only carries' : 'files only carry'} the date of an export or conversion. Set the date
+        Photos shows for {day.videos.length === 1 ? 'it' : 'them'} to search for it.
+      </p>
+    {:else}
       <div class="search">
         <span class="small muted">Search Photos for</span>
         <button class="btn query" type="button" onclick={() => copy(day.query)} aria-label="Copy {day.query}">
@@ -77,9 +89,16 @@
             {/if}
           </div>
           <div class="info small">
-            <span class="tabular">{[recordedClock(video.recordedAt), formatTime(video.durationS)].filter(Boolean).join(' · ')}</span>
+            {#if day.query}
+              <span class="tabular">{[recordedClock(video.recordedAt), formatTime(video.durationS)].filter(Boolean).join(' · ')}</span>
+            {:else}
+              <span class="tabular">{formatTime(video.durationS)}{#if video.recordedAt}<span class="faint"> · file date {formatDay(video.recordedAt)}</span>{/if}</span>
+            {/if}
             <span class="name muted">{video.fileName}</span>
           </div>
+          {#if !day.query}
+            <button class="btn quiet set" type="button" onclick={() => (dating = video)}>Set date…</button>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -90,6 +109,10 @@
   </label>
   {#if videos.length > 1}<p class="small faint hint">Pick them together, in any order: each file finds its video.</p>{/if}
 </div>
+
+{#if dating}
+  <RecordedAtSheet video={dating} onclose={() => (dating = null)} />
+{/if}
 
 <style>
   .finder {
@@ -145,8 +168,14 @@
   .info {
     display: flex;
     flex-direction: column;
+    flex: 1;
     min-width: 0;
   }
+
+  .set {
+    flex: none;
+  }
+
 
   .name {
     overflow: hidden;

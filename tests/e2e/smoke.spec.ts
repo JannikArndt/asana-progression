@@ -220,8 +220,16 @@ test('re-selecting files: one picker, files matched by content, the date for the
   await second.getByRole('button', { name: /^Confirm / }).click();
   const notice = page.locator('.notice', { hasText: 'again to save full-resolution stills' });
   await expect(notice).toBeVisible();
+  // The fixture carries only a file date, not a recording date: no date to search Photos for
+  // until the recording time is set by hand.
+  await expect(notice.getByText(/^Recording date unknown/)).toBeVisible();
+  await expect(notice.getByText('Search Photos for')).toHaveCount(0);
+  await notice.getByRole('button', { name: 'Set date…' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Recording time' });
+  await sheet.locator('input[type=datetime-local]').fill('2025-08-28T07:04');
+  await sheet.getByRole('button', { name: 'Save' }).click();
   await expect(notice.getByText('Search Photos for')).toBeVisible();
-  await expect(notice.getByRole('button', { name: /^Copy \w+ \d+, \d{4}$/ })).toBeVisible();
+  await expect(notice.getByRole('button', { name: 'Copy August 28, 2025' })).toBeVisible();
   await expect(notice.locator('[data-needed-video]')).toHaveCount(1);
   await expect(second.locator('[data-capture=needs-file]')).toHaveCount(1);
 

@@ -10,6 +10,7 @@
   import { capture, type PoseResult } from '../state/capture.svelte';
   import { attachPicked } from '../state/hold-actions';
   import { photosSearchDate, recordedClock } from '../state/file-match';
+  import { weakRecordedAt } from '../state/session-data';
   import { copyText } from '../diagnostics';
   import { dismissOffset, dismissProgress, gestureAxis, isTap, shouldDismiss, type Axis } from './viewer-gestures';
 
@@ -107,7 +108,8 @@
   let attachMessage = $state<string | null>(null);
   let attaching = $state(false);
   let copied = $state(false);
-  const searchDate = $derived(video ? photosSearchDate(video.recordedAt ?? video.importedAt) : '');
+  /** Only the camera's date finds the video in Photos (not an export or file date). */
+  const searchDate = $derived(video && !weakRecordedAt(video) ? photosSearchDate(video.recordedAt) : '');
 
   async function reattach(e: Event) {
     const input = e.currentTarget as HTMLInputElement;

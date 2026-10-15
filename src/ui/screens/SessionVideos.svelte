@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import DebugPanel from '../components/DebugPanel.svelte';
+  import RecordedAtSheet from '../components/RecordedAtSheet.svelte';
   import { formatDuration, formatTime } from '../components/timeline';
   import { videoOffsets } from '../components/session-timeline';
   import { formatDay, formatRecordedAt } from '../format';
@@ -41,7 +42,17 @@
   /** Analysed videos whose file is not selected in this page session. */
   const missing = $derived(review.videos.filter((v) => review.analyses[v.id] && !app.files.has(v.id)));
 
-  const recordedFrom: Record<string, string> = { quicktime: 'camera time', mvhd: 'container time, can be the export time', file: 'file date' };
+  const recordedFrom: Record<string, string> = {
+    quicktime: 'camera time',
+    udta: 'camera time',
+    mvhd: 'container time, can be the export time',
+    file: 'file date',
+    manual: 'set by hand',
+  };
+  /** Video whose recording time is being set (null = sheet closed). */
+  let dating = $state<Video | null>(null);
+  /** The app's copy of a video (a recording time set on this page shows at once). */
+  const current = (video: Video) => app.videos.find((v) => v.id === video.id) ?? video;
   function sourceOf(video: Video): string | null {
     const src = (video.meta as unknown as VideoMeta | undefined)?.recordedAtSource;
     return src ? (recordedFrom[src] ?? src) : null;
@@ -127,17 +138,21 @@
       {#each review.videos as video, i (video.id)}
         {@const offset = offsets.get(video.id) ?? 0}
         {@const analysis = review.analyses[video.id]}
-        {@const source = sourceOf(video)}
+        {@const dated = current(video)}
+        {@const source = sourceOf(dated)}
         <li class="card item" data-video-id={video.id}>
           <div class="row">
             <div class="info">
               <h3 class="name">{video.fileName}</h3>
               <p class="small tabular">
-                {#if video.recordedAt}
-                  <span title={video.recordedAt}>{formatRecordedAt(video.recordedAt)}</span>{#if source}<span class="faint"> · {source}</span>{/if}
-                {:else}
-                  <span class="faint">No recording time</span>
-                {/if}
+                <button class="when" type="button" aria-label="Recording time: {dated.recordedAt ? formatRecordedAt(dated.recordedAt) : 'none'}. Edit" onclick={() => (dating = dated)}>
+                  {#if dated.recordedAt}
+                    <span title={dated.recordedAt}>{formatRecordedAt(dated.recordedAt)}</span>{#if source}<span class="faint"> · {source}</span>{/if}
+                  {:else}
+                    <span class="faint">No recording time</span>
+                  {/if}
+                  <span class="edit">Edit</span>
+                </button>
               </p>
               <p class="small muted tabular">
                 {formatTime(offset)}–{formatTime(offset + video.durationS)} · {formatDuration(video.durationS)}
@@ -190,7 +205,30 @@
   {/if}
 </main>
 
+{#if dating}
+  <RecordedAtSheet video={dating} onclose={() => (dating = null)} />
+{/if}
+
 <style>
+  /* The recording time: tap to correct it (Photos searches by it). */
+  .when {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    min-height: var(--touch);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+  }
+
+  .when .edit {
+    margin-left: var(--space-2);
+    color: var(--color-accent-strong);
+  }
+
   .videos-screen {
     padding: calc(var(--space-2) + var(--safe-top)) calc(var(--space-4) + var(--safe-right)) calc(var(--space-7) + var(--safe-bottom))
       calc(var(--space-4) + var(--safe-left));

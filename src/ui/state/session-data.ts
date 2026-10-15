@@ -1,7 +1,7 @@
 /** Pure helpers joining sessions, videos, analyses and holds (tested; no I/O). */
 import type { HistoryEntry, ReviewItem } from '../../labeling';
 import { poseKey, type Analysis, type CompactPose, type Hold, type ReviewCandidate, type Session, type SessionLocation, type Video } from '../../model';
-import type { GeoLocation } from '../../source';
+import type { GeoLocation, VideoMeta } from '../../source';
 
 export function dayOf(iso: string | null | undefined): string {
   return iso ? iso.slice(0, 10) : '';
@@ -411,6 +411,54 @@ export function videoLocation(video: Pick<Video, 'meta'>): GeoLocation | null | 
   const l = meta['location'] as Partial<Record<keyof GeoLocation, unknown>> | null;
   if (!l || typeof l !== 'object' || !isNum(l.lat) || !isNum(l.lon)) return null;
   return { lat: l.lat, lon: l.lon, altM: isNum(l.altM) ? l.altM : null };
+}
+
+/** Where a video's recording time came from (`VideoMeta.recordedAtSource`), null when unknown. */
+export function recordedAtSource(video: Pick<Video, 'meta'>): VideoMeta['recordedAtSource'] {
+  const s = video.meta?.['recordedAtSource'];
+  return typeof s === 'string' ? (s as VideoMeta['recordedAtSource']) : null;
+}
+
+/**
+ * True when a video's recording time is not the camera's: a container or file date (an export or
+ * re-encode, e.g. a file the Photos picker converted), or none. Photos searches by the recording
+ * date, so such a time must not be offered as the date to search for.
+ */
+export function weakRecordedAt(video: Pick<Video, 'meta' | 'recordedAt'>): boolean {
+  const s = recordedAtSource(video);
+  return !video.recordedAt || !(s === 'quicktime' || s === 'udta' || s === 'manual');
+}
+
+/** `<input type="datetime-local">` value of a recording time, in its own wall-clock time. */
+export function datetimeInputValue(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const own = /^(\d{4}-\d\d-\d\dT\d\d:\d\d)(?::\d\d)?(?:\.\d+)?[+-]\d\d:?\d\d$/.exec(iso);
+  if (own) return own[1]!;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
+ * Recording time from a `datetime-local` value: ISO 8601 with the UTC offset of `previous` when it
+ * had one (the place of recording), else the device's offset at that time. Null when invalid.
+ */
+export function recordedAtFromInput(value: string, previous: string | null | undefined): string | null {
+  const m = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)$/.exec(value);
+  if (!m) return null;
+  const [, y, mo, d, h, mi] = m;
+  const prevOffset = previous ? /([+-]\d\d):?(\d\d)$/.exec(previous) : null;
+  let offset: string;
+  if (prevOffset) offset = `${prevOffset[1]}:${prevOffset[2]}`;
+  else {
+    const local = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi));
+    if (Number.isNaN(local.getTime())) return null;
+    const min = -local.getTimezoneOffset();
+    const a = Math.abs(min);
+    offset = `${min < 0 ? '-' : '+'}${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`;
+  }
+  return `${y}-${mo}-${d}T${h}:${mi}:00${offset}`;
 }
 
 /** Coordinates of a session, null when it has none. */

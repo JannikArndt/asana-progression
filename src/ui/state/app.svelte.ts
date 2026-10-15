@@ -24,7 +24,7 @@ import {
 } from '../../model';
 import { openVideo, type VideoMeta, type VideoSource } from '../../source';
 import { SvelteMap } from 'svelte/reactivity';
-import { dayOf, groupByDay, orderVideoIds, orphanVideos, SHORT_CLIP_S, videoLocation, withCoords } from './session-data';
+import { dayOf, groupByDay, orderVideoIds, orphanVideos, SHORT_CLIP_S, videoLocation, weakRecordedAt, withCoords } from './session-data';
 
 export interface AnalysisSummary {
   videoId: string;
@@ -313,6 +313,42 @@ class AppState {
     }
     // Fire and forget: never blocks capture, and a file that cannot be read just stays without a place.
     void this.backfillLocation(videoId, meta).catch(() => {});
+    void this.backfillRecordedAt(videoId, meta).catch(() => {});
+  }
+
+  /**
+   * Sets a video's recording time (`source` says where it came from). The session's date follows
+   * when it was this video's old time (the session starts with this video).
+   */
+  async setRecordedAt(videoId: string, recordedAt: string, source: VideoMeta['recordedAtSource']) {
+    const db = this.db;
+    const video = await db.videos.get(videoId);
+    if (!video) return;
+    const old = video.recordedAt;
+    const next: Video = { ...video, recordedAt, meta: { ...(video.meta ?? {}), recordedAtSource: source } };
+    await db.videos.put(next);
+    this.videos = this.videos.map((v) => (v.id === videoId ? next : v));
+    const session = (await db.sessions.findBy('videoIds', videoId))[0];
+    if (session && (session.date === old || session.date === video.importedAt)) {
+      const dated = { ...session, date: recordedAt };
+      await db.sessions.put(dated);
+      this.upsertSession(dated);
+    }
+  }
+
+  /**
+   * Videos whose recording time is only a container or file date (an export or re-encode time):
+   * when the attached file has the camera's date (videos imported before `©day` was read), use it.
+   * A time set by hand stays.
+   */
+  private async backfillRecordedAt(videoId: string, meta?: VideoMeta) {
+    const known = this.videos.find((v) => v.id === videoId);
+    if (!known || !weakRecordedAt(known)) return;
+    const src = meta ? null : this.source(videoId);
+    const read = meta ?? (src ? (await src).meta : null);
+    if (read && ((read.recordedAtSource === 'quicktime' || read.recordedAtSource === 'udta') && read.recordedAt && read.recordedAt !== known.recordedAt)) {
+      await this.setRecordedAt(videoId, read.recordedAt, read.recordedAtSource);
+    }
   }
 
   /**

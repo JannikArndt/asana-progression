@@ -51,7 +51,12 @@ export interface VideoMeta {
   hasAudio: boolean;
   /** Best available recording time, ISO 8601 with offset when known. */
   recordedAt: string | null;
-  recordedAtSource: 'quicktime' | 'mvhd' | 'file' | null;
+  /**
+   * Where `recordedAt` came from: the QuickTime creation date, the udta `©day` date (both the
+   * camera's recording time), the container's creation time (can be an export or re-encode time),
+   * the file date, or set by hand in the app.
+   */
+  recordedAtSource: 'quicktime' | 'udta' | 'mvhd' | 'file' | 'manual' | null;
   /** Raw `com.apple.quicktime.creationdate` (includes the time zone). */
   quicktimeCreationDate: string | null;
   /** `mvhd` creation_time (UTC). May be the export time rather than the recording time. */
