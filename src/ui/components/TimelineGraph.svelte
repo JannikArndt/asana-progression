@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
+  import { theme } from '../theme.svelte';
   import {
     clampView,
     envelope,
@@ -478,6 +479,11 @@
 
   onMount(() => {
     readColors();
+    const offTheme = theme.onThemeChange(() => {
+      readColors();
+      hatch = null;
+      schedule();
+    });
     view = homeView(wrap.clientWidth);
     const ro = new ResizeObserver(() => {
       const width = wrap.clientWidth;
@@ -491,6 +497,7 @@
     canvas.addEventListener('gesturechange', prevent);
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => {
+      offTheme();
       ro.disconnect();
       stopMotion();
       cancelAnimationFrame(raf);

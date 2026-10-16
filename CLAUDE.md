@@ -520,6 +520,19 @@ use them everywhere, including canvas drawing (TimelineGraph reads them via
 `getComputedStyle`). Calm and light: off-white `--color-bg`, near-black text, one muted sage
 accent, system font, hairlines, no heavy shadows, touch targets ≥ 44 px.
 
+Dark mode: `tokens.css` redefines the colour tokens for `prefers-color-scheme: dark` (unless
+`<html data-theme="light">`) and for `data-theme="dark"`: warm near-black ground, lighter sage
+accent with dark text on it (`--color-on-accent`). Text, handles and landmarks on photos and the
+dark overlays use `--color-on-photo` (white in both). Selected segments use `--color-raised`.
+Settings → Appearance (System / Light / Dark, `ui/theme.svelte.ts`, localStorage `asana.theme`,
+a device setting outside backups) sets `data-theme`; an inline script in `index.html` applies it
+before the first paint, `theme` swaps the `theme-color` meta and `theme.onThemeChange` lets
+canvas drawing (TimelineGraph) re-read the tokens.
+
+App icon (`npm run icons`, `scripts/make-icons.mjs`): Utthita Trikonasana as an off-white line
+figure on a sage gradient, full bleed (iOS rounds the corners); the maskable variant is scaled to
+the 80 % safe zone.
+
 Sheets (`components/Sheet.svelte`) are pinned to `visualViewport` (iOS keyboard: the layout
 viewport extends behind it); search sheets pass `fill` to keep their height while results shrink.
 Every bottom surface is a `Sheet`, including `dialog.ask` questions and the review ••• menu
