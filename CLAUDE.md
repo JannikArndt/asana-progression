@@ -1,6 +1,6 @@
 # asana-progression — notes for Claude
 
-Mobile-first static web app (iPhone, latest iOS Safari). Finds held yoga poses in practice videos,
+Node 24 (CI and `engines`); mobile-first static web app (iPhone, latest iOS Safari). Finds held yoga poses in practice videos,
 lets the user label them, and shows each asana's progression over the years. Everything runs on
 device; there is no backend. Live: https://jannikarndt.github.io/asana-progression/
 
@@ -15,15 +15,26 @@ npm run check        # svelte-check (TypeScript strict), fails on warnings
 npm test             # Vitest unit tests (Node)
 npm run test:coverage
 npm run test:e2e     # Playwright smoke tests (builds + vite preview on :4173)
-npm run build        # dist/ incl. version.json
+npm run preview      # serve the built dist/ (what test:e2e uses)
+npm run build        # dist/ incl. version.json {build, version, builtAt} (vite build + scripts/stamp-build.mjs)
+npm run verify       # what CI's verify job runs: check, test, test/ (deploy contract, build id), build; ends on VERIFY: PASS / FAIL
+npm run live         # does GitHub Pages serve this tree's build? (--wait polls up to 15 min); ends on LIVE: <build>
+npm run ship         # clean tree -> verify -> push main -> live --wait
 npm run fixtures     # regenerate tests/fixtures/*.mp4|mov (needs ffmpeg with libx264/libx265/libvpx)
 npm run icons        # regenerate public/icons/*.png
 ```
 
 In the cloud container, Playwright must use the preinstalled browser:
-`PW_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e`
+`PW_CHROMIUM_PATH=$(ls -d /opt/pw-browsers/chromium-*/chrome-linux*/chrome | head -1) npm run test:e2e`
+(the directory name changes with the Playwright build: `chromium-1194/chrome-linux` once, `chromium-1243/chrome-linux64` now)
 (`PW_PORT=<port>` runs the preview server on another port than 4173, e.g. for parallel checkouts).
 Playwright's Chromium decodes VP9/AV1 but not H.264/HEVC, so e2e fixtures are VP9.
+
+**Work goes straight to `main`** (the owner allowed it; no feature branches). The loop: `npm run verify`
+→ commit → push `main` → CI runs verify + e2e, deploys, and polls the live `version.json` →
+`npm run live -- --wait` says `LIVE: <build>`. A change is done when that line appears, not when
+the job is green. e2e stays its own script (a minute or more); CI runs it, run it locally when the
+change touches the UI flow. `.claude/hooks/session-start.sh` installs dependencies in cloud sessions.
 
 ## Architecture
 
@@ -501,17 +512,34 @@ recompute candidates/preMerge with the defaults before committing a fixture.
 
 ## Deployment
 
-`.github/workflows/deploy.yml`: `build` (npm ci → check → test → build → configure-pages →
-upload-pages-artifact) and `e2e` (Playwright) run on every push/PR; `deploy` (deploy-pages) runs
-on `main` only and needs both. Vite `base: '/asana-progression/'`.
+Hosted on GitHub Pages, built by Actions (Settings → Pages → Source: GitHub Actions), live at
+https://jannikarndt.github.io/asana-progression/. `.github/workflows/deploy.yml`: `verify` (npm ci →
+`npm run verify`, uploads the artifact on `main`) and `e2e` (Playwright) run on every push/PR;
+`deploy` (deploy-pages) runs on `main` only, needs both, is the only job with `pages: write` /
+`id-token: write`, and its last step polls `<page_url>version.json?t=…` until `build` matches the
+one `verify` produced (Pages caches for ~10 min, hence the query and the 15 min window). Every
+action is pinned to a SHA and every job has a timeout; `test/deploy-contract.test.mjs` holds that.
+Dependabot (`.github/dependabot.yml`: npm and github-actions, grouped, majors ignored) PRs merge
+themselves once verify passes and start `deploy.yml` (`.github/workflows/dependabot-merge.yml`);
+majors (Node, Vite, Svelte, TypeScript, …) are moved by hand. Vite `base: '/asana-progression/'`.
 
-`version.json` (`{version, builtAt}`, version = short SHA + build time) is emitted by the build.
-On `visibilitychange` → visible the app fetches it with `cache: 'no-store'`; a new version shows a
+**The build id.** `scripts/stamp-build.mjs` runs after `vite build`: `build` = 12 hex of a content
+hash over everything in `dist/` except `version.json`, and the same id is written into
+`<meta name="app-build">` in `dist/index.html` (hashed with the meta reset to `dev`, so it never
+depends on itself). So nothing time- or SHA-dependent may be compiled into the bundle (that is why
+`src/ui/build.ts` reads the meta at runtime instead of a Vite `define`), and a docs-only push gives
+the same `build`, which prompts nobody. `version` (short SHA + time) and `builtAt` in
+`version.json` are display only (Settings → App, diagnostics). `dev` = unstamped page: no update checks.
+
+On `visibilitychange` → visible the app fetches it with `cache: 'no-store'`; a different `build` shows a
 subtle "Update available" pill. Reload happens only when quiet (no analysis, capture, backup
 export/import or prepared backup file — register via `updates.addQuietCheck`; labels are never
 unsaved): when the page is hidden, or on tap. The automatic reload (page hidden) also waits while
 a video file is selected (`updates.addHiddenCheck`: switching to Photos to find the next file hides
-the page, and a reload drops the files); the tap then asks "Update now?" first.
+the page, and a reload drops the files); the tap then asks "Update now?" first. The automatic reload
+also never happens in the page's first 20 s and never twice for the same build
+(sessionStorage `asana.update.reloaded`): Pages may still serve the old HTML for a few minutes, and
+one build behind beats a reload loop.
 
 ## Design
 
