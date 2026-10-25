@@ -1,5 +1,6 @@
 import { exportBackup, OpfsAssetStore, sampleBytes, type BackupManifest, type ImportPlan, type ImportResult, type StorePlan } from '../../storage';
 import { formatBytes } from '../diagnostics';
+import { currentBuild } from '../build';
 import { formatDay } from '../format';
 import type { BackupEvent, BackupRequest } from '../pipeline/backup-protocol';
 import { app } from './app.svelte';
@@ -86,7 +87,7 @@ class BackupState {
       const now = new Date();
       const { blob, manifest } = await exportBackup(app.db, new OpfsAssetStore(), {
         includeSamples,
-        appVersion: __APP_VERSION__,
+        appVersion: currentBuild(),
         now,
         onProgress: (done, total) => {
           const t = performance.now();

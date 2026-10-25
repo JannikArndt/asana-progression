@@ -12,6 +12,7 @@
     type StorageEstimateInfo,
   } from '../../storage';
   import { app } from '../state/app.svelte';
+  import { appInfo, currentBuild } from '../build';
   import { router } from '../state/router.svelte';
   import { dialog } from '../state/dialog.svelte';
   import { pipeline } from '../pipeline/controller.svelte';
@@ -156,7 +157,7 @@
 
   async function copyAll() {
     const report = {
-      app: { version: __APP_VERSION__, builtAt: __BUILT_AT__ },
+      app: appInfo(),
       device,
       decoders: hevc,
       storage: { estimate: est, opfsBytes: opfs, persistRequested: await app.db.settings.get('persistRequested'), persistGranted: await app.db.settings.get('persistGranted') },
@@ -390,8 +391,8 @@
   <section class="group">
     <h3 class="section-title">App</h3>
     <dl class="kv">
-      <dt>Version</dt><dd class="mono">{__APP_VERSION__}</dd>
-      <dt>Built</dt><dd>{__BUILT_AT__.slice(0, 16).replace('T', ' ')} UTC</dd>
+      <dt>Version</dt><dd class="mono">{currentBuild()}</dd>
+      <dt>Built</dt><dd>{updates.builtAt ? `${updates.builtAt.slice(0, 16).replace('T', ' ')} UTC` : '—'}</dd>
       <dt>Update</dt><dd>{updates.available ? `available (${updates.remoteVersion})` : updates.lastChecked ? 'up to date' : 'not checked'}</dd>
     </dl>
     <div class="actions">

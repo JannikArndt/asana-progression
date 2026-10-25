@@ -1,35 +1,8 @@
 /// <reference types="vitest/config" />
 import { defineConfig, type Connect, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
-import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-
-function gitSha(): string {
-  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA.slice(0, 7);
-  try {
-    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-  } catch {
-    return 'dev';
-  }
-}
-
-const builtAt = new Date().toISOString();
-const version = `${gitSha()}-${builtAt.replace(/[-:]/g, '').slice(0, 15)}`;
-
-/** Emits dist/version.json; the app polls it to detect new deployments. */
-function versionFile(): Plugin {
-  return {
-    name: 'version-file',
-    generateBundle() {
-      this.emitFile({
-        type: 'asset',
-        fileName: 'version.json',
-        source: JSON.stringify({ version, builtAt }),
-      });
-    },
-  };
-}
 
 const MEDIAPIPE_FILES: Record<string, string> = {
   'vision_wasm_module_internal.js': 'text/javascript',
@@ -76,11 +49,7 @@ function mediapipeWasm(): Plugin {
 
 export default defineConfig({
   base: '/asana-progression/',
-  plugins: [svelte(), versionFile(), mediapipeWasm()],
-  define: {
-    __APP_VERSION__: JSON.stringify(version),
-    __BUILT_AT__: JSON.stringify(builtAt),
-  },
+  plugins: [svelte(), mediapipeWasm()],
   worker: { format: 'es' },
   build: { target: 'es2022', sourcemap: true },
   test: {

@@ -2,8 +2,8 @@ import type { ParamGrid } from '../../labeling';
 import type { LabProgress, LabReport } from '../research/lab';
 import type { ResearchEvent, ResearchRequest } from '../pipeline/research-protocol';
 import { debugCropper } from './capture.svelte';
+import { appInfo } from '../build';
 
-const APP = { version: __APP_VERSION__, builtAt: __BUILT_AT__ };
 
 function day(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');
@@ -61,7 +61,7 @@ class ResearchState {
     this.exporting = { phase: 'analyses', done: 0, total: 0 };
     const jobId = ++this.jobId;
     try {
-      await this.run({ type: 'export', jobId, cropper: debugCropper(), baseUrl: import.meta.env.BASE_URL, app: APP }, 'export', (ev) => {
+      await this.run({ type: 'export', jobId, cropper: debugCropper(), baseUrl: import.meta.env.BASE_URL, app: appInfo() }, 'export', (ev) => {
         if (ev.type === 'export-progress') this.exporting = { phase: ev.phase, done: ev.done, total: ev.total };
         if (ev.type !== 'export-done') return false;
         const file = new File([ev.blob], `asana-progression-research-${day(new Date())}.json`, { type: 'application/json' });
@@ -82,7 +82,7 @@ class ResearchState {
     this.labRunning = { video: 0, videos: 0, combo: 0, combos: 0 };
     const jobId = ++this.jobId;
     try {
-      await this.run({ type: 'lab', jobId, grid: $state.snapshot(grid) as ParamGrid, app: APP }, 'lab', (ev) => {
+      await this.run({ type: 'lab', jobId, grid: $state.snapshot(grid) as ParamGrid, app: appInfo() }, 'lab', (ev) => {
         if (ev.type === 'lab-progress') this.labRunning = ev.progress;
         if (ev.type !== 'lab-done') return false;
         this.report = ev.report;

@@ -310,7 +310,9 @@ test('the videos of a session form one timeline; the files have their own page',
 test('version.json is served and the manifest is linked', async ({ page, request }) => {
   const res = await request.get('./version.json');
   expect(res.ok()).toBe(true);
-  expect((await res.json()).version).toBeTruthy();
+  const version = await res.json();
+  expect(version.build).toMatch(/^[0-9a-f]{12}$/);
+  expect(version.version).toBeTruthy();
   await page.goto('./');
   await expect(page.locator('link[rel=manifest]')).toHaveAttribute('href', './manifest.webmanifest');
   const manifest = await request.get('./manifest.webmanifest');

@@ -1,13 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { isNewer } from './update.svelte';
+import { isNewer, mayAutoReload, MIN_PAGE_AGE_MS } from './update.svelte';
 
 describe('isNewer', () => {
-  it('detects a different deployed version', () => {
-    expect(isNewer('a-1', { version: 'b-2' })).toBe(true);
-    expect(isNewer('a-1', { version: 'a-1' })).toBe(false);
-    expect(isNewer('a-1', { version: '' })).toBe(false);
-    expect(isNewer('a-1', null)).toBe(false);
-    expect(isNewer('a-1', 'x')).toBe(false);
+  it('detects a different deployed build', () => {
+    expect(isNewer('a1', { build: 'b2', version: 'x', builtAt: 'y' })).toBe(true);
+    expect(isNewer('a1', { build: 'a1' })).toBe(false);
+    expect(isNewer('a1', { build: '' })).toBe(false);
+    expect(isNewer('a1', { version: 'b2' })).toBe(false); // only `build` counts: version changes on every CI run
+    expect(isNewer('a1', null)).toBe(false);
+    expect(isNewer('a1', 'x')).toBe(false);
+  });
+
+  it('stays silent in an unstamped (dev) page', () => {
+    expect(isNewer('dev', { build: 'b2' })).toBe(false);
+  });
+});
+
+describe('mayAutoReload', () => {
+  it('waits for the first 20 s and never reloads twice for the same build', () => {
+    expect(mayAutoReload('b2', MIN_PAGE_AGE_MS - 1, null)).toBe(false);
+    expect(mayAutoReload('b2', MIN_PAGE_AGE_MS, null)).toBe(true);
+    expect(mayAutoReload('b2', 60_000, 'b2')).toBe(false);
+    expect(mayAutoReload('b3', 60_000, 'b2')).toBe(true);
   });
 });
 

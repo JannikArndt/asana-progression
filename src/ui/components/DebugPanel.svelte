@@ -4,6 +4,7 @@
   import { deleteFile, sampleFileName } from '../../storage';
   import type { Analysis, Video } from '../../model';
   import { app } from '../state/app.svelte';
+  import { appInfo } from '../build';
   import { router } from '../state/router.svelte';
   import { dialog } from '../state/dialog.svelte';
   import { invalidateSamples, sampleReader } from '../state/samples';
@@ -120,7 +121,7 @@
 
   async function copyDiagnostics() {
     const report = {
-      app: { version: __APP_VERSION__, builtAt: __BUILT_AT__ },
+      app: appInfo(),
       device: deviceInfo(),
       ...videoDiagnostics(video, analysis, support, capture.diagnostics(video.id, analysis)),
       hdrProbe: await app.db.settings.get('diag.hdrProbe'),

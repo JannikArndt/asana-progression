@@ -8,6 +8,7 @@
   import type { Video } from '../../model';
   import type { VideoMeta } from '../../source';
   import { app } from '../state/app.svelte';
+  import { appInfo } from '../build';
   import { capture } from '../state/capture.svelte';
   import { router } from '../state/router.svelte';
   import { SessionReview } from '../state/review.svelte';
@@ -86,7 +87,7 @@
     const session = review.session;
     if (!session) return;
     const report = {
-      app: { version: __APP_VERSION__, builtAt: __BUILT_AT__ },
+      app: appInfo(),
       device: deviceInfo(),
       session: { id: session.id, date: session.date, videoIds: session.videoIds, templateId: session.templateId ?? null },
       videos: await Promise.all(
