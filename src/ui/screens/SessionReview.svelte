@@ -543,7 +543,10 @@
     <button class="btn quiet" type="button" onclick={() => router.go({ name: 'home', tab: 'sessions' })}>‹ Sessions</button>
     {#if review.session}
       {@const n = review.session.videoIds.length}
-      <a class="btn quiet videos-link" href={routeHash({ name: 'session-videos', id })}>{n} {n === 1 ? 'video' : 'videos'} ›</a>
+      <span class="links">
+        {#if counts.labeled}<a class="btn quiet videos-link" href={routeHash({ name: 'session-poses', id })}>Poses ›</a>{/if}
+        <a class="btn quiet videos-link" href={routeHash({ name: 'session-videos', id })}>{n} {n === 1 ? 'video' : 'videos'} ›</a>
+      </span>
     {/if}
   </header>
 
@@ -820,6 +823,10 @@
   }
 
   /* The video files are a technical detail: a quiet link to their own page. */
+  .links {
+    display: flex;
+  }
+
   .videos-link {
     color: var(--color-text-2);
     text-decoration: none;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayCrop, fillCrop, flipbookInterval, hasBothSides, hasReps, holdReps, itemAspect, nextColumns, progressionItems, repLabel, swipeIndex, typicalAspect } from './views';
+import { cropFileName, cropPixels, displayCrop, fillCrop, flipbookInterval, hasBothSides, hasReps, holdReps, itemAspect, nextColumns, progressionItems, repLabel, sessionItems, swipeIndex, typicalAspect } from './views';
 import type { Asset, Hold, Session } from '../model/types';
 
 const hold = (id: string, sessionId: string, asanaId: string, side: Hold['side'], startS = 0): Hold => ({
@@ -144,5 +144,41 @@ describe('crop aspects', () => {
     expect(px(fillCrop(null, 1600, 900, 1), 1600, 900)).toEqual([350, 0, 900, 900]);
     // A tall crop that cannot grow wide enough in a portrait frame is cut instead.
     expect(px(fillCrop({ x: 0, y: 0, w: 1, h: 1 }, 900, 1600, 1), 900, 1600)).toEqual([0, 350, 900, 900]);
+  });
+});
+
+describe('sessionItems', () => {
+  const ses: Session[] = [{ id: 's1', date: '2026-10-14T07:00:00+02:00', note: 'n', videoIds: ['v2', 'v1'] }, { id: 's2', date: '2026-10-15', note: '', videoIds: ['v'] }];
+  const h = (id: string, sid: string, vid: string, asanaId: string, startS: number): Hold => ({ ...hold(id, sid, asanaId, null, startS), videoId: vid });
+  const holds = [h('c', 's1', 'v1', 'navasana', 10), h('a', 's1', 'v2', 'navasana', 300), h('b', 's1', 'v2', 'kurmasana', 400), h('d', 's1', 'v1', 'navasana', 20), h('x', 's2', 'v', 'navasana', 0)];
+
+  it('lists the holds of one session in practice order with reps and assets', () => {
+    const items = sessionItems('s1', holds, ses, [asset('st', 'b', 'still')]);
+    expect(items.map((i) => [i.hold.id, repLabel(i)])).toEqual([
+      ['a', ''],
+      ['b', ''],
+      ['c', '1/2'],
+      ['d', '2/2'],
+    ]);
+    expect(items[1]!.still?.id).toBe('st');
+    expect(items[0]!.note).toBe('n');
+    expect(sessionItems('gone', holds, ses, [])).toEqual([]);
+  });
+});
+
+describe('crop export', () => {
+  it('maps a crop to whole pixels inside the image', () => {
+    expect(cropPixels(null, 1920, 1080)).toEqual({ x: 0, y: 0, w: 1920, h: 1080 });
+    expect(cropPixels({ x: 0.25, y: 0.1, w: 0.5, h: 0.5 }, 1000, 800)).toEqual({ x: 250, y: 80, w: 500, h: 400 });
+    expect(cropPixels({ x: 0.9, y: 0.9, w: 0.5, h: 0.5 }, 100, 100)).toEqual({ x: 90, y: 90, w: 10, h: 10 });
+    expect(cropPixels({ x: 1.2, y: -0.1, w: 0, h: 0 }, 100, 100)).toEqual({ x: 99, y: 0, w: 1, h: 1 });
+  });
+
+  it('names files by date, position, asana, side and rep', () => {
+    const it1 = { date: '2026-10-14T07:00:00+02:00', hold: { side: 'R' as const }, rep: 1, reps: 1 };
+    expect(cropFileName(it1 as never, 'Utthita Trikonasana', 7)).toBe('2026-10-14_07_Utthita-Trikonasana_R.jpg');
+    expect(cropFileName({ ...it1, hold: { side: null }, rep: 2, reps: 5 } as never, 'Navasana', 31, 3)).toBe('2026-10-14_031_Navasana_rep2of5.jpg');
+    expect(cropFileName({ ...it1, date: '' } as never, ' Ūrdhva / Dhanurāsana ', 1)).toBe('undated_01_Ūrdhva-Dhanurāsana_R.jpg');
+    expect(cropFileName(it1 as never, '//', 1)).toBe('2026-10-14_01_asana_R.jpg');
   });
 });

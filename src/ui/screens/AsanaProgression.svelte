@@ -17,6 +17,8 @@
   import { capture } from '../state/capture.svelte';
   import { chooseBestFrame, setManualCrop } from '../state/hold-actions';
   import VideoFinder from '../components/VideoFinder.svelte';
+  import CropExportNotice from '../components/CropExportNotice.svelte';
+  import { cropExport } from '../state/crop-export.svelte';
   import { asanaFamilies, familyLetter } from '../../model';
   import { formatDay } from '../format';
 
@@ -122,6 +124,14 @@
     viewerIndex = items.indexOf(item);
   }
 
+  /** Cropped stills of the shown holds (side and rep filters apply), oldest first. */
+  function exportCrops() {
+    const a = asana;
+    if (!a) return;
+    const slug = a.name.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '') || 'asana';
+    void cropExport.prepare(`asana:${id}`, items, () => a.name, `${slug}-progression`);
+  }
+
   function statusText(item: ProgressionItem): string {
     const s = capture.status[item.hold.id];
     if (s === 'queued' || s === 'capturing') return 'Capturing…';
@@ -186,9 +196,14 @@
 <main class="asana">
   <header class="top">
     <button class="btn quiet" type="button" onclick={() => router.go({ name: 'home', tab: 'asanas' })}>‹ Asanas</button>
-    {#if withStills.length >= 2}
-      <button class="btn quiet" type="button" onclick={() => (flipbook = true)}>Flipbook</button>
-    {/if}
+    <span class="actions">
+      {#if withStills.length}
+        <button class="btn quiet" type="button" onclick={exportCrops} disabled={!!cropExport.preparing}>Export</button>
+      {/if}
+      {#if withStills.length >= 2}
+        <button class="btn quiet" type="button" onclick={() => (flipbook = true)}>Flipbook</button>
+      {/if}
+    </span>
   </header>
   {#if asana}
     <div class="title">
@@ -239,6 +254,8 @@
         {#if attachMessage}<p class="small" aria-live="polite">{attachMessage}</p>{/if}
       </div>
     {/if}
+
+    <CropExportNotice scope="asana:{id}" />
 
     {#if !items.length}
       <p class="muted">No holds labeled yet. Label holds in a session to see them here.</p>
@@ -384,6 +401,10 @@
     display: flex;
     justify-content: space-between;
     margin: 0 calc(-1 * var(--space-3));
+  }
+
+  .actions {
+    display: flex;
   }
 
   .title {

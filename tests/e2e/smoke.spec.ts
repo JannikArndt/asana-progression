@@ -190,9 +190,51 @@ test('import → review → asana', async ({ page }) => {
   await expect(page.locator('.tile')).toHaveCount(1);
   await page.getByRole('radio', { name: 'Left' }).click();
   await expect(page.locator('.tile')).toHaveCount(0);
+  await page.getByRole('radio', { name: 'Both' }).click();
+
+  // Export the cropped stills of the asana as a ZIP.
+  const zipEntries = async (download: import('@playwright/test').Download) => {
+    const bytes = await (await import('node:fs/promises')).readFile(await download.path());
+    // STORE-only ZIP: the names are in the clear; every entry is a JPEG.
+    return { names: [...bytes.toString('latin1').matchAll(/PK\x01\x02[\s\S]{42}([^\x00]+?\.jpg)/g)].map((m) => m[1]), jpegs: bytes.toString('latin1').split('\xff\xd8\xff').length - 1 };
+  };
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await expect(page.getByText('1 cropped photo ready')).toBeVisible({ timeout: 30_000 });
+  let download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save ZIP' }).click();
+  expect((await download).suggestedFilename()).toBe('Utthita-Trikonasana-progression.zip');
+  expect(await zipEntries(await download)).toEqual({ names: [expect.stringMatching(/^\d{4}-\d{2}-\d{2}_01_Utthita-Trikonasana_R\.jpg$/)], jpegs: 1 });
+
+  // The session in poses: the labeled holds as cropped photos in practice order, and their export.
+  await page.getByRole('button', { name: '‹ Asanas' }).click();
+  await page.getByRole('tab', { name: 'Sessions' }).click();
+  await page.locator('.row.session').first().click();
+  await page.getByRole('link', { name: 'Poses ›' }).click();
+  await expect(page).toHaveURL(/#\/session\/[^/]+\/poses$/);
+  await expect(page.locator('.grid .tile')).toHaveCount(2);
+  await expect(page.locator('.grid .tile .name')).toHaveText(['Adho Mukha Svanasana', 'Utthita Trikonasana']);
+  await expect(page.locator('.grid .tile img')).toHaveCount(2, { timeout: 60_000 });
+  await page.getByRole('radio', { name: '3 columns' }).click();
+  await page.locator('.grid .tile').nth(1).click();
+  const poseViewer = page.getByRole('dialog', { name: /holds$/ });
+  await expect(poseViewer.locator('footer')).toContainText('Utthita Trikonasana · Right');
+  await poseViewer.locator('.slide.current .media').click();
+  await expect(poseViewer.getByRole('toolbar', { name: 'Hold actions' }).getByRole('button', { name: 'Compare' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await expect(page.getByText('2 cropped photos ready')).toBeVisible({ timeout: 30_000 });
+  download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save ZIP' }).click();
+  expect((await download).suggestedFilename()).toMatch(/^asana-progression-\d{4}-\d{2}-\d{2}\.zip$/);
+  expect((await zipEntries(await download)).names).toEqual([
+    expect.stringMatching(/_01_Adho-Mukha-Svanasana\.jpg$/),
+    expect.stringMatching(/_02_Utthita-Trikonasana_R\.jpg$/),
+  ]);
+  await page.getByRole('link', { name: '‹ Session' }).click();
+  await page.getByRole('button', { name: '‹ Sessions' }).click();
+  await page.getByRole('tab', { name: 'Asanas' }).click();
 
   // Re-importing the same file asks what to do.
-  await page.getByRole('button', { name: '‹ Asanas' }).click();
   await page.locator('input[type=file]').first().setInputFiles(video);
   await expect(page.getByText('This video was imported before')).toBeVisible();
   // "Cancel" of a question is the sheet's ✕ in the header.

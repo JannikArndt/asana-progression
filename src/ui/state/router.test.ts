@@ -12,6 +12,7 @@ describe('router', () => {
       { name: 'video', id: 'vid_a/b' },
       { name: 'session', id: 'ses_1' },
       { name: 'session-videos', id: 'ses_1' },
+      { name: 'session-poses', id: 'ses_1' },
       { name: 'asana', id: 'navasana' },
     ];
     for (const r of routes) expect(parseHash(routeHash(r))).toEqual(r);

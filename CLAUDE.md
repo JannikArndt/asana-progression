@@ -298,6 +298,18 @@ crossfade with both dates and a Stop button; the feed marks the reference. Choos
 re-captures the still (no file → re-attach row in the viewer). Flipbook (`Flipbook`: stills in date order,
 0.5–12 per second, preloads ahead). Holds without a still fall back to the tiny analysis frame.
 
+Session in poses (`#/session/<id>/poses`, `screens/SessionPoses.svelte`, linked "Poses ›" in the
+review header once a hold is labeled): the session's labeled holds as cropped photos in practice
+order (`progression.sessionItems`), 1–3 columns (localStorage `asana.sessionPoses.columns`), tiles
+share the median crop aspect, captions = asana name, side, rep; the same viewer (`HoldViewer`
+`heading` = asana name, no Compare), crop editor and frame picker as the asana page.
+
+Crop export ("Export" on the asana page — the shown holds, filters apply — and on the poses
+page; `ui/state/crop-export.svelte.ts`, `CropExportNotice`): each full-resolution still cut to its
+display crop (`progression.cropPixels`), JPEG q 0.92, named `<date>_<nn>_<Asana-Name>[_R|L][_repXofY].jpg`
+(`cropFileName`); holds without a still are skipped and counted. The result waits for a fresh tap:
+"Share N photos…" (share sheet with the images: Save to Photos) or "Save ZIP" (STORE ZIP).
+
 ### Backup (milestone 5)
 
 Settings → Backup. `storage/zip.ts` is a dependency-free STORE-only ZIP writer/reader (streaming

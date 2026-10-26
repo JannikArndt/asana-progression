@@ -4,6 +4,7 @@
   import Processing from './screens/Processing.svelte';
   import SessionReview from './screens/SessionReview.svelte';
   import SessionVideos from './screens/SessionVideos.svelte';
+  import SessionPoses from './screens/SessionPoses.svelte';
   import AsanaProgression from './screens/AsanaProgression.svelte';
   import Catalog from './screens/Catalog.svelte';
   import TemplateEditor from './screens/TemplateEditor.svelte';
@@ -18,6 +19,7 @@
   import { capture } from './state/capture.svelte';
   import { backup } from './state/backup.svelte';
   import { research } from './state/research.svelte';
+  import { cropExport } from './state/crop-export.svelte';
   import { updates } from './update.svelte';
 
   // Old milestone-1 links (#/video/<id>) open the session containing the video.
@@ -36,6 +38,7 @@
     // A prepared backup file would be lost, e.g. while the share sheet hides the page.
     updates.addQuietCheck(() => !backup.exporting && !backup.importing && !backup.ready);
     updates.addQuietCheck(() => !research.busy && !research.ready);
+    updates.addQuietCheck(() => !cropExport.preparing && !cropExport.ready);
     // Selected video files are lost on reload: switching to Photos to find the next file hides the page.
     updates.addHiddenCheck(() => app.files.size === 0);
     updates.start();
@@ -54,6 +57,10 @@
 {:else if router.route.name === 'session-videos'}
   {#key router.route.id}
     <SessionVideos id={router.route.id} />
+  {/key}
+{:else if router.route.name === 'session-poses'}
+  {#key router.route.id}
+    <SessionPoses id={router.route.id} />
   {/key}
 {:else if router.route.name === 'asana'}
   {#key router.route.id}<AsanaProgression id={router.route.id} />{/key}

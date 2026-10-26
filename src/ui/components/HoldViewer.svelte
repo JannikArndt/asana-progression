@@ -15,7 +15,7 @@
   import { dismissOffset, dismissProgress, gestureAxis, isTap, shouldDismiss, type Axis } from './viewer-gestures';
 
   interface Props {
-    /** All holds of the asana, oldest first. */
+    /** All holds of the asana, oldest first (or of one session, in practice order). */
     items: ProgressionItem[];
     index: number;
     /** The hold the others are compared with (split slider / crossfade), or null. */
@@ -23,14 +23,17 @@
     title: string;
     /** Something is open on top (crop editor, frame picker): it owns the keyboard. */
     covered?: boolean;
-    oncompare: (holdId: string | null) => void;
+    /** Mark a reference hold (omitted: no Compare action, e.g. the holds of one session). */
+    oncompare?: ((holdId: string | null) => void) | undefined;
+    /** First caption line of a hold (default: its date). */
+    heading?: ((item: ProgressionItem) => string) | undefined;
     onedit: (item: ProgressionItem) => void;
     /** Choose another best frame from the analysis frames (omitted: no such action). */
     onframe?: ((item: ProgressionItem) => void) | undefined;
     onsession: (sessionId: string) => void;
     onclose: () => void;
   }
-  let { items, index = $bindable(), compareId, title, covered = false, oncompare, onedit, onframe, onsession, onclose }: Props = $props();
+  let { items, index = $bindable(), compareId, title, covered = false, oncompare, heading, onedit, onframe, onsession, onclose }: Props = $props();
 
   type CompareMode = 'split' | 'fade';
   const POSTURE: Record<PostureClass, string> = { standing: 'standing', seated: 'seated', lying: 'lying', inverted: 'inverted', 'arm-balance': 'arm balance' };
@@ -292,10 +295,12 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2" /><path d="M12 7.5v7M5.5 10.5h13M12 14.5l-4 7M12 14.5l4 7" /></svg>
           <span>Pose</span>
         </button>
-        <button type="button" aria-pressed={isReference} class:on={isReference} onclick={() => { oncompare(isReference ? null : current.hold.id); showBar(); }}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M12 2v20" /></svg>
-          <span>Compare</span>
-        </button>
+        {#if oncompare}
+          <button type="button" aria-pressed={isReference} class:on={isReference} onclick={() => { oncompare(isReference ? null : current.hold.id); showBar(); }}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M12 2v20" /></svg>
+            <span>Compare</span>
+          </button>
+        {/if}
       </div>
     {/if}
   </div>
@@ -303,14 +308,14 @@
   <footer style:opacity={1 - closing}>
     {#if current}
       <div class="caption">
-        <span class="date tabular">{formatDay(current.date, true)}{current.hold.side ? ` · ${current.hold.side === 'R' ? 'Right' : 'Left'}` : ''}{current.reps > 1 ? ` · rep ${current.rep} of ${current.reps}` : ''}</span>
+        <span class="date tabular">{heading ? heading(current) : formatDay(current.date, true)}{current.hold.side ? ` · ${current.hold.side === 'R' ? 'Right' : 'Left'}` : ''}{current.reps > 1 ? ` · rep ${current.rep} of ${current.reps}` : ''}</span>
         {#if current.note}<span class="note">{current.note}</span>{/if}
       </div>
       {#if comparing && reference}
         <div class="compare">
           <div class="compare-head">
             <span>Comparing with <strong class="tabular">{formatDay(reference.date, true)}</strong></span>
-            <button class="btn quiet small" type="button" onclick={() => oncompare(null)}>Stop</button>
+            <button class="btn quiet small" type="button" onclick={() => oncompare?.(null)}>Stop</button>
           </div>
           <div class="modes" role="radiogroup" aria-label="Compare mode">
             <button type="button" role="radio" aria-checked={compare === 'split'} class:on={compare === 'split'} onclick={() => (compare = 'split')}>Split</button>
@@ -321,7 +326,7 @@
       {:else if isReference}
         <div class="compare-head">
           <span class="explain">{items.length > 1 ? 'Swipe to another day to compare it with this one.' : 'Compare needs a second hold of this asana.'}</span>
-          <button class="btn quiet small" type="button" onclick={() => oncompare(null)}>Stop</button>
+          <button class="btn quiet small" type="button" onclick={() => oncompare?.(null)}>Stop</button>
         </div>
       {/if}
       {#if video}

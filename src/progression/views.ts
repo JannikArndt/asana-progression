@@ -49,8 +49,26 @@ export function progressionItems(
   reps: RepFilter = 'all',
 ): ProgressionItem[] {
   const sessionById = new Map(sessions.map((s) => [s.id, s]));
-  const repOf = holdReps(holds, sessions);
   const videoPos = (h: Hold) => sessionById.get(h.sessionId)?.videoIds.indexOf(h.videoId) ?? -1;
+  return buildItems(holds, sessions, assets, (h) => h.asanaId === asanaId && (side === 'both' || h.side === side))
+    .filter((it) => reps === 'all' || (reps === 'first' ? it.rep === 1 : it.rep === it.reps))
+    .sort((a, b) => a.date.localeCompare(b.date) || videoPos(a.hold) - videoPos(b.hold) || a.hold.startS - b.hold.startS);
+}
+
+/**
+ * All holds of one session with their assets, in practice order (videos as listed in the
+ * session, then time). `holds` may contain other sessions' holds; they are left out.
+ */
+export function sessionItems(sessionId: string, holds: Hold[], sessions: Session[], assets: Asset[]): ProgressionItem[] {
+  const videoIds = sessions.find((s) => s.id === sessionId)?.videoIds ?? [];
+  const videoPos = (h: Hold) => videoIds.indexOf(h.videoId);
+  const own = holds.filter((h) => h.sessionId === sessionId);
+  return buildItems(own, sessions, assets, () => true).sort((a, b) => videoPos(a.hold) - videoPos(b.hold) || a.hold.startS - b.hold.startS);
+}
+
+function buildItems(holds: Hold[], sessions: Session[], assets: Asset[], keep: (h: Hold) => boolean): ProgressionItem[] {
+  const sessionById = new Map(sessions.map((s) => [s.id, s]));
+  const repOf = holdReps(holds, sessions);
   const byHold = new Map<string, Asset[]>();
   for (const a of assets) {
     const list = byHold.get(a.holdId) ?? [];
@@ -59,25 +77,21 @@ export function progressionItems(
   }
   const newest = (list: Asset[] | undefined, kind: Asset['kind']) =>
     list?.filter((a) => a.kind === kind).sort((x, y) => (y.createdAt ?? '').localeCompare(x.createdAt ?? ''))[0];
-  return holds
-    .filter((h) => h.asanaId === asanaId && (side === 'both' || h.side === side))
-    .map((hold) => {
-      const s = sessionById.get(hold.sessionId);
-      const list = byHold.get(hold.id);
-      const r = repOf.get(hold.id) ?? { rep: 1, of: 1 };
-      return {
-        hold,
-        date: s?.date ?? '',
-        note: s?.note ?? '',
-        still: newest(list, 'still'),
-        thumb: newest(list, 'thumb'),
-        clip: newest(list, 'clip'),
-        rep: r.rep,
-        reps: r.of,
-      };
-    })
-    .filter((it) => reps === 'all' || (reps === 'first' ? it.rep === 1 : it.rep === it.reps))
-    .sort((a, b) => a.date.localeCompare(b.date) || videoPos(a.hold) - videoPos(b.hold) || a.hold.startS - b.hold.startS);
+  return holds.filter(keep).map((hold) => {
+    const s = sessionById.get(hold.sessionId);
+    const list = byHold.get(hold.id);
+    const r = repOf.get(hold.id) ?? { rep: 1, of: 1 };
+    return {
+      hold,
+      date: s?.date ?? '',
+      note: s?.note ?? '',
+      still: newest(list, 'still'),
+      thumb: newest(list, 'thumb'),
+      clip: newest(list, 'clip'),
+      rep: r.rep,
+      reps: r.of,
+    };
+  });
 }
 
 /** Whether any session has more than one rep of the asana in a row (to offer the rep filter). */
@@ -161,4 +175,32 @@ export function fillCrop(crop: Box | null, width: number, height: number, aspect
   const x = Math.min(width - w, Math.max(0, cx - w / 2));
   const y = Math.min(height - h, Math.max(0, cy - h / 2));
   return { x: x / width, y: y / height, w: w / width, h: h / height };
+}
+
+/** Pixel rectangle of a normalized crop in an image (rounded, inside the image, at least 1 px). */
+export function cropPixels(crop: Box | null, width: number, height: number): { x: number; y: number; w: number; h: number } {
+  const c = crop ?? { x: 0, y: 0, w: 1, h: 1 };
+  const x = Math.min(width - 1, Math.max(0, Math.round(c.x * width)));
+  const y = Math.min(height - 1, Math.max(0, Math.round(c.y * height)));
+  const w = Math.max(1, Math.min(width - x, Math.round(c.w * width)));
+  const h = Math.max(1, Math.min(height - y, Math.round(c.h * height)));
+  return { x, y, w, h };
+}
+
+/**
+ * File name of an exported crop: date, position, asana, side and rep, e.g.
+ * "2026-10-14_07_Utthita-Trikonasana_R.jpg" or "2026-10-14_31_Navasana_rep2of5.jpg".
+ * `position` is 1-based (the order in the export); names keep letters of any script.
+ */
+export function cropFileName(item: Pick<ProgressionItem, 'date' | 'hold' | 'rep' | 'reps'>, asanaName: string, position: number, digits = 2): string {
+  const day = /^\d{4}-\d{2}-\d{2}/.exec(item.date)?.[0] ?? 'undated';
+  const name =
+    asanaName
+      .normalize('NFC')
+      .replace(/[^\p{L}\p{N}]+/gu, '-')
+      .replace(/^-+|-+$/g, '') || 'asana';
+  const parts = [day, String(position).padStart(digits, '0'), name];
+  if (item.hold.side) parts.push(item.hold.side);
+  if (item.reps > 1) parts.push(`rep${item.rep}of${item.reps}`);
+  return `${parts.join('_')}.jpg`;
 }
