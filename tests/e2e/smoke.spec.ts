@@ -173,6 +173,38 @@ test('import → review → asana', async ({ page }) => {
   await expect.poll(maskAspect).toBeGreaterThan(0.8);
   await editor.getByRole('button', { name: 'Save' }).click();
   await expect(editor).toBeHidden();
+  // Save the photo as shown (the crop just edited), at the still's resolution, with or without metadata.
+  const jpegInfo = async (download: import('@playwright/test').Download) => {
+    const b = await (await import('node:fs/promises')).readFile(await download.path());
+    let p = 2;
+    while (p < b.length && !(b[p + 1]! >= 0xc0 && b[p + 1]! <= 0xc2)) p += 2 + b.readUInt16BE(p + 2);
+    return { width: b.readUInt16BE(p + 7), height: b.readUInt16BE(p + 5), text: b.toString('latin1') };
+  };
+  await action('Save photo');
+  const saveSheet = page.getByRole('dialog', { name: 'Save photo' });
+  const size = saveSheet.getByText(/\d+ × \d+ px/);
+  await expect(size).toBeVisible({ timeout: 30_000 });
+  const [w, h] = (await size.textContent())!.match(/(\d+) × (\d+) px/)!.slice(1).map(Number);
+  expect(w! / h!).toBeGreaterThan(0.8); // the free crop from the editor, not the 16:9 frame
+  let photo = page.waitForEvent('download');
+  await saveSheet.getByRole('button', { name: 'Save', exact: true }).click();
+  let info = await jpegInfo(await photo);
+  expect((await photo).suggestedFilename()).toMatch(/^\d{4}-\d{2}-\d{2}_Utthita-Trikonasana_R\.jpg$/);
+  expect([info.width, info.height]).toEqual([w, h]);
+  expect(info.text).not.toContain('Exif');
+  await saveSheet.getByLabel(/Include metadata/).check();
+  photo = page.waitForEvent('download');
+  await saveSheet.getByRole('button', { name: 'Save', exact: true }).click();
+  info = await jpegInfo(await photo);
+  expect([info.width, info.height]).toEqual([w, h]);
+  expect(info.text).toContain('Exif\0\0MM');
+  expect(info.text).toContain('Utthita Trikonasana - Right');
+  expect(info.text).toContain('#/asana/utthita-trikonasana');
+  expect(info.text).toMatch(/DateCreated>\d{4}-\d{2}-\d{2}T/);
+  await saveSheet.getByLabel(/Include metadata/).uncheck();
+  await page.keyboard.press('Escape');
+  await expect(saveSheet).toBeHidden();
+  await expect(viewer).toBeVisible();
   // A tap beside the image closes the viewer; so do a pull down and Escape.
   await viewer.locator('.stage').click({ position: { x: 4, y: 4 } });
   await expect(viewer).toBeHidden();
@@ -196,14 +228,15 @@ test('import → review → asana', async ({ page }) => {
   const zipEntries = async (download: import('@playwright/test').Download) => {
     const bytes = await (await import('node:fs/promises')).readFile(await download.path());
     // STORE-only ZIP: the names are in the clear; every entry is a JPEG.
-    return { names: [...bytes.toString('latin1').matchAll(/PK\x01\x02[\s\S]{42}([^\x00]+?\.jpg)/g)].map((m) => m[1]), jpegs: bytes.toString('latin1').split('\xff\xd8\xff').length - 1 };
+    const text = bytes.toString('latin1');
+    return { names: [...text.matchAll(/PK\x01\x02[\s\S]{42}([^\x00]+?\.jpg)/g)].map((m) => m[1]), jpegs: text.split('\xff\xd8\xff').length - 1, exif: text.split('Exif\0\0').length - 1 };
   };
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   await expect(page.getByText('1 cropped photo ready')).toBeVisible({ timeout: 30_000 });
   let download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Save ZIP' }).click();
   expect((await download).suggestedFilename()).toBe('Utthita-Trikonasana-progression.zip');
-  expect(await zipEntries(await download)).toEqual({ names: [expect.stringMatching(/^\d{4}-\d{2}-\d{2}_01_Utthita-Trikonasana_R\.jpg$/)], jpegs: 1 });
+  expect(await zipEntries(await download)).toEqual({ names: [expect.stringMatching(/^\d{4}-\d{2}-\d{2}_01_Utthita-Trikonasana_R\.jpg$/)], jpegs: 1, exif: 0 });
 
   // The session in poses: the labeled holds as cropped photos in practice order, and their export.
   await page.getByRole('button', { name: '‹ Asanas' }).click();
@@ -230,6 +263,12 @@ test('import → review → asana', async ({ page }) => {
     expect.stringMatching(/_01_Adho-Mukha-Svanasana\.jpg$/),
     expect.stringMatching(/_02_Utthita-Trikonasana_R\.jpg$/),
   ]);
+  // With metadata: every photo carries EXIF (the choice is remembered).
+  await page.getByLabel(/Include metadata/).check();
+  download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save ZIP' }).click();
+  expect(await zipEntries(await download)).toMatchObject({ jpegs: 2, exif: 2 });
+  await page.getByLabel(/Include metadata/).uncheck();
   await page.getByRole('link', { name: '‹ Session' }).click();
   await page.getByRole('button', { name: '‹ Sessions' }).click();
   await page.getByRole('tab', { name: 'Asanas' }).click();

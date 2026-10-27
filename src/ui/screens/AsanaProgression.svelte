@@ -129,7 +129,7 @@
     const a = asana;
     if (!a) return;
     const slug = a.name.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '') || 'asana';
-    void cropExport.prepare(`asana:${id}`, items, () => a.name, `${slug}-progression`);
+    void cropExport.prepare(`asana:${id}`, items, `${slug}-progression`);
   }
 
   function statusText(item: ProgressionItem): string {

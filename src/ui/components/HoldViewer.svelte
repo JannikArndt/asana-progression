@@ -3,6 +3,7 @@
   import { fade } from 'svelte/transition';
   import AssetImage from './AssetImage.svelte';
   import PoseOverlay from './PoseOverlay.svelte';
+  import PhotoSaveSheet from './PhotoSaveSheet.svelte';
   import { displayCrop, itemAspect, swipeIndex, type ProgressionItem } from '../../progression';
   import type { PostureClass } from '../../model';
   import { formatDay } from '../format';
@@ -52,6 +53,8 @@
   let bar = $state(false);
   let barTimer: ReturnType<typeof setTimeout> | undefined;
   let showPose = $state(false);
+  /** The hold whose cropped photo is being saved (sheet above the viewer). */
+  let saving = $state.raw<ProgressionItem | null>(null);
   let poses = $state.raw<Record<string, PoseResult | 'loading'>>({});
 
   const current = $derived(items[index]);
@@ -135,7 +138,7 @@
     });
     ro.observe(stage);
     const onKey = (e: KeyboardEvent) => {
-      if (covered) return;
+      if (covered || saving) return;
       if (e.key === 'Escape') onclose();
       else if (e.key === 'ArrowLeft') index = Math.max(0, index - 1);
       else if (e.key === 'ArrowRight') index = Math.min(items.length - 1, index + 1);
@@ -271,29 +274,33 @@
 
     {#if bar && current}
       <div class="bar" role="toolbar" aria-label="Hold actions" transition:fade={{ duration: 150 }}>
-        <button type="button" onclick={() => open(() => onedit(current))} disabled={!current.still}>
+        <button type="button" aria-label="Edit crop" onclick={() => open(() => onedit(current))} disabled={!current.still}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14" /></svg>
-          <span>Edit crop</span>
+          <span>Crop</span>
         </button>
         {#if onframe}
-          <button type="button" onclick={() => open(() => onframe(current))} disabled={!canChooseFrame}>
+          <button type="button" aria-label="Choose frame" onclick={() => open(() => onframe(current))} disabled={!canChooseFrame}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M8 5v14M16 5v14" /></svg>
-            <span>Choose frame</span>
+            <span>Frame</span>
           </button>
         {/if}
         {#if current.clip}
-          <button type="button" aria-pressed={playing} onclick={() => { playing = !playing; showBar(); }}>
+          <button type="button" aria-label={playing ? 'Stop clip' : 'Play clip'} aria-pressed={playing} onclick={() => { playing = !playing; showBar(); }}>
             {#if playing}
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>
             {:else}
               <svg viewBox="0 0 24 24" aria-hidden="true"><path class="solid" d="M7 4.5l12 7.5-12 7.5z" /></svg>
             {/if}
-            <span>{playing ? 'Stop clip' : 'Play clip'}</span>
+            <span>{playing ? 'Stop' : 'Clip'}</span>
           </button>
         {/if}
         <button type="button" aria-pressed={showPose} class:on={showPose} onclick={() => { showPose = !showPose; showBar(); }} disabled={!current.still}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2" /><path d="M12 7.5v7M5.5 10.5h13M12 14.5l-4 7M12 14.5l4 7" /></svg>
           <span>Pose</span>
+        </button>
+        <button type="button" aria-label="Save photo" onclick={() => open(() => (saving = current))} disabled={!current.still}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 17v3h16v-3" /></svg>
+          <span>Save</span>
         </button>
         {#if oncompare}
           <button type="button" aria-pressed={isReference} class:on={isReference} onclick={() => { oncompare(isReference ? null : current.hold.id); showBar(); }}>
@@ -350,6 +357,10 @@
     {/if}
   </footer>
 </div>
+
+{#if saving}
+  <PhotoSaveSheet item={saving} onclose={() => (saving = null)} />
+{/if}
 
 <style>
   /* The backdrop fades while the image is pulled down. */
@@ -496,10 +507,10 @@
   }
 
   .bar button {
-    flex: 1 1 0;
+    flex: 1 1 auto;
     min-width: var(--touch);
     min-height: 52px;
-    padding: var(--space-1) var(--space-2);
+    padding: var(--space-1) 2px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -530,6 +541,13 @@
     stroke-width: 1.8;
     stroke-linecap: round;
     stroke-linejoin: round;
+  }
+
+  .bar button span {
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
   .bar svg .solid {

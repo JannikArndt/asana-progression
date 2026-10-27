@@ -289,7 +289,8 @@ member's page (side and rep filters carried over), so everything below is one le
 (2–4 columns, pinch or ctrl+wheel; tiles share the median crop aspect), side filter, rep filter
 (All reps / First / Last, when the asana has runs of reps), viewer
 (`HoldViewer`: swipe through all holds oldest → newest; a tap on the image toggles a translucent
-action bar — Edit crop, Choose frame, Play clip, Pose, Compare — that hides after 4 s; nothing
+action bar — Crop, Frame, Clip, Pose, Save, Compare (short labels; the buttons' `aria-label`s
+are the full names: Edit crop, Choose frame, Play clip, Save photo) — that hides after 4 s; nothing
 opens directly from a tap; a tap beside the image, a pull down or Escape closes; axis decided after
 10 px in `viewer-gestures.ts`, tested). Compare (formerly "pin", same localStorage key
 `asana.pinned.<id>`) marks a reference hold: swiping to another day shows split slider or
@@ -304,11 +305,26 @@ order (`progression.sessionItems`), 1–3 columns (localStorage `asana.sessionPo
 share the median crop aspect, captions = asana name, side, rep; the same viewer (`HoldViewer`
 `heading` = asana name, no Compare), crop editor and frame picker as the asana page.
 
-Crop export ("Export" on the asana page — the shown holds, filters apply — and on the poses
-page; `ui/state/crop-export.svelte.ts`, `CropExportNotice`): each full-resolution still cut to its
-display crop (`progression.cropPixels`), JPEG q 0.92, named `<date>_<nn>_<Asana-Name>[_R|L][_repXofY].jpg`
-(`cropFileName`); holds without a still are skipped and counted. The result waits for a fresh tap:
-"Share N photos…" (share sheet with the images: Save to Photos) or "Save ZIP" (STORE ZIP).
+Photo export (`ui/state/crop-export.svelte.ts`): `preparePhoto` cuts the hold's full-resolution
+still (the whole video frame, JPEG q 0.9) to its current display crop (`progression.cropPixels`,
+the latest hold record, so a crop edited a moment ago counts) at native size, JPEG q 0.92, named
+`<date>[_<nn>]_<Asana-Name>[_R|L][_repXofY].jpg` (`cropFileName`), in two variants: plain and with
+metadata. Metadata (`capture.withPhotoMetadata`, `capture/metadata.ts`, tested and checked with
+Pillow): EXIF (big-endian TIFF; ASCII via `toAscii`: description, make/model of the video,
+Software, DateTime/Original/Digitized + SubSec + OffsetTime*, pixel size, UserComment = link, GPS
+with altitude) and XMP (dc:title/description/subject/source/relation, photoshop:DateCreated,
+xmp:CreateDate/CreatorTool, Iptc4xmpCore:Location) inserted after SOI without re-encoding. Values
+(`ui/state/photo-meta.ts`, `holdPhotoMetadata`): asana name (+ side, rep), place name and session
+note as caption; time = video `recordedAt` + `bestS` in the recording's own offset (`localTimeAt`;
+else the session date); GPS = the video's location, else the session's; link = `#/asana/<id>` of
+this deployment (`asanaLink`). "Include metadata" (`MetadataToggle`, localStorage
+`asana.export.metadata`, default off) picks the variant; both are built ahead because saving must
+follow the tap directly (iOS). Single photo: viewer bar → Save → `PhotoSaveSheet` (preview, name,
+px, size, toggle, "Share…" / "Save"). All: "Export" on the asana page (the shown holds, filters
+apply) and the poses page → `CropExportNotice` ("Share N photos…" = share sheet with the images,
+Save to Photos; "Save ZIP", both ZIP variants prepared); holds without a still are skipped and
+counted. HEIC is not offered: it would need an HEVC still from WebCodecs plus a hand-written HEIF
+container (canvas `toBlob` HEIC support on iOS Safari is unverified).
 
 ### Backup (milestone 5)
 

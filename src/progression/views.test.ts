@@ -180,5 +180,6 @@ describe('crop export', () => {
     expect(cropFileName({ ...it1, hold: { side: null }, rep: 2, reps: 5 } as never, 'Navasana', 31, 3)).toBe('2026-10-14_031_Navasana_rep2of5.jpg');
     expect(cropFileName({ ...it1, date: '' } as never, ' Ūrdhva / Dhanurāsana ', 1)).toBe('undated_01_Ūrdhva-Dhanurāsana_R.jpg');
     expect(cropFileName(it1 as never, '//', 1)).toBe('2026-10-14_01_asana_R.jpg');
+    expect(cropFileName(it1 as never, 'Utthita Trikonasana')).toBe('2026-10-14_Utthita-Trikonasana_R.jpg');
   });
 });

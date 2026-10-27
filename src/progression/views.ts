@@ -190,16 +190,17 @@ export function cropPixels(crop: Box | null, width: number, height: number): { x
 /**
  * File name of an exported crop: date, position, asana, side and rep, e.g.
  * "2026-10-14_07_Utthita-Trikonasana_R.jpg" or "2026-10-14_31_Navasana_rep2of5.jpg".
- * `position` is 1-based (the order in the export); names keep letters of any script.
+ * `position` is 1-based (the order in the export; omitted for a single photo); names keep letters
+ * of any script.
  */
-export function cropFileName(item: Pick<ProgressionItem, 'date' | 'hold' | 'rep' | 'reps'>, asanaName: string, position: number, digits = 2): string {
+export function cropFileName(item: Pick<ProgressionItem, 'date' | 'hold' | 'rep' | 'reps'>, asanaName: string, position?: number, digits = 2): string {
   const day = /^\d{4}-\d{2}-\d{2}/.exec(item.date)?.[0] ?? 'undated';
   const name =
     asanaName
       .normalize('NFC')
       .replace(/[^\p{L}\p{N}]+/gu, '-')
       .replace(/^-+|-+$/g, '') || 'asana';
-  const parts = [day, String(position).padStart(digits, '0'), name];
+  const parts = position === undefined ? [day, name] : [day, String(position).padStart(digits, '0'), name];
   if (item.hold.side) parts.push(item.hold.side);
   if (item.reps > 1) parts.push(`rep${item.rep}of${item.reps}`);
   return `${parts.join('_')}.jpg`;

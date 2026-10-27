@@ -69,7 +69,7 @@
 
   function exportCrops() {
     if (!session) return;
-    void cropExport.prepare(scope, items, nameOf, `asana-progression-${session.date.slice(0, 10)}`);
+    void cropExport.prepare(scope, items, `asana-progression-${session.date.slice(0, 10)}`);
   }
 
   function caption(item: ProgressionItem): string {
