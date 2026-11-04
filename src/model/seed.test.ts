@@ -10,6 +10,9 @@ import {
   withReps,
   withSunSalutations,
   withSuptaPadangusthasanaB,
+  INTERMEDIATE_GROUP,
+  INTERMEDIATE_SERIES_ID,
+  intermediateSeriesTemplate,
 } from './seed';
 import type { SequenceTemplate } from './types';
 
@@ -17,15 +20,16 @@ describe('catalog seed', () => {
   it('has unique ids and the expected sided asanas', () => {
     const ids = SEED_ASANAS.map((a) => a.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(SEED_ASANAS.length).toBe(64);
+    expect(SEED_ASANAS.length).toBe(64 + 40);
     const sided = SEED_ASANAS.filter((a) => a.sided).map((a) => a.name);
     expect(sided).toContain('Utthita Trikonasana');
     expect(sided).toContain('Marichyasana D');
     expect(sided).toContain('Supta Padangusthasana A');
     expect(sided).toContain('Supta Padangusthasana B');
     expect(sided).not.toContain('Paschimottanasana A');
-    expect(sided.length).toBe(22);
-    expect(SEED_ASANAS.every((a) => a.group && (a.posture || a.id === 'adho-mukha-svanasana'))).toBe(true);
+    expect(sided.length).toBe(22 + 12);
+    const primary = SEED_ASANAS.filter((a) => a.group !== INTERMEDIATE_GROUP);
+    expect(primary.every((a) => a.group && (a.posture || a.id === 'adho-mukha-svanasana'))).toBe(true);
   });
 
   it('derives ids from names', () => {
@@ -139,5 +143,51 @@ describe('primary series template', () => {
 
   it('rejects unknown references', () => {
     expect(() => primarySeriesTemplate([{ id: 'urdhva-dhanurasana', name: 'UD', sided: false }])).toThrow(/unknown asana/);
+  });
+});
+
+describe('intermediate series template', () => {
+  const t = intermediateSeriesTemplate();
+  const labels = t.entries.map((e) => `${e.asanaId}${e.side ? ` ${e.side}` : ''}${e.reps ? ` ×${e.reps}` : ''}`);
+
+  it('adds the second-series asanas in v5, outside the Primary series', () => {
+    expect(SEED_ADDED[5]).toHaveLength(40);
+    expect(SEED_ADDED[5]![0]).toBe('pasasana');
+    const primary = new Set(primarySeriesTemplate().entries.map((e) => e.asanaId));
+    expect(SEED_ADDED[5]!.some((id) => primary.has(id))).toBe(false);
+  });
+
+  it('runs sun salutations, standing, the second series, then backbends and finishing', () => {
+    expect(t.id).toBe(INTERMEDIATE_SERIES_ID);
+    expect(t.name).toBe('Intermediate series');
+    expect(labels.slice(0, 3)).toEqual(['adho-mukha-svanasana ×8', 'padangusthasana', 'padahastasana']);
+    const i = labels.indexOf('parsvottanasana L');
+    expect(labels.slice(i + 1, i + 6)).toEqual(['pasasana R', 'pasasana L', 'krounchasana R', 'krounchasana L', 'salabhasana-a']);
+    expect(labels).not.toContain('utthita-hasta-padangusthasana-a R');
+    expect(labels).not.toContain('dandasana');
+    const ud = labels.indexOf('urdhva-dhanurasana ×3');
+    expect(labels[ud - 1]).toBe('baddha-hasta-sirsasana-d');
+    expect(labels[ud + 1]).toBe('paschimottanasana-a');
+    expect(labels[ud + 2]).toBe('salamba-sarvangasana');
+    expect(labels[labels.length - 1]).toBe('savasana');
+    // 8 sun salutations + standing 16 + second series 52 + UD, Paschimottanasana, 14 finishing
+    expect(t.entries.length).toBe(1 + 16 + 52 + 2 + 14);
+  });
+
+  it('runs Eka Pada Sirsasana and Gomukhasana A/B right, then A/B left', () => {
+    const i = labels.indexOf('eka-pada-sirsasana-a R');
+    expect(labels.slice(i, i + 5)).toEqual(['eka-pada-sirsasana-a R', 'eka-pada-sirsasana-b R', 'eka-pada-sirsasana-a L', 'eka-pada-sirsasana-b L', 'dwi-pada-sirsasana-a']);
+    const g = labels.indexOf('gomukhasana-a R');
+    expect(labels.slice(g, g + 4)).toEqual(['gomukhasana-a R', 'gomukhasana-b R', 'gomukhasana-a L', 'gomukhasana-b L']);
+  });
+
+  it('uses an asana of the same name the user added by hand and skips missing ones', () => {
+    const own = SEED_ASANAS.filter((a) => a.id !== 'pasasana' && a.id !== 'nakrasana').concat({ id: 'pasasana-2', name: 'Pasasana', sided: true });
+    const entries = intermediateSeriesTemplate(own).entries;
+    expect(entries.filter((e) => e.asanaId.startsWith('pasasana'))).toEqual([
+      { asanaId: 'pasasana-2', side: 'R' },
+      { asanaId: 'pasasana-2', side: 'L' },
+    ]);
+    expect(entries.some((e) => e.asanaId === 'nakrasana')).toBe(false);
   });
 });

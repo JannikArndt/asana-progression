@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 const video = fileURLToPath(new URL('../fixtures/synthetic-practice-vp9.mp4', import.meta.url));
 const otherVideo = fileURLToPath(new URL('../fixtures/h264-bframes.mp4', import.meta.url));
@@ -383,6 +383,37 @@ test('the videos of a session form one timeline; the files have their own page',
   await expect(items.nth(1)).toHaveAttribute('data-video-id', firstId!);
   await expect(page.getByRole('button', { name: /^Debug · / })).toHaveCount(2);
   await page.getByRole('button', { name: '‹ Session' }).click();
+  await expect(cards(page)).toHaveCount(6);
+
+  expect(errors).toEqual([]);
+});
+
+test('add videos to a session from its videos page', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('./');
+  await page.evaluate(() => localStorage.setItem('asana.debug.capture', JSON.stringify({ cropper: 'none' })));
+  await importVideo(page);
+  await expect(cards(page)).toHaveCount(3, { timeout: 90_000 });
+  await cards(page).nth(0).getByRole('button', { name: 'Confirm Adho Mukha Svanasana' }).click();
+
+  await page.getByRole('link', { name: '1 video ›' }).click();
+  // A second part: the fixture plus an empty MP4 'free' box (another fingerprint, same content).
+  const part = testInfo.outputPath('part-2.mp4');
+  writeFileSync(part, Buffer.concat([readFileSync(video), Buffer.from([0, 0, 0, 8, 0x66, 0x72, 0x65, 0x65])]));
+  await page.locator('.add input[type=file]').setInputFiles(part);
+  // No same-day or template question.
+  await expect(cards(page)).toHaveCount(6, { timeout: 90_000 });
+  await expect(page.getByText('Suggestions for this session')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Template: Primary series' })).toBeVisible();
+  await expect(page.getByRole('link', { name: '2 videos ›' })).toBeVisible();
+  // The new cards continue after the labeled hold (the down dogs have reps left).
+  await expect(cards(page).nth(3).getByRole('button', { name: 'Adho Mukha Svanasana', exact: true })).toBeVisible();
+
+  // A file that is already in the session is only attached.
+  await page.getByRole('link', { name: '2 videos ›' }).click();
+  await page.locator('.add input[type=file]').setInputFiles(video);
+  await expect(page.getByText('This video was imported before')).toHaveCount(0);
   await expect(cards(page)).toHaveCount(6);
 
   expect(errors).toEqual([]);

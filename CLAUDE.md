@@ -75,7 +75,7 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
 ### Labeling (milestone 2)
 
 - Catalog-first: holds reference asanas; a `SequenceTemplate` only drives suggestions. Seeded on
-  first run (`catalogVersion` setting, now 4): 64 asanas (22 sided, each with a `group` and,
+  first run (`catalogVersion` setting, now 5): 64 Primary-series asanas (+ 40 Intermediate, below; 22 sided, each with a `group` and,
   except Adho Mukha Svanasana, a coarse `posture` class) and "Primary series" (87 entries; reps:
   Adho Mukha Svanasana ×8 for the sun salutations, 5 A + 3 B, Navasana ×5, Urdhva Dhanurasana ×3;
   sided asanas R then L; Utthita Hasta Padangusthasana A/B/C R then A/B/C L and Supta
@@ -88,6 +88,18 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   every template whose R entry is directly followed by L (`withSuptaPadangusthasanaB`, v4; labeled
   holds re-align via `alignToTemplate`); a deleted template stays deleted. Seed rows may carry an
   explicit `id` for such renames.
+- **Intermediate series** (v5): 40 second-series asanas in the catalog group `Intermediate`
+  (`INTERMEDIATE_GROUP`, 12 sided; posture classes only where the coarse classifier should agree —
+  kneeling, squatting and leg-behind-head shapes have none, so they never contradict a suggestion)
+  and the template "Intermediate series" (`intermediateSeriesTemplate`, id `intermediate-series`,
+  85 entries): down dog ×8, the standing sequence up to Parsvottanasana, Pasasana … Baddha Hasta
+  Sirsasana D (Eka Pada Sirsasana and Gomukhasana A/B run R then L), Urdhva Dhanurasana ×3,
+  Paschimottanasana A, the finishing group. Order from the user's practice sheets (ashtangayoga.info
+  2nd series, R. Steiner 2015; Ryan Spielman's chart; Tittibhasana A–C as on the former, the latter
+  also shows a D). The Primary series template never takes the `Intermediate` seed ids. On upgrade
+  a seed asana whose normalized name the user already has (e.g. a hand-made "Pasasana") is not
+  added; the template resolves ids by name over the stored catalog and skips missing ones. Created
+  once (v5); a deleted one stays deleted.
 - **Variant families**: lettered variants ("Janu Sirsasana A/B/C", names ending in a space + A–F,
   same base and `group`) stay separate asanas — A is only ever compared with A — but are shown as
   one asana with letters, like R/L (`model.variantOf`, `asanaFamilies`, derived from the names, so
@@ -111,7 +123,13 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
 - Sessions: created at import (one per video; files of one batch recorded on the same day share
   a session). The template is chosen per session at import from all templates + None (default
   Primary series, else the first template; "None" for clips < 5 min) and can be switched on the
-  review screen (a "Template" row opening the same list). Milestone-1 videos without a session get
+  review screen (a "Template" row opening the same list). The default for a new session is the
+  template of the latest session that has one (`lastTemplateId`), else the Primary series.
+- **Add videos to a session**: the videos page has "+ Add videos to this session…"
+  (`importFiles(files, sessionId)`): new files join that session (no same-day or template question;
+  recording order via `orderVideoIds`), so its template and labeled holds steer the suggestions for
+  the new cards (alignment is session-wide); a file already in the session is only attached; a
+  file of another session asks as usual, its "new" option reads "Add to this session as well". Milestone-1 videos without a session get
   one on startup (`AppState.migrate`). Length = `sessionSpanS`: first video start to last video
   end (pauses count), only when every `recordedAt` parses and the span is ≥ the sum of durations
   − 1 s and ≤ sum + 4 h; otherwise the sum (export times, file dates).

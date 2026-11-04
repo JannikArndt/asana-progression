@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  lastTemplateId,
   asanaStats,
   combineSessions,
   familyStats,
@@ -489,5 +490,15 @@ describe('recording times', () => {
     expect(new Date(local).getTime()).toBe(new Date(2025, 7, 28, 6, 30).getTime());
     expect(recordedAtFromInput('2025-08-28T06:30', null)).toMatch(/^2025-08-28T06:30:00[+-]/);
     expect(recordedAtFromInput('', null)).toBeNull();
+  });
+});
+
+describe('lastTemplateId', () => {
+  const ses = (id: string, date: string, templateId?: string): Session => ({ id, date, note: '', videoIds: [], ...(templateId ? { templateId } : {}) });
+  it('takes the template of the latest session whose template still exists', () => {
+    const templates = [{ id: 'primary-series' }, { id: 'intermediate-series' }];
+    const sessions = [ses('a', '2026-10-01T07:00', 'primary-series'), ses('b', '2026-10-03T07:00', 'intermediate-series'), ses('c', '2026-10-04T07:00'), ses('d', '2026-10-05T07:00', 'deleted')];
+    expect(lastTemplateId(sessions, templates)).toBe('intermediate-series');
+    expect(lastTemplateId([ses('c', '2026-10-04T07:00')], templates)).toBeUndefined();
   });
 });

@@ -78,6 +78,54 @@ const GROUPS: Array<{ group: string; rows: SeedRow[] }> = [
     ],
   },
   {
+    // Second series (Nadi Shodhana): practised after the standing sequence instead of the seated
+    // one. Posture classes only where the coarse classifier is expected to agree; kneeling,
+    // squatting and leg-behind-head shapes have none (no class contradicts them in suggestions).
+    group: 'Intermediate',
+    rows: [
+      { name: 'Pasasana', sided: true },
+      { name: 'Krounchasana', sided: true, posture: 'seated' },
+      { name: 'Salabhasana A', posture: 'lying' },
+      { name: 'Salabhasana B', posture: 'lying' },
+      { name: 'Bhekasana', posture: 'lying' },
+      { name: 'Dhanurasana', posture: 'lying' },
+      { name: 'Parsva Dhanurasana', sided: true, posture: 'lying' },
+      { name: 'Ustrasana' },
+      { name: 'Laghu Vajrasana' },
+      { name: 'Kapotasana A' },
+      { name: 'Kapotasana B' },
+      { name: 'Supta Vajrasana' },
+      { name: 'Bakasana A', posture: 'arm-balance' },
+      { name: 'Bakasana B', posture: 'arm-balance' },
+      { name: 'Bharadvajasana', sided: true, posture: 'seated' },
+      { name: 'Ardha Matsyendrasana', sided: true, posture: 'seated' },
+      { name: 'Eka Pada Sirsasana A', sided: true, posture: 'seated' },
+      { name: 'Eka Pada Sirsasana B', sided: true },
+      { name: 'Dwi Pada Sirsasana A', posture: 'seated' },
+      { name: 'Dwi Pada Sirsasana B', posture: 'arm-balance' },
+      { name: 'Yoga Nidrasana' },
+      { name: 'Tittibhasana A', posture: 'arm-balance' },
+      { name: 'Tittibhasana B' },
+      { name: 'Tittibhasana C' },
+      { name: 'Pincha Mayurasana', posture: 'inverted' },
+      { name: 'Karandavasana' },
+      { name: 'Mayurasana' },
+      { name: 'Nakrasana' },
+      { name: 'Vatayanasana', sided: true },
+      { name: 'Parighasana', sided: true },
+      { name: 'Gomukhasana A', sided: true, posture: 'seated' },
+      { name: 'Gomukhasana B', sided: true, posture: 'seated' },
+      { name: 'Supta Urdhva Pada Vajrasana', sided: true },
+      { name: 'Mukta Hasta Sirsasana A', posture: 'inverted' },
+      { name: 'Mukta Hasta Sirsasana B', posture: 'inverted' },
+      { name: 'Mukta Hasta Sirsasana C', posture: 'inverted' },
+      { name: 'Baddha Hasta Sirsasana A', posture: 'inverted' },
+      { name: 'Baddha Hasta Sirsasana B', posture: 'inverted' },
+      { name: 'Baddha Hasta Sirsasana C', posture: 'inverted' },
+      { name: 'Baddha Hasta Sirsasana D', posture: 'inverted' },
+    ],
+  },
+  {
     group: 'Backbending',
     rows: [{ name: 'Urdhva Dhanurasana', posture: 'lying' }],
   },
@@ -116,6 +164,9 @@ export const SEED_ASANAS: readonly Asana[] = GROUPS.flatMap(({ group, rows }) =>
   rows.map((r) => ({ id: r.id ?? asanaId(r.name), name: r.name, sided: r.sided === true, group, ...(r.posture ? { posture: r.posture } : {}) })),
 );
 
+/** Catalog group of the second-series asanas (not part of the Primary series template). */
+export const INTERMEDIATE_GROUP = 'Intermediate';
+
 /** Downward dog: held for 5 breaths once per sun salutation. */
 export const DOWNWARD_DOG_ID = 'adho-mukha-svanasana';
 /** Usual repetitions in the Primary series (suggestions allow fewer or more). */
@@ -133,7 +184,11 @@ export const SUPTA_PADANGUSTHASANA_B_ID = 'supta-padangusthasana-b';
 export const SUPTA_PADANGUSTHASANA_OLD_NAME = 'Supta Padangusthasana';
 
 /** Seed asanas added after the first catalog version, by version. Deleted asanas are not re-added. */
-export const SEED_ADDED: Readonly<Record<number, readonly string[]>> = { 2: [DOWNWARD_DOG_ID], 4: [SUPTA_PADANGUSTHASANA_B_ID] };
+export const SEED_ADDED: Readonly<Record<number, readonly string[]>> = {
+  2: [DOWNWARD_DOG_ID],
+  4: [SUPTA_PADANGUSTHASANA_B_ID],
+  5: SEED_ASANAS.filter((a) => a.group === INTERMEDIATE_GROUP).map((a) => a.id),
+};
 
 /** Catalog upgrade (v2) for an existing Primary series template: prepends the sun salutations once. */
 export function withSunSalutations(t: SequenceTemplate): SequenceTemplate {
@@ -178,6 +233,10 @@ export function withSuptaPadangusthasanaB(t: SequenceTemplate): SequenceTemplate
 }
 
 export const PRIMARY_SERIES_ID = 'primary-series';
+export const INTERMEDIATE_SERIES_ID = 'intermediate-series';
+
+/** Second-series seed asanas: never part of the Primary series template. */
+const INTERMEDIATE_IDS = new Set(SEED_ADDED[5]);
 
 /**
  * Default "Primary series" template: catalog order, sided asanas right then left. Exceptions to
@@ -198,6 +257,7 @@ export function primarySeriesTemplate(asanas: readonly Asana[] = SEED_ASANAS): S
   // Variants performed together on one side before switching sides.
   const runs = [['a', 'b', 'c'].map((v) => `utthita-hasta-padangusthasana-${v}`), [SUPTA_PADANGUSTHASANA_ID, SUPTA_PADANGUSTHASANA_B_ID]];
   for (const a of asanas) {
+    if (INTERMEDIATE_IDS.has(a.id)) continue;
     const run = runs.find((r) => r.includes(a.id));
     if (run) {
       const present = run.filter((id) => byId.has(id));
@@ -210,4 +270,87 @@ export function primarySeriesTemplate(asanas: readonly Asana[] = SEED_ASANAS): S
     if (a.id === 'urdhva-dhanurasana') add('paschimottanasana-a');
   }
   return { id: PRIMARY_SERIES_ID, name: 'Primary series', entries };
+}
+
+/**
+ * Steps of the Intermediate series after the sun salutations: a string is one asana (sided ones R
+ * then L), an array is a run of sided variants performed on the right, then on the left. Order
+ * after the practice sheets of ashtangayoga.info (R. Steiner, 2015) and Ryan Spielman's
+ * Intermediate series chart: standing sequence up to Parsvottanasana, the second series, then the
+ * closing sequence of the Primary series from Urdhva Dhanurasana.
+ */
+const INTERMEDIATE_STEPS: ReadonlyArray<string | readonly string[]> = [
+  'padangusthasana',
+  'padahastasana',
+  'utthita-trikonasana',
+  'parivrtta-trikonasana',
+  'utthita-parsvakonasana',
+  'parivrtta-parsvakonasana',
+  ...['a', 'b', 'c', 'd'].map((v) => `prasarita-padottanasana-${v}`),
+  'parsvottanasana',
+  'pasasana',
+  'krounchasana',
+  'salabhasana-a',
+  'salabhasana-b',
+  'bhekasana',
+  'dhanurasana',
+  'parsva-dhanurasana',
+  'ustrasana',
+  'laghu-vajrasana',
+  'kapotasana-a',
+  'kapotasana-b',
+  'supta-vajrasana',
+  'bakasana-a',
+  'bakasana-b',
+  'bharadvajasana',
+  'ardha-matsyendrasana',
+  ['eka-pada-sirsasana-a', 'eka-pada-sirsasana-b'],
+  'dwi-pada-sirsasana-a',
+  'dwi-pada-sirsasana-b',
+  'yoga-nidrasana',
+  ...['a', 'b', 'c'].map((v) => `tittibhasana-${v}`),
+  'pincha-mayurasana',
+  'karandavasana',
+  'mayurasana',
+  'nakrasana',
+  'vatayanasana',
+  'parighasana',
+  ['gomukhasana-a', 'gomukhasana-b'],
+  'supta-urdhva-pada-vajrasana',
+  ...['a', 'b', 'c'].map((v) => `mukta-hasta-sirsasana-${v}`),
+  ...['a', 'b', 'c', 'd'].map((v) => `baddha-hasta-sirsasana-${v}`),
+];
+
+/**
+ * Default "Intermediate series" template over a catalog: sun salutations, standing sequence, the
+ * second series, then Urdhva Dhanurasana (×3), Paschimottanasana and the finishing sequence, as in
+ * the Primary series. A seed asana missing from `asanas` is looked up by name (a user-created
+ * asana of the same name, e.g. "Pasasana" added by hand before v5) and skipped when absent.
+ */
+export function intermediateSeriesTemplate(asanas: readonly Asana[] = SEED_ASANAS): SequenceTemplate {
+  const byId = new Map(asanas.map((a) => [a.id, a]));
+  const byName = new Map(asanas.map((a) => [asanaId(a.name), a]));
+  const seedName = new Map(SEED_ASANAS.map((a) => [a.id, a.name]));
+  const resolve = (id: string) => byId.get(id) ?? byName.get(asanaId(seedName.get(id) ?? id));
+  const entries: TemplateEntry[] = [];
+  const add = (id: string, reps?: number) => {
+    const a = resolve(id);
+    if (!a) return;
+    const extra = reps ? { reps } : {};
+    if (a.sided) entries.push({ asanaId: a.id, side: 'R', ...extra }, { asanaId: a.id, side: 'L', ...extra });
+    else entries.push({ asanaId: a.id, ...extra });
+  };
+  add(DOWNWARD_DOG_ID, PRIMARY_REPS[DOWNWARD_DOG_ID]);
+  for (const step of INTERMEDIATE_STEPS) {
+    if (typeof step === 'string') {
+      add(step);
+      continue;
+    }
+    const run = step.map(resolve).filter((a): a is Asana => !!a);
+    for (const side of ['R', 'L'] as const) for (const a of run) if (a.sided) entries.push({ asanaId: a.id, side });
+  }
+  add('urdhva-dhanurasana', PRIMARY_REPS['urdhva-dhanurasana']);
+  add('paschimottanasana-a');
+  for (const a of SEED_ASANAS.filter((x) => x.group === 'Finishing')) add(a.id);
+  return { id: INTERMEDIATE_SERIES_ID, name: 'Intermediate series', entries };
 }

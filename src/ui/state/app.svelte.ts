@@ -3,6 +3,9 @@ import { openMetadataStore, type MetadataStore } from '../../storage';
 import {
   newId,
   primarySeriesTemplate,
+  intermediateSeriesTemplate,
+  INTERMEDIATE_SERIES_ID,
+  asanaId,
   SEED_ADDED,
   withSunSalutations,
   withReps,
@@ -36,7 +39,7 @@ export interface AnalysisSummary {
   createdAt: string;
 }
 
-const CATALOG_VERSION = 4;
+const CATALOG_VERSION = 5;
 
 const LEGACY_SEPARATE_KEY = 'asana.sessions.separate';
 
@@ -110,7 +113,7 @@ class AppState {
     return this.store;
   }
 
-  /** Seeds the asana catalog and the Primary series template on first run; upgrades older seeds. */
+  /** Seeds the asana catalog and the Primary and Intermediate series templates on first run; upgrades older seeds. */
   private async seedCatalog() {
     const db = this.db;
     const version = (await db.settings.get<number>('catalogVersion')) ?? 0;
@@ -119,10 +122,12 @@ class AppState {
     if (asanas.length === 0) for (const a of SEED_ASANAS) await db.asanas.put({ ...a });
     else {
       const have = new Set(asanas.map((a) => a.id));
+      // An asana the user added by hand under the same name (e.g. "Pasasana") is kept instead.
+      const names = new Set(asanas.map((a) => asanaId(a.name)));
       for (let v = version + 1; v <= CATALOG_VERSION; v++) {
         for (const id of SEED_ADDED[v] ?? []) {
           const a = SEED_ASANAS.find((x) => x.id === id);
-          if (a && !have.has(id)) await db.asanas.put({ ...a });
+          if (a && !have.has(id) && !names.has(asanaId(a.name))) await db.asanas.put({ ...a });
         }
       }
       // v4: Supta Padangusthasana became A (leg up, same id) and B (leg to the side); user renames win.
@@ -141,6 +146,10 @@ class AppState {
         const up = withSuptaPadangusthasanaB(t);
         if (up !== t) await db.templates.put(up);
       }
+    }
+    // v5: the Intermediate series, once (a deleted one stays deleted), over the stored catalog.
+    if (version < 5 && !(await db.templates.get(INTERMEDIATE_SERIES_ID))) {
+      await db.templates.put(intermediateSeriesTemplate(await db.asanas.all()));
     }
     await db.settings.set('catalogVersion', CATALOG_VERSION);
   }

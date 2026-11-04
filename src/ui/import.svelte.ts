@@ -1,7 +1,7 @@
 import { fingerprint, openVideo, targetSize, type VideoMeta } from '../source';
 import { estimateStorage, requestPersistence, wouldExceedQuota } from '../storage';
 import { newId, PRIMARY_SERIES_ID, type Session, type Video } from '../model';
-import { dayOf, orderVideoIds, sessionOfVideo, SHORT_CLIP_S, withCoords } from './state/session-data';
+import { dayOf, lastTemplateId, orderVideoIds, sessionOfVideo, SHORT_CLIP_S, withCoords } from './state/session-data';
 import { app } from './state/app.svelte';
 import { dialog } from './state/dialog.svelte';
 import { router } from './state/router.svelte';
@@ -30,12 +30,14 @@ function dateLabel(iso: string | null): string {
 
 /**
  * Asks which template drives suggestions for a new session: every template, or none. The default
- * (first, highlighted) is none for clips under 5 min, else the Primary series (or the first template).
+ * (first, highlighted) is none for clips under 5 min, else the template of the latest session that
+ * has one (e.g. the Intermediate series once it is practised), else the Primary series (or the
+ * first template).
  * Returns the template id, undefined for none, null when cancelled.
  */
 async function chooseTemplate(meta: VideoMeta): Promise<string | undefined | null> {
   const templates = app.templates;
-  const preferred = templates.find((t) => t.id === PRIMARY_SERIES_ID) ?? templates[0];
+  const preferred = templates.find((t) => t.id === lastTemplateId(app.sessions, templates)) ?? templates.find((t) => t.id === PRIMARY_SERIES_ID) ?? templates[0];
   const def = meta.durationS < SHORT_CLIP_S ? undefined : preferred;
   const option = (id: string, label: string, detail: string, isDefault: boolean) => ({ id, label, detail, ...(isDefault ? { kind: 'primary' as const } : {}) });
   const none = option('none', 'None', 'Single pose or freeform practice: suggest by recent use.', !def);
@@ -55,7 +57,7 @@ async function chooseTemplate(meta: VideoMeta): Promise<string | undefined | nul
 }
 
 /** "Reuse labels" / "Import as a new session" / "Cancel" for a file imported before (`more`: the answer applies to later such files too). */
-function askKnownVideo(file: File, existing: Video, more: boolean): Promise<string> {
+function askKnownVideo(file: File, existing: Video, more: boolean, intoSession: boolean): Promise<string> {
   return dialog.ask({
     title: 'This video was imported before',
     message:
@@ -68,14 +70,21 @@ function askKnownVideo(file: File, existing: Video, more: boolean): Promise<stri
         detail: 'Keeps the existing analysis and attaches this file for full-resolution frames.',
         kind: 'primary',
       },
-      { id: 'new', label: 'Import as a new session', detail: 'Analyses the video again as a separate entry.' },
+      intoSession
+        ? { id: 'new', label: 'Add to this session as well', detail: 'Analyses the video again as a separate entry of this session.' }
+        : { id: 'new', label: 'Import as a new session', detail: 'Analyses the video again as a separate entry.' },
       { id: 'cancel', label: 'Cancel', kind: 'quiet' },
     ],
   });
 }
 
-/** Import flow: probe → fingerprint → duplicate/resume dialog → session → quota check → process. */
-export async function importFiles(files: File[]): Promise<void> {
+/**
+ * Import flow: probe → fingerprint → duplicate/resume dialog → session → quota check → process.
+ * `intoSession`: "Add videos to this session" — every new file joins that session (no same-day
+ * question, no template question: the session keeps its template, and its labeled holds steer the
+ * suggestions for the new cards); a file already in it is only attached.
+ */
+export async function importFiles(files: File[], intoSession?: string): Promise<void> {
   // A file picked right after launch: templates and sessions must be loaded for the questions below.
   await app.whenReady();
   const db = app.db;
@@ -144,10 +153,22 @@ export async function importFiles(files: File[]): Promise<void> {
         skip = job.skipNonReference;
       }
     } else {
-      const existing = (await db.videos.findBy('fingerprint', fp))[0];
-      if (existing) {
+      const target = intoSession ? await db.sessions.get(intoSession) : undefined;
+      const known = await db.videos.findBy('fingerprint', fp);
+      const inTarget = target && known.find((v) => target.videoIds.includes(v.id));
+      const existing = inTarget ?? known[0];
+      if (inTarget) {
+        // Already part of this session: attach the file (and process it if it never was).
+        app.attachFile(inTarget.id, file, meta);
+        await afterAttach(inTarget.id);
+        if (await db.analyses.get(inTarget.id)) {
+          lastVideoId = inTarget.id;
+          continue;
+        }
+        videoId = inTarget.id;
+      } else if (existing) {
         const more = i < files.length - 1;
-        const choice: string = knownChoice ?? (await askKnownVideo(file, existing, more));
+        const choice: string = knownChoice ?? (await askKnownVideo(file, existing, more, !!intoSession));
         if (more) knownChoice ??= choice;
         if (choice === 'cancel') continue;
         if (choice === 'new') asNewSession = true;
@@ -185,7 +206,9 @@ export async function importFiles(files: File[]): Promise<void> {
 
     let newSession: Session | null = null;
     let joinSession: Session | null = null;
-    if (!videoId) {
+    const into = intoSession ? await db.sessions.get(intoSession) : undefined;
+    if (!videoId && into) joinSession = { ...into };
+    else if (!videoId) {
       const recDay = dayOf(meta.recordedAt);
       joinSession = (!asNewSession && recDay && batchSessions.get(recDay)) || null;
       // Sessions that already hold this recording are never offered (no duplicate in one session).

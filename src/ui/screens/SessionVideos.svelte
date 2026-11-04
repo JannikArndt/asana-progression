@@ -15,6 +15,8 @@
   import { moveItem, orderVideoIds } from '../state/session-data';
   import VideoFinder from '../components/VideoFinder.svelte';
   import { copyText, deviceInfo, videoDiagnostics } from '../diagnostics';
+  import { importFiles } from '../import.svelte';
+  import { pipeline } from '../pipeline/controller.svelte';
 
   interface Props {
     id: string;
@@ -28,6 +30,21 @@
   const review = new SessionReview();
   let debugOpen = $state<Record<string, boolean>>({});
   let message = $state<string | null>(null);
+  let adding = $state(false);
+
+  /** "Add videos to this session": e.g. the other parts of a practice recorded as several files. */
+  async function onAdd(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const files = [...(input.files ?? [])];
+    input.value = '';
+    if (!files.length) return;
+    adding = true;
+    try {
+      await importFiles(files, id);
+    } finally {
+      adding = false;
+    }
+  }
   let attachMessage = $state<string | null>(null);
 
   $effect(() => {
@@ -197,6 +214,17 @@
       {/each}
     </ol>
 
+    <div class="add">
+      <label class="btn" class:disabled={adding || pipeline.running}>
+        + Add videos to this session…
+        <input class="visually-hidden" type="file" accept="video/*" multiple disabled={adding || pipeline.running} onchange={onAdd} />
+      </label>
+      <p class="small muted">
+        Other parts of this practice: they join this session in recording order, keep its template, and the holds labeled here guide the
+        suggestions.
+      </p>
+    </div>
+
     {#if review.videos.length}
       <div class="all">
         <button class="btn" type="button" onclick={copyAll}>Copy diagnostics of all videos</button>
@@ -262,6 +290,25 @@
 
   .sort {
     align-self: flex-start;
+  }
+
+  .add {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .add .btn {
+    align-self: flex-start;
+  }
+
+  .add p {
+    margin: 0;
+  }
+
+  .add .disabled {
+    opacity: 0.45;
+    pointer-events: none;
   }
 
   .list {

@@ -597,3 +597,11 @@ export function missingPoseFrames(a: Pick<Analysis, 'candidates' | 'poses' | 'sa
   }
   return out;
 }
+
+/** Template of the latest session (by date) whose template still exists; undefined when none has one. */
+export function lastTemplateId(sessions: readonly Session[], templates: ReadonlyArray<{ id: string }>): string | undefined {
+  const ids = new Set(templates.map((t) => t.id));
+  let best: Session | undefined;
+  for (const s of sessions) if (s.templateId && ids.has(s.templateId) && (!best || s.date > best.date)) best = s;
+  return best?.templateId;
+}
