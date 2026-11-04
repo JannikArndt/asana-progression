@@ -163,25 +163,25 @@
     <section class="list" role="tabpanel">
       {#each groups as g (g.group)}
         <h2 class="section-title group">{g.group}</h2>
-        {#each g.families as f (f.members[0]!.id)}
-          {@const st = stats.get(f.members[0]!.id)}
-          <button class="row asana" class:empty-asana={!st} type="button" onclick={() => openFamily(f)}>
-            <div class="thumb">
-              {#if st?.preview}
-                {@const hold = st.preview}
-                {@const img = images.get(hold.id)}
-                {#if img}
-                  <LazyAsset asset={img} crop={fillCrop(displayCrop(hold), img.width, img.height, 1)} alt="">
-                    {#snippet fallback()}{@render tiny(hold)}{/snippet}
-                  </LazyAsset>
-                {:else}
-                  {@render tiny(hold)}
+        <div class="tiles">
+          {#each g.families as f (f.members[0]!.id)}
+            {@const st = stats.get(f.members[0]!.id)}
+            <button class="tile asana" class:empty-asana={!st} type="button" onclick={() => openFamily(f)}>
+              <div class="tile-img">
+                {#if st?.preview}
+                  {@const hold = st.preview}
+                  {@const img = images.get(hold.id)}
+                  {#if img}
+                    <LazyAsset asset={img} crop={fillCrop(displayCrop(hold), img.width, img.height, 1)} aspect={1} alt="">
+                      {#snippet fallback()}{@render tiny(hold)}{/snippet}
+                    </LazyAsset>
+                  {:else}
+                    {@render tiny(hold)}
+                  {/if}
                 {/if}
-              {/if}
-            </div>
-            <div class="row-main">
+              </div>
               <span class="name">{f.base}</span>
-              <span class="muted small tabular">
+              <span class="muted small tabular line">
                 {st ? `${st.count} ${st.count === 1 ? 'hold' : 'holds'}${st.days > 1 ? ` · ${st.days} days` : ''}` : 'No holds yet'}
                 {#if f.members.length > 1}
                   ·
@@ -190,9 +190,9 @@
                   </span>
                 {/if}
               </span>
-            </div>
-          </button>
-        {/each}
+            </button>
+          {/each}
+        </div>
       {/each}
     </section>
   {/if}
@@ -287,7 +287,54 @@
   }
 
   .group {
-    margin: var(--space-4) 0 var(--space-1);
+    margin: var(--space-4) 0 var(--space-2);
+  }
+
+  /* Asanas: two columns of square pictures with name and counts. */
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4) var(--space-3);
+  }
+
+  .tile {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    color: inherit;
+  }
+
+  .tile .name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+  }
+
+  .tile-img {
+    aspect-ratio: 1;
+    margin-bottom: var(--space-1);
+    overflow: hidden;
+    border-radius: var(--radius-m);
+    background: var(--color-neutral-tint);
+  }
+
+  .tile-img :global(.lazy),
+  .tile-img :global(.frame),
+  .tile-img :global(.tiny) {
+    height: 100%;
+    border-radius: 0;
+  }
+
+  .tile-img :global(.tiny canvas) {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 
   .empty {

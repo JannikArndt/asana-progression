@@ -626,6 +626,9 @@ App icon (`npm run icons`, `scripts/make-icons.mjs`): Utthita Trikonasana as an 
 figure on a sage gradient, full bleed (iOS rounds the corners); the maskable variant is scaled to
 the 80 % safe zone.
 
+Every screen's header (`main > header.top`, global.css) is sticky below the status bar area,
+which is covered; the review's sticky timeline sits below it (`--head-h`, measured).
+
 Sheets (`components/Sheet.svelte`) are pinned to `visualViewport` (iOS keyboard: the layout
 viewport extends behind it); search sheets pass `fill` to keep their height while results shrink.
 Every bottom surface is a `Sheet`, including `dialog.ask` questions and the review ••• menu
@@ -644,7 +647,7 @@ dismisses past 30 % of its height or on a flick ≥ 0.5 px/ms (upward flick keep
 springs back; the backdrop fades with the offset. `prefers-reduced-motion`: no slide animations.
 Focus moves into the sheet, Tab is trapped, focus returns on close.
 
-Asanas list (Home): one row per variant family (base name; `session-data.familyStats` joins the
+Asanas list (Home): a 2-column grid of square tiles, one per variant family (base name; `session-data.familyStats` joins the
 members). The preview is the newest hold that has a captured image (thumb, else still),
 filling a square via `progression.fillCrop` around the display crop; the gray analysis frame only
 when nothing is captured. The line reads "N holds", plus "· M days" when they span several days,

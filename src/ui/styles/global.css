@@ -208,3 +208,23 @@ button {
   overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
 }
+
+/*
+ * Screen headers (back link, actions) stay at the top while the page scrolls, right below the
+ * status bar area, which is covered so content scrolls away beneath it.
+ */
+main > header.top {
+  position: sticky;
+  top: var(--safe-top);
+  z-index: 4;
+  background: var(--color-bg);
+}
+
+main:has(> header.top)::before {
+  content: '';
+  position: fixed;
+  inset: 0 0 auto;
+  height: var(--safe-top);
+  background: var(--color-bg);
+  z-index: 4;
+}

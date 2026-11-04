@@ -533,6 +533,9 @@
     return `Select ${files} again to read the poses of the open cards (better suggestions and “Confirm all”).`;
   });
 
+  /** Height of the sticky screen header: the sticky timeline sits right below it. */
+  let headH = $state(0);
+
   /** "Completely labeled" (never 100 %): the session then opens in the Poses view. */
   async function setComplete(complete: boolean) {
     const session = review.session;
@@ -548,8 +551,8 @@
   const sessionLabels = $derived(review.items.filter((i) => i.status === 'labeled' && i.label).map((i) => i.label!));
 </script>
 
-<main class="review-screen">
-  <header class="top">
+<main class="review-screen" style:--head-h="{headH}px">
+  <header class="top" bind:offsetHeight={headH}>
     <button class="btn quiet" type="button" onclick={() => router.go({ name: 'home', tab: 'sessions' })}>‹ Sessions</button>
     {#if review.session}
       {@const n = review.session.videoIds.length}
@@ -1048,7 +1051,7 @@
 
   .timeline-head {
     position: sticky;
-    top: var(--safe-top);
+    top: calc(var(--safe-top) + var(--head-h, 0px));
     z-index: 2;
     display: flex;
     flex-direction: column;

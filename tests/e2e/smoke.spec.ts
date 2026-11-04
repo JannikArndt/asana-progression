@@ -118,8 +118,8 @@ test('import → review → asana', async ({ page }) => {
   await page.getByRole('tab', { name: 'Asanas' }).click();
   const row = page.getByRole('button', { name: /Utthita Trikonasana\s+1 hold/ });
   await expect(row).toBeVisible();
-  // The row previews the captured colour still, not the gray analysis frame.
-  await expect(row.locator('.thumb img')).toBeVisible({ timeout: 60_000 });
+  // The tile previews the captured colour still, not the gray analysis frame.
+  await expect(row.locator('.tile-img img')).toBeVisible({ timeout: 60_000 });
   await row.click();
   await expect(page.getByRole('heading', { name: 'Utthita Trikonasana' })).toBeVisible();
   // Progression: the captured still in the feed, the viewer, grid and side filter.
