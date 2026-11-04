@@ -312,7 +312,9 @@ are the full names: Edit crop, Choose frame, Play clip, Save photo) — that hid
 opens directly from a tap; a tap beside the image, a pull down or Escape closes; axis decided after
 10 px in `viewer-gestures.ts`, tested). Compare (formerly "pin", same localStorage key
 `asana.pinned.<id>`) marks a reference hold: swiping to another day shows split slider or
-crossfade with both dates and a Stop button; the feed marks the reference. Choose frame opens
+crossfade with both dates and a Stop button; the feed marks the reference. "Other days" (footer
+toggle, localStorage `asana.viewer.others`) shows a strip of the same asana and side from other
+sessions; a tap compares with that hold (same split/crossfade; not stored). Choose frame opens
 `FrameScrubber` above the viewer and `hold-actions.chooseBestFrame` updates candidate + hold and
 re-captures the still (no file → re-attach row in the viewer). Flipbook (`Flipbook`: stills in date order,
 0.5–12 per second, preloads ahead). Holds without a still fall back to the tiny analysis frame.
@@ -320,8 +322,25 @@ re-captures the still (no file → re-attach row in the viewer). Flipbook (`Flip
 Session in poses (`#/session/<id>/poses`, `screens/SessionPoses.svelte`, linked "Poses ›" in the
 review header once a hold is labeled): the session's labeled holds as cropped photos in practice
 order (`progression.sessionItems`), 1–3 columns (localStorage `asana.sessionPoses.columns`), tiles
-share the median crop aspect, captions = asana name, side, rep; the same viewer (`HoldViewer`
-`heading` = asana name, no Compare), crop editor and frame picker as the asana page.
+share the median crop aspect, captions = asana name, side, rep; R and L of one asana always share a
+row (`progression.gridSlots` leaves an empty cell before an R in the last column); the same viewer
+(`HoldViewer` `heading` = asana name, no Compare, plus **Cover** = `Session.coverHoldId`), crop
+editor and frame picker as the asana page. "Mark as completely labeled" (here and in the review;
+`Session.complete`, it is never 100 %) makes the Sessions list open the session here, with "Edit"
+→ review and "‹ Sessions"; the research export carries it as `markedComplete`.
+
+Improve crops (`#/session/<id>/crops`, `screens/ImproveCrops.svelte`, "Improve crops" on the poses
+page): the session's holds one step at a time, a sided hold together with its other side
+(`progression.sidePartner`: the next L of the same asana and rep, across variant runs like UHP
+A/B/C), starting at the first step without its own crop. Crop / Frame per hold, "Use this shape for
+Left/Right" (`cropWithAspect`: same centre and area), "Confirm & next" writes the current display
+crop as `crop.manual` (so it survives `CROP_VERSION` re-crops) and moves on; ‹ / › browse.
+
+High-quality frames: `ui/state/hq-frame.ts` `hqFrame(videoId, t)` decodes the exact frame from the
+file picked in this page session (requests serialized; a superseded one is skipped). `FrameScrubber`
+shows it over the gray analysis frame once the slider rests 220 ms ("full quality" / "preview").
+`CropEditor` keeps the frame 48 px from the stage's sides so its handles stay out of iOS Safari's
+edge-swipe (back) zone.
 
 Photo export (`ui/state/crop-export.svelte.ts`): `preparePhoto` cuts the hold's full-resolution
 still (the whole video frame, JPEG q 0.9) to its current display crop (`progression.cropPixels`,
@@ -632,8 +651,9 @@ when nothing is captured. The line reads "N holds", plus "· M days" when they s
 plus the letters of a family ("· A B", letters without holds fainter). A tap opens the letter
 with the newest hold.
 
-Sessions list (Home): a 56 px square thumbnail of the captured image (thumb, else still) of the
-hold nearest the middle of the session (`sessionPreview`), the **whole frame** cover-cropped
+Home header: "+" (import, a file input) and a gear (Settings). Sessions list (Home): a 56 px square
+thumbnail of the captured image (thumb, else still) of the chosen hold (`coverHoldId`), else the
+first down dog, else the hold nearest the middle of the session (`sessionPreview`), the **whole frame** cover-cropped
 (`fillCrop(null, …)`: place and light identify a session, not the body); else the analysis frame
 in the middle of the longest analysed video (`sessionTinyFrame`). Lines: date; "span · N labeled
 · M open · template"; place (name, else coordinates) and note, when present.

@@ -2,6 +2,8 @@
   import Sheet from './Sheet.svelte';
   import { grayToImageData, sampleReader } from '../state/samples';
   import { formatTime } from './timeline';
+  import { app } from '../state/app.svelte';
+  import { hqFrame } from '../state/hq-frame';
 
   interface Props {
     title: string;
@@ -25,6 +27,31 @@
   let index = $state(0);
   let canvas: HTMLCanvasElement;
   let request = 0;
+  /** Full-quality frame from the video file (when it is selected), shown once the slider rests. */
+  let hqBox: HTMLDivElement;
+  let hqIndex = $state<number | null>(null);
+  let hqLoading = $state(false);
+  const hasFile = $derived(app.files.has(videoId));
+  const HQ_DELAY_MS = 220;
+  $effect(() => {
+    const i = index;
+    if (!hasFile) return;
+    const timer = setTimeout(() => {
+      hqLoading = true;
+      void hqFrame(videoId, i / sampleHz, 1600, () => i === index)
+        .then((c) => {
+          if (!c || i !== index || !hqBox) return;
+          c.className = 'hq-canvas';
+          hqBox.replaceChildren(c);
+          hqIndex = i;
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (i === index) hqLoading = false;
+        });
+    }, HQ_DELAY_MS);
+    return () => clearTimeout(timer);
+  });
 
   $effect.pre(() => {
     index = Math.min(last, Math.max(first, Math.round(valueS * sampleHz)));
@@ -56,8 +83,12 @@
 <Sheet {title} {onclose} action={{ label: confirmLabel, onclick: () => onconfirm(index / sampleHz) }}>
   <div class="frame" style:aspect-ratio="{frameWidth} / {frameHeight}">
     <canvas bind:this={canvas}></canvas>
+    <div class="hq" class:shown={hqIndex === index} bind:this={hqBox}></div>
   </div>
-  <div class="time tabular">{formatTime(index / sampleHz)}<span class="faint">.{String(Math.round(((index / sampleHz) % 1) * 100)).padStart(2, '0')}</span></div>
+  <div class="time tabular">
+    {formatTime(index / sampleHz)}<span class="faint">.{String(Math.round(((index / sampleHz) % 1) * 100)).padStart(2, '0')}</span>
+    {#if hasFile}<span class="quality faint">{hqIndex === index ? 'full quality' : hqLoading ? 'loading…' : 'preview'}</span>{/if}
+  </div>
   <input
     class="slider"
     type="range"
@@ -84,6 +115,7 @@
 
 <style>
   .frame {
+    position: relative;
     width: 100%;
     overflow: hidden;
     border-radius: var(--radius-m);
@@ -94,6 +126,29 @@
     display: block;
     width: 100%;
     height: 100%;
+  }
+
+  .hq {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 120ms linear;
+  }
+
+  .hq.shown {
+    opacity: 1;
+  }
+
+  .hq :global(.hq-canvas) {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .quality {
+    margin-left: var(--space-2);
+    font-size: var(--text-s);
   }
 
   .time {

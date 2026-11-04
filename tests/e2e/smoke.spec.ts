@@ -269,7 +269,39 @@ test('import → review → asana', async ({ page }) => {
   await page.getByRole('button', { name: 'Save ZIP' }).click();
   expect(await zipEntries(await download)).toMatchObject({ jpegs: 2, exif: 2 });
   await page.getByLabel(/Include metadata/).uncheck();
-  await page.getByRole('link', { name: '‹ Session' }).click();
+
+  // The session's picture in the list: Cover in the viewer.
+  await page.locator('.grid .tile').nth(1).click();
+  await poseViewer.locator('.slide.current .media').click();
+  const cover = poseViewer.getByRole('button', { name: 'Use as session picture' });
+  await cover.click();
+  await expect(cover).toHaveAttribute('aria-pressed', 'true');
+  // Other days of this pose: none yet (one session).
+  await poseViewer.getByRole('button', { name: 'Other days' }).click();
+  await expect(poseViewer.getByText('No other day with this pose and side yet.')).toBeVisible();
+  await poseViewer.getByRole('button', { name: 'Hide other days' }).click();
+  await page.keyboard.press('Escape');
+
+  // Improve crops: one pose after another; confirming keeps the crop as the hold's own.
+  await page.getByRole('link', { name: 'Improve crops' }).click();
+  await expect(page).toHaveURL(/#\/session\/[^/]+\/crops$/);
+  // Trikonasana's crop was edited above: the flow starts at the down dog, the first without its own crop.
+  await expect(page.locator('.count')).toHaveText('1 / 2');
+  await expect(page.locator('.pose-name')).toHaveText('Adho Mukha Svanasana');
+  await page.getByRole('button', { name: 'Confirm & next' }).click();
+  await expect(page.locator('.pose-name')).toHaveText('Utthita Trikonasana');
+  await expect(page.getByText(/2 of 2 confirmed/)).toBeVisible();
+  await page.getByRole('button', { name: 'Confirm & finish' }).click();
+  await expect(page).toHaveURL(/#\/session\/[^/]+\/poses$/);
+
+  // Completely labeled: the session opens in Poses; Edit goes to the review.
+  await page.getByRole('button', { name: 'Mark as completely labeled' }).click();
+  await expect(page.getByRole('button', { name: 'Completely labeled ✓' })).toBeVisible();
+  await page.getByRole('link', { name: '‹ Sessions' }).click();
+  await page.locator('.row.session').first().click();
+  await expect(page).toHaveURL(/#\/session\/[^/]+\/poses$/);
+  await page.getByRole('link', { name: 'Edit', exact: true }).click();
+  await expect(page.getByText('Completely labeled: the session opens in Poses.')).toBeVisible();
   await page.getByRole('button', { name: '‹ Sessions' }).click();
   await page.getByRole('tab', { name: 'Asanas' }).click();
 

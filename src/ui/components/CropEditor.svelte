@@ -26,6 +26,11 @@
   ];
   /** Space around the frame (the handles reach 22 px beyond it). */
   const MARGIN = 24;
+  /**
+   * Left and right: the handles' hit areas stay clear of the screen edges, where iOS Safari's
+   * back/forward swipe starts (a drag on the left edge handle went back a page).
+   */
+  const SIDE_MARGIN = 48;
   const MIN_FRAME = 72;
 
   let stage: HTMLDivElement;
@@ -44,7 +49,9 @@
   const imgH = $derived(still.height);
 
   function area(): Box {
-    return inset({ x: 0, y: 0, w: stageW, h: stageH }, MARGIN);
+    const box = inset({ x: 0, y: 0, w: stageW, h: stageH }, MARGIN);
+    const extra = Math.min(SIDE_MARGIN - MARGIN, Math.max(0, box.w / 4));
+    return { x: box.x + extra, y: box.y, w: Math.max(1, box.w - 2 * extra), h: box.h };
   }
 
   function maxScale(): number {

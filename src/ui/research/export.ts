@@ -133,7 +133,8 @@ export interface ResearchExport {
   cropper: string;
   catalog: Array<Pick<Asana, 'id' | 'name' | 'sided'> & { group: string | null; posture: PostureClass | null }>;
   templates: SequenceTemplate[];
-  sessions: Array<{ id: string; date: string; templateId: string | null; videoIds: string[]; fullyLabeled: boolean }>;
+  /** `markedComplete`: the user marked it as completely labeled (open cards there are not holds they missed). */
+  sessions: Array<{ id: string; date: string; templateId: string | null; videoIds: string[]; fullyLabeled: boolean; markedComplete: boolean }>;
   videos: Array<Pick<Video, 'id' | 'durationS' | 'width' | 'height' | 'fps' | 'codec' | 'recordedAt'>>;
   analyses: ResearchAnalysis[];
   holds: ResearchHold[];
@@ -386,7 +387,7 @@ export async function buildResearchExport(src: ResearchSource, deps: ResearchDep
     cropper,
     catalog: src.asanas.map((a) => ({ id: a.id, name: a.name, sided: a.sided, group: a.group ?? null, posture: a.posture ?? null })),
     templates: src.templates.map((t) => ({ id: t.id, name: t.name, entries: t.entries.map((e) => ({ ...e })) })),
-    sessions: src.sessions.map((s) => ({ id: s.id, date: day(s.date), templateId: s.templateId ?? null, videoIds: [...s.videoIds], fullyLabeled: fullSessions.has(s.id) })),
+    sessions: src.sessions.map((s) => ({ id: s.id, date: day(s.date), templateId: s.templateId ?? null, videoIds: [...s.videoIds], fullyLabeled: fullSessions.has(s.id), markedComplete: s.complete === true })),
     videos: src.videos.map((v) => ({ id: v.id, durationS: v.durationS, width: v.width, height: v.height, fps: v.fps, codec: v.codec, recordedAt: v.recordedAt })),
     analyses,
     holds,

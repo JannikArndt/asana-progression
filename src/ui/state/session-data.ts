@@ -1,6 +1,6 @@
 /** Pure helpers joining sessions, videos, analyses and holds (tested; no I/O). */
 import type { HistoryEntry, ReviewItem } from '../../labeling';
-import { poseKey, type Analysis, type CompactPose, type Hold, type ReviewCandidate, type Session, type SessionLocation, type Video } from '../../model';
+import { DOWNWARD_DOG_ID, poseKey, type Analysis, type CompactPose, type Hold, type ReviewCandidate, type Session, type SessionLocation, type Video } from '../../model';
 import type { GeoLocation, VideoMeta } from '../../source';
 
 export function dayOf(iso: string | null | undefined): string {
@@ -550,14 +550,19 @@ export function placeLabel(session: Session): string | null {
 }
 
 /**
- * The session's picture in the list: of its holds with a captured image (`captured`), the one
- * nearest the middle of the session (session order: video order, then best frame). Null if none.
+ * The session's picture in the list, of its holds with a captured image (`captured`): the one the
+ * user chose (`coverHoldId`), else the first down dog (session order: video order, then best
+ * frame), else the one nearest the middle of the session. Null if none.
  */
 export function sessionPreview(session: Session, holds: Hold[], captured: ReadonlySet<string>): Hold | null {
   const order = new Map(session.videoIds.map((id, i) => [id, i]));
   const list = holds
     .filter((h) => h.sessionId === session.id)
     .sort((a, b) => (order.get(a.videoId) ?? order.size) - (order.get(b.videoId) ?? order.size) || a.bestS - b.bestS);
+  const chosen = list.find((h) => h.id === session.coverHoldId && captured.has(h.id));
+  if (chosen) return chosen;
+  const dog = list.find((h) => h.asanaId === DOWNWARD_DOG_ID && captured.has(h.id));
+  if (dog) return dog;
   const middle = (list.length - 1) / 2;
   let best: Hold | null = null;
   let bestD = Infinity;

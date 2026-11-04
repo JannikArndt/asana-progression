@@ -1,4 +1,4 @@
-/** Tiny hash router: #/, #/process, #/session/<id>, #/session/<id>/videos, #/session/<id>/poses, #/settings, #/lab, … */
+/** Tiny hash router: #/, #/process, #/session/<id>, #/session/<id>/videos, #/session/<id>/poses, #/session/<id>/crops, #/settings, #/lab, … */
 export type Route =
   | { name: 'home'; tab?: 'asanas' | 'sessions' }
   | { name: 'process' }
@@ -6,6 +6,7 @@ export type Route =
   | { name: 'session'; id: string }
   | { name: 'session-videos'; id: string }
   | { name: 'session-poses'; id: string }
+  | { name: 'session-crops'; id: string }
   | { name: 'asana'; id: string }
   | { name: 'settings' }
   | { name: 'catalog' }
@@ -22,6 +23,7 @@ export function parseHash(hash: string): Route {
   if (parts[0] === 'video' && parts[1]) return { name: 'video', id: parts[1] };
   if (parts[0] === 'session' && parts[1] && parts[2] === 'videos') return { name: 'session-videos', id: parts[1] };
   if (parts[0] === 'session' && parts[1] && parts[2] === 'poses') return { name: 'session-poses', id: parts[1] };
+  if (parts[0] === 'session' && parts[1] && parts[2] === 'crops') return { name: 'session-crops', id: parts[1] };
   if (parts[0] === 'session' && parts[1]) return { name: 'session', id: parts[1] };
   if (parts[0] === 'asana' && parts[1]) return { name: 'asana', id: parts[1] };
   if (parts[0] === 'sessions') return { name: 'home', tab: 'sessions' };
@@ -45,6 +47,8 @@ export function routeHash(r: Route): string {
       return `#/session/${encodeURIComponent(r.id)}/videos`;
     case 'session-poses':
       return `#/session/${encodeURIComponent(r.id)}/poses`;
+    case 'session-crops':
+      return `#/session/${encodeURIComponent(r.id)}/crops`;
     case 'asana':
       return `#/asana/${encodeURIComponent(r.id)}`;
     case 'catalog':

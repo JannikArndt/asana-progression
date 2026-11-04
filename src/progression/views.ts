@@ -66,6 +66,41 @@ export function sessionItems(sessionId: string, holds: Hold[], sessions: Session
   return buildItems(own, sessions, assets, () => true).sort((a, b) => videoPos(a.hold) - videoPos(b.hold) || a.hold.startS - b.hold.startS);
 }
 
+/**
+ * Grid slots for items in `cols` columns: item indices, with `null` (an empty cell) before a right
+ * side that would sit in the last column while its left side follows directly, so R and L of one
+ * asana always share a row (e.g. after an odd number of sun salutations).
+ */
+export function gridSlots(items: readonly Pick<ProgressionItem, 'hold'>[], cols: number): Array<number | null> {
+  const out: Array<number | null> = [];
+  items.forEach((item, i) => {
+    const next = items[i + 1]?.hold;
+    const pair = item.hold.side === 'R' && next?.side === 'L' && next.asanaId === item.hold.asanaId;
+    if (cols > 1 && pair && out.length % cols === cols - 1) out.push(null);
+    out.push(i);
+  });
+  return out;
+}
+
+/**
+ * The other side of a sided hold in practice order: for R the next L of the same asana and rep
+ * (and the reverse), as long as no other asana's hold of the same side sits between. Null when
+ * the hold has no side or no partner.
+ */
+export function sidePartner(items: readonly Pick<ProgressionItem, 'hold' | 'rep'>[], index: number): number | null {
+  const me = items[index];
+  if (!me?.hold.side) return null;
+  const want = me.hold.side === 'R' ? 'L' : 'R';
+  const step = want === 'L' ? 1 : -1;
+  for (let i = index + step; i >= 0 && i < items.length; i += step) {
+    const h = items[i]!.hold;
+    if (h.asanaId === me.hold.asanaId && h.side === want && items[i]!.rep === me.rep) return i;
+    if (h.side === me.hold.side && h.asanaId === me.hold.asanaId) return null;
+    if (!h.side) return null;
+  }
+  return null;
+}
+
 function buildItems(holds: Hold[], sessions: Session[], assets: Asset[], keep: (h: Hold) => boolean): ProgressionItem[] {
   const sessionById = new Map(sessions.map((s) => [s.id, s]));
   const repOf = holdReps(holds, sessions);

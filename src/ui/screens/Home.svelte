@@ -79,16 +79,26 @@
 <main class="home">
   <header class="top">
     <h1>Asanas</h1>
-    <button class="btn quiet icon" type="button" aria-label="Settings" onclick={() => router.go({ name: 'settings' })}>
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
-        ><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6" /><path
-          d="M12 2.8v2.4M12 18.8v2.4M21.2 12h-2.4M5.2 12H2.8M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7M18.5 18.5l-1.7-1.7M7.2 7.2 5.5 5.5"
-          stroke="currentColor"
-          stroke-width="1.6"
-          stroke-linecap="round"
-        /></svg
-      >
-    </button>
+    <div class="tools">
+      <label class="btn quiet icon import" class:disabled={busy || pipeline.running} aria-label="Import video" title="Import video">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
+          ><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg
+        >
+        <input class="visually-hidden" type="file" accept="video/*" multiple disabled={busy || pipeline.running} onchange={onFiles} />
+      </label>
+      <button class="btn quiet icon" type="button" aria-label="Settings" title="Settings" onclick={() => router.go({ name: 'settings' })}>
+        <!-- Gear: eight teeth around a ring, hole in the middle. -->
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
+          ><path
+            d="M10.3 2.8h3.4l.5 2.4a7.3 7.3 0 0 1 1.9 1.1l2.3-.8 1.7 2.9-1.8 1.6a7.4 7.4 0 0 1 0 2.2l1.8 1.6-1.7 2.9-2.3-.8a7.3 7.3 0 0 1-1.9 1.1l-.5 2.4h-3.4l-.5-2.4a7.3 7.3 0 0 1-1.9-1.1l-2.3.8-1.7-2.9 1.8-1.6a7.4 7.4 0 0 1 0-2.2L3.9 8.4l1.7-2.9 2.3.8a7.3 7.3 0 0 1 1.9-1.1z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linejoin="round"
+          /><circle cx="12" cy="12" r="2.8" fill="none" stroke="currentColor" stroke-width="1.6" /></svg
+        >
+      </button>
+    </div>
   </header>
 
   {#if pipeline.running}
@@ -107,14 +117,6 @@
     </div>
   {/each}
 
-  <label class="btn primary import" class:disabled={busy || pipeline.running}>
-    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"
-      ><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg
-    >
-    Import video
-    <input class="visually-hidden" type="file" accept="video/*" multiple disabled={busy || pipeline.running} onchange={onFiles} />
-  </label>
-
   {#if app.error}
     <p class="error">{app.error}</p>
   {/if}
@@ -127,7 +129,7 @@
   {#if tab === 'sessions'}
     <section class="list" role="tabpanel">
       {#if app.ready && app.sessions.length === 0}
-        <p class="muted empty">No sessions yet. Import a practice video to find the holds.</p>
+        <p class="muted empty">No sessions yet. Import a practice video with + (top right) to find the holds.</p>
       {/if}
       {#each app.sessions as s (s.id)}
         {@const sum = summarizeSession(s, app.videos, app.summaries)}
@@ -135,7 +137,7 @@
         {@const extra = [placeLabel(s), s.note].filter(Boolean).join(' · ')}
         {@const preview = sessionPreview(s, app.holds, captured)}
         {@const img = preview ? images.get(preview.id) : undefined}
-        <button class="row session" type="button" onclick={() => router.go({ name: 'session', id: s.id })}>
+        <button class="row session" type="button" onclick={() => router.go({ name: s.complete ? 'session-poses' : 'session', id: s.id })}>
           <!-- The whole frame, centred: place and light make a session recognizable, not the body crop. -->
           <div class="thumb">
             {#if img}
@@ -219,10 +221,9 @@
     padding: 0;
   }
 
-  .import {
-    align-self: stretch;
-    min-height: 52px;
-    font-size: var(--text-l);
+  .tools {
+    display: flex;
+    gap: var(--space-1);
   }
 
   .import.disabled {

@@ -308,6 +308,12 @@ class AppState {
     if (s) this.summaries = { ...this.summaries, [videoId]: { ...s, candidates } };
   }
 
+  /** Writes a changed session and updates the list. */
+  async saveSession(session: Session) {
+    await this.db.sessions.put(session);
+    this.upsertSession(session);
+  }
+
   upsertSession(session: Session) {
     this.sessions = [...this.sessions.filter((x) => x.id !== session.id), session].sort((a, b) => b.date.localeCompare(a.date));
   }

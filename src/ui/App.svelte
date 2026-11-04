@@ -5,6 +5,7 @@
   import SessionReview from './screens/SessionReview.svelte';
   import SessionVideos from './screens/SessionVideos.svelte';
   import SessionPoses from './screens/SessionPoses.svelte';
+  import ImproveCrops from './screens/ImproveCrops.svelte';
   import AsanaProgression from './screens/AsanaProgression.svelte';
   import Catalog from './screens/Catalog.svelte';
   import TemplateEditor from './screens/TemplateEditor.svelte';
@@ -61,6 +62,10 @@
 {:else if router.route.name === 'session-poses'}
   {#key router.route.id}
     <SessionPoses id={router.route.id} />
+  {/key}
+{:else if router.route.name === 'session-crops'}
+  {#key router.route.id}
+    <ImproveCrops id={router.route.id} />
   {/key}
 {:else if router.route.name === 'asana'}
   {#key router.route.id}<AsanaProgression id={router.route.id} />{/key}

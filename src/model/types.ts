@@ -100,6 +100,10 @@ export interface Session {
    * place name the user gave (suggested from named sessions nearby). Both are optional.
    */
   location?: SessionLocation;
+  /** The user marked it as completely labeled (it is never 100 %): it opens in the Poses view. */
+  complete?: boolean;
+  /** Hold whose picture stands for the session in the list (else the first down dog). */
+  coverHoldId?: string;
 }
 
 export interface SessionLocation {

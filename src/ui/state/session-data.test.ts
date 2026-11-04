@@ -440,6 +440,15 @@ describe('session previews', () => {
     expect(sessionPreview(ses, [hold('x', 's', 'v9', 'x', 1), hold('y', 's', 'v2', 'x', 1)], new Set(['x']))?.id).toBe('x');
   });
 
+  it('prefers the chosen picture, then the first down dog', () => {
+    const list = [hold('a', 's', 'v1', 'x', 1), hold('d2', 's', 'v1', 'adho-mukha-svanasana', 40), hold('d1', 's', 'v1', 'adho-mukha-svanasana', 20), hold('c', 's', 'v2', 'x', 5)];
+    const all = new Set(['a', 'd1', 'd2', 'c']);
+    expect(sessionPreview(ses, list, all)?.id).toBe('d1');
+    expect(sessionPreview({ ...ses, coverHoldId: 'c' }, list, all)?.id).toBe('c');
+    // A chosen hold without a captured image (or gone) falls back.
+    expect(sessionPreview({ ...ses, coverHoldId: 'c' }, list, new Set(['a', 'd2']))?.id).toBe('d2');
+  });
+
   it('falls back to the middle frame of the longest analysed video', () => {
     expect(sessionTinyFrame(ses, { v1: { sampleCount: 100 }, v2: { sampleCount: 401 } })).toEqual({ videoId: 'v2', index: 200 });
     expect(sessionTinyFrame(ses, { v1: { sampleCount: 10 } })).toEqual({ videoId: 'v1', index: 5 });

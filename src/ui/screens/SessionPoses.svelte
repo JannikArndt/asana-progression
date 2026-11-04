@@ -6,7 +6,7 @@
   import FrameScrubber from '../components/FrameScrubber.svelte';
   import VideoFinder from '../components/VideoFinder.svelte';
   import CropExportNotice from '../components/CropExportNotice.svelte';
-  import { displayCrop, repLabel, sessionItems, typicalAspect, type ProgressionItem } from '../../progression';
+  import { displayCrop, gridSlots, repLabel, sessionItems, typicalAspect, type ProgressionItem } from '../../progression';
   import { app } from '../state/app.svelte';
   import { router, routeHash } from '../state/router.svelte';
   import { capture } from '../state/capture.svelte';
@@ -42,6 +42,8 @@
   /** The session's labeled holds in practice order. */
   const items = $derived(sessionItems(id, app.holds, app.sessions, app.assets));
   const tileAspect = $derived(typicalAspect(items));
+  /** R and L of one asana share a row: empty cells where needed. */
+  const slots = $derived(gridSlots(items, columns));
   const withStills = $derived(items.filter((i) => i.still).length);
   const place = $derived(session ? placeLabel(session) : null);
   const scope = $derived(`session:${id}`);
@@ -72,6 +74,18 @@
     void cropExport.prepare(scope, items, `asana-progression-${session.date.slice(0, 10)}`);
   }
 
+  async function setCover(item: ProgressionItem) {
+    if (!session) return;
+    const { coverHoldId: _, ...rest } = session;
+    await app.saveSession(session.coverHoldId === item.hold.id ? rest : { ...rest, coverHoldId: item.hold.id });
+  }
+
+  async function setComplete(complete: boolean) {
+    if (!session) return;
+    const { complete: _, ...rest } = session;
+    await app.saveSession(complete ? { ...rest, complete } : rest);
+  }
+
   function caption(item: ProgressionItem): string {
     return [item.hold.side, repLabel(item) ? `rep ${repLabel(item)}` : ''].filter(Boolean).join(' · ');
   }
@@ -79,10 +93,17 @@
 
 <main class="poses">
   <header class="top">
-    <a class="btn quiet" href={routeHash({ name: 'session', id })}>‹ Session</a>
-    {#if withStills}
-      <button class="btn quiet" type="button" onclick={exportCrops} disabled={!!cropExport.preparing}>Export</button>
+    {#if session?.complete}
+      <a class="btn quiet" href={routeHash({ name: 'home', tab: 'sessions' })}>‹ Sessions</a>
+    {:else}
+      <a class="btn quiet" href={routeHash({ name: 'session', id })}>‹ Session</a>
     {/if}
+    <span class="links">
+      {#if withStills}
+        <button class="btn quiet" type="button" onclick={exportCrops} disabled={!!cropExport.preparing}>Export</button>
+      {/if}
+      {#if session?.complete}<a class="btn quiet" href={routeHash({ name: 'session', id })}>Edit</a>{/if}
+    </span>
   </header>
 
   {#if session}
@@ -92,6 +113,14 @@
     </div>
 
     {#if items.length}
+      <div class="actions">
+        {#if withStills}<a class="btn" href={routeHash({ name: 'session-crops', id })}>Improve crops</a>{/if}
+        {#if session.complete}
+          <button class="btn quiet" type="button" onclick={() => setComplete(false)}>Completely labeled ✓</button>
+        {:else}
+          <button class="btn quiet" type="button" onclick={() => setComplete(true)}>Mark as completely labeled</button>
+        {/if}
+      </div>
       <div class="segmented" role="radiogroup" aria-label="Columns">
         {#each [1, 2, 3] as n (n)}
           <button type="button" role="radio" aria-checked={columns === n} class:on={columns === n} onclick={() => (columns = n)}>{n} {n === 1 ? 'column' : 'columns'}</button>
@@ -119,7 +148,11 @@
       <p class="muted">No holds labeled in this session yet. <a href={routeHash({ name: 'session', id })}>Label them in the review.</a></p>
     {:else}
       <ol class="grid" style:--cols={columns}>
-        {#each items as item, i (item.hold.id)}
+        {#each slots as i, k (i === null ? `gap-${k}` : items[i]!.hold.id)}
+          {#if i === null}
+            <li class="gap" aria-hidden="true"></li>
+          {:else}
+          {@const item = items[i]!}
           {@const sum = app.summaries[item.hold.videoId]}
           {@const name = nameOf(item)}
           <li>
@@ -139,6 +172,7 @@
               </span>
             </button>
           </li>
+          {/if}
         {/each}
       </ol>
     {/if}
@@ -158,6 +192,8 @@
     onedit={(item) => (editing = item)}
     onframe={(item) => (framing = item)}
     onsession={() => router.go({ name: 'session', id })}
+    oncover={setCover}
+    coverId={session.coverHoldId}
     onclose={() => (viewerIndex = null)}
   />
 {/if}
@@ -222,6 +258,20 @@
   }
 
   .top a {
+    text-decoration: none;
+  }
+
+  .links {
+    display: flex;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .actions a {
     text-decoration: none;
   }
 

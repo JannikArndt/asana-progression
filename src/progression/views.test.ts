@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cropFileName, cropPixels, displayCrop, fillCrop, flipbookInterval, hasBothSides, hasReps, holdReps, itemAspect, nextColumns, progressionItems, repLabel, sessionItems, swipeIndex, typicalAspect } from './views';
+import { cropFileName, cropPixels, displayCrop, fillCrop, flipbookInterval, hasBothSides, hasReps, holdReps, itemAspect, nextColumns, progressionItems, repLabel, sessionItems, gridSlots, sidePartner, swipeIndex, typicalAspect } from './views';
 import type { Asset, Hold, Session } from '../model/types';
 
 const hold = (id: string, sessionId: string, asanaId: string, side: Hold['side'], startS = 0): Hold => ({
@@ -181,5 +181,28 @@ describe('crop export', () => {
     expect(cropFileName({ ...it1, date: '' } as never, ' Ūrdhva / Dhanurāsana ', 1)).toBe('undated_01_Ūrdhva-Dhanurāsana_R.jpg');
     expect(cropFileName(it1 as never, '//', 1)).toBe('2026-10-14_01_asana_R.jpg');
     expect(cropFileName(it1 as never, 'Utthita Trikonasana')).toBe('2026-10-14_Utthita-Trikonasana_R.jpg');
+  });
+});
+
+describe('gridSlots and sidePartner', () => {
+  const it_ = (asanaId: string, side: 'R' | 'L' | null, rep = 1) => ({ hold: { asanaId, side } as never, rep });
+  const list = [it_('dog', null), it_('dog', null), it_('dog', null), it_('pada', null), it_('trik', 'R'), it_('trik', 'L'), it_('uhp-a', 'R'), it_('uhp-b', 'R'), it_('uhp-a', 'L'), it_('uhp-b', 'L')];
+
+  it('keeps R and L of one asana on one row', () => {
+    expect(gridSlots(list, 2)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(gridSlots(list.slice(1), 2)).toEqual([0, 1, 2, null, 3, 4, 5, 6, 7, 8]);
+    expect(gridSlots(list.slice(1), 1)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(gridSlots(list, 3)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(gridSlots(list.slice(2), 3)).toEqual([0, 1, null, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it('finds the other side across a run of variants', () => {
+    expect(sidePartner(list, 4)).toBe(5);
+    expect(sidePartner(list, 5)).toBe(4);
+    expect(sidePartner(list, 6)).toBe(8);
+    expect(sidePartner(list, 9)).toBe(7);
+    expect(sidePartner(list, 0)).toBeNull();
+    expect(sidePartner([it_('a', 'R'), it_('a', 'R', 2)], 0)).toBeNull();
+    expect(sidePartner([it_('a', 'R'), it_('b', null), it_('a', 'L')], 0)).toBeNull();
   });
 });

@@ -533,6 +533,16 @@
     return `Select ${files} again to read the poses of the open cards (better suggestions and “Confirm all”).`;
   });
 
+  /** "Completely labeled" (never 100 %): the session then opens in the Poses view. */
+  async function setComplete(complete: boolean) {
+    const session = review.session;
+    if (!session) return;
+    const { complete: _, ...rest } = session;
+    const next = complete ? { ...rest, complete } : rest;
+    await app.saveSession(next);
+    if (complete) router.go({ name: 'session-poses', id });
+  }
+
   const scrubEntry = $derived(scrub?.key ? review.entry(scrub.key) : undefined);
   const pickerEntry = $derived(pickerKey ? review.entry(pickerKey) : undefined);
   const sessionLabels = $derived(review.items.filter((i) => i.status === 'labeled' && i.label).map((i) => i.label!));
@@ -573,6 +583,18 @@
         <span>{place ?? 'Add location'}</span>
       </button>
     </div>
+
+    {#if counts.labeled}
+      <div class="complete">
+        {#if session.complete}
+          <span class="small muted">Completely labeled: the session opens in Poses.</span>
+          <button class="btn quiet small-btn" type="button" onclick={() => setComplete(false)}>Undo</button>
+        {:else}
+          <button class="btn small-btn" type="button" onclick={() => setComplete(true)}>Mark as completely labeled</button>
+          <span class="small muted">Opens in Poses from then on; Edit comes back here.</span>
+        {/if}
+      </div>
+    {/if}
 
     {#if review.combinable.length && !pipeline.running && importQueue.total === 0}
       <div class="card notice">
@@ -836,6 +858,18 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
+  }
+
+  .complete {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .small-btn {
+    min-height: 40px;
+    padding: 0 var(--space-3);
   }
 
   .small {

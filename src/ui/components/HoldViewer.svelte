@@ -4,7 +4,8 @@
   import AssetImage from './AssetImage.svelte';
   import PoseOverlay from './PoseOverlay.svelte';
   import PhotoSaveSheet from './PhotoSaveSheet.svelte';
-  import { displayCrop, itemAspect, swipeIndex, type ProgressionItem } from '../../progression';
+  import LazyAsset from './LazyAsset.svelte';
+  import { displayCrop, fillCrop, itemAspect, progressionItems, swipeIndex, type ProgressionItem } from '../../progression';
   import type { PostureClass } from '../../model';
   import { formatDay } from '../format';
   import { app } from '../state/app.svelte';
@@ -32,9 +33,34 @@
     /** Choose another best frame from the analysis frames (omitted: no such action). */
     onframe?: ((item: ProgressionItem) => void) | undefined;
     onsession: (sessionId: string) => void;
+    /** Make this hold the session's picture in the list (omitted: no such action). */
+    oncover?: ((item: ProgressionItem) => void) | undefined;
+    /** The hold that is the session's picture now (marks the Cover action). */
+    coverId?: string | undefined;
     onclose: () => void;
   }
-  let { items, index = $bindable(), compareId, title, covered = false, oncompare, heading, onedit, onframe, onsession, onclose }: Props = $props();
+  let { items, index = $bindable(), compareId, title, covered = false, oncompare, heading, onedit, onframe, onsession, oncover, coverId, onclose }: Props = $props();
+
+  const OTHERS_KEY = 'asana.viewer.others';
+  function savedOthers(): boolean {
+    try {
+      return localStorage.getItem(OTHERS_KEY) === '1';
+    } catch {
+      return false;
+    }
+  }
+  /** Strip of the same asana and side on other days; a tap compares with that hold. */
+  let showOthers = $state(savedOthers());
+  let pick = $state.raw<ProgressionItem | null>(null);
+  function toggleOthers() {
+    showOthers = !showOthers;
+    if (!showOthers) pick = null;
+    try {
+      localStorage.setItem(OTHERS_KEY, showOthers ? '1' : '0');
+    } catch {
+      /* private mode */
+    }
+  }
 
   type CompareMode = 'split' | 'fade';
   const POSTURE: Record<PostureClass, string> = { standing: 'standing', seated: 'seated', lying: 'lying', inverted: 'inverted', 'arm-balance': 'arm balance' };
@@ -58,7 +84,20 @@
   let poses = $state.raw<Record<string, PoseResult | 'loading'>>({});
 
   const current = $derived(items[index]);
-  const reference = $derived(compareId ? items.find((i) => i.hold.id === compareId) : undefined);
+  /** Holds of the same asana and side in other sessions, oldest first (with a captured image). */
+  const others = $derived.by(() => {
+    if (!showOthers || !current) return [];
+    const h = current.hold;
+    return progressionItems(h.asanaId, app.holds, app.sessions, app.assets, h.side ?? 'both').filter(
+      (o) => o.hold.sessionId !== h.sessionId && (o.thumb ?? o.still) && (o.hold.side ?? null) === (h.side ?? null),
+    );
+  });
+  // A picked hold belongs to the hold it was picked for.
+  $effect(() => {
+    void current?.hold.id;
+    pick = null;
+  });
+  const reference = $derived(pick ?? (compareId ? items.find((i) => i.hold.id === compareId) : undefined));
   const comparing = $derived(!!reference && !!current && reference.hold.id !== current.hold.id && !!(reference.still ?? reference.thumb));
   const isReference = $derived(!!current && compareId === current.hold.id);
   const canChooseFrame = $derived(!!current && !!app.summaries[current.hold.videoId]);
@@ -302,6 +341,13 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 17v3h16v-3" /></svg>
           <span>Save</span>
         </button>
+        {#if oncover}
+          {@const isCover = coverId === current.hold.id}
+          <button type="button" aria-label="Use as session picture" aria-pressed={isCover} class:on={isCover} onclick={() => { oncover(current); showBar(); }} disabled={!current.still && !current.thumb}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 16l5-5 4 4 3-3 6 6" /></svg>
+            <span>Cover</span>
+          </button>
+        {/if}
         {#if oncompare}
           <button type="button" aria-pressed={isReference} class:on={isReference} onclick={() => { oncompare(isReference ? null : current.hold.id); showBar(); }}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M12 2v20" /></svg>
@@ -322,7 +368,7 @@
         <div class="compare">
           <div class="compare-head">
             <span>Comparing with <strong class="tabular">{formatDay(reference.date, true)}</strong></span>
-            <button class="btn quiet small" type="button" onclick={() => oncompare?.(null)}>Stop</button>
+            <button class="btn quiet small" type="button" onclick={() => (pick ? (pick = null) : oncompare?.(null))}>Stop</button>
           </div>
           <div class="modes" role="radiogroup" aria-label="Compare mode">
             <button type="button" role="radio" aria-checked={compare === 'split'} class:on={compare === 'split'} onclick={() => (compare = 'split')}>Split</button>
@@ -353,7 +399,33 @@
       {:else if status === 'queued' || status === 'capturing'}
         <p class="saving">Saving the still…</p>
       {/if}
-      <button class="btn quiet session" type="button" onclick={() => onsession(current.hold.sessionId)}>Open session ›</button>
+      {#if showOthers}
+        {#if others.length}
+          <ol class="others" aria-label="Other days">
+            {#each others as o (o.hold.id)}
+              {@const img = o.thumb ?? o.still}
+              <li>
+                <button
+                  type="button"
+                  class:on={pick?.hold.id === o.hold.id}
+                  aria-pressed={pick?.hold.id === o.hold.id}
+                  aria-label="Compare with {formatDay(o.date, true)}"
+                  onclick={() => (pick = pick?.hold.id === o.hold.id ? null : o)}
+                >
+                  <LazyAsset asset={img} crop={img ? fillCrop(displayCrop(o.hold), img.width, img.height, 3 / 4) : null} aspect={3 / 4} alt="" />
+                  <span class="tabular">{formatDay(o.date)}</span>
+                </button>
+              </li>
+            {/each}
+          </ol>
+        {:else}
+          <p class="explain small-text">No other day with this pose{current.hold.side ? ' and side' : ''} yet.</p>
+        {/if}
+      {/if}
+      <div class="foot-row">
+        <button class="btn quiet session" type="button" aria-pressed={showOthers} onclick={toggleOthers}>{showOthers ? 'Hide other days' : 'Other days'}</button>
+        <button class="btn quiet session" type="button" onclick={() => onsession(current.hold.sessionId)}>Open session ›</button>
+      </div>
     {/if}
   </footer>
 </div>
@@ -653,8 +725,58 @@
   }
 
   .session {
-    align-self: center;
     color: inherit;
     opacity: 0.85;
+  }
+
+  .foot-row {
+    display: flex;
+    justify-content: center;
+    gap: var(--space-2);
+  }
+
+  .small-text {
+    margin: 0;
+    text-align: center;
+    font-size: var(--text-s);
+  }
+
+  /* Other days of this pose: a horizontal strip; a tap compares with that hold. */
+  .others {
+    list-style: none;
+    margin: 0;
+    padding: 2px 0;
+    display: flex;
+    gap: var(--space-2);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .others button {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 56px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: var(--text-xs);
+    opacity: 0.8;
+  }
+
+  .others button.on {
+    opacity: 1;
+  }
+
+  .others button.on :global(.lazy) {
+    outline: 2px solid var(--color-on-photo);
+    outline-offset: 1px;
+  }
+
+  .others button span {
+    text-align: center;
+    white-space: nowrap;
   }
 </style>

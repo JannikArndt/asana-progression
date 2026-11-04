@@ -168,7 +168,7 @@ describe('research export', () => {
     // No pooled frame in any encoding: the only long strings are the float16 signals.
     const strings = [...json.matchAll(/"([A-Za-z0-9+/=]{200,})"/g)].map((m) => m[1]!);
     expect(strings.length).toBe(2 * x.analyses.filter((a) => a.signals).length);
-    expect(x.sessions[0]).toEqual({ id: 's1', date: '2025-04-03', templateId: 't1', videoIds: ['v1'], fullyLabeled: true });
+    expect(x.sessions[0]).toEqual({ id: 's1', date: '2025-04-03', templateId: 't1', videoIds: ['v1'], fullyLabeled: true, markedComplete: false });
     expect(x.videos[0]).toEqual({ id: 'v1', durationS: lib.src.videos[0]!.durationS, width: 1920, height: 1080, fps: 30, codec: 'hevc', recordedAt: '2025-04-03T07:12:00+02:00' });
     expect(x).toMatchObject({ format: RESEARCH_FORMAT, version: 1, exportedAt: '2026-10-12T12:00:00.000Z', cropper: 'mediapipe-pose', app: { version: 'test' } });
     expect(x.catalog[1]).toEqual({ id: 'trikonasana', name: 'trikonasana', sided: true, group: 'Standing', posture: null });
