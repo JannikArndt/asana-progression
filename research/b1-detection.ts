@@ -216,9 +216,10 @@ function labSection(d: Dataset) {
 
 async function mergeSection(d: Dataset) {
   const sessions = d.sessions.map((s) => s.label);
-  const ref = (await runOffline(d, [{ ...DEFAULT_PARAMS }]))[0]!;
+  const near = { nearest: true };
+  const ref = (await runOffline(d, [{ ...DEFAULT_PARAMS }], near))[0]!;
   const fx = [loadFixture('ashtanga-primary-outdoor'), loadFixture('sarvangasana-finishing')] as const;
-  console.log('\n### Similar-merge parameters, replayed offline (exact: exported distances)\n');
+  console.log(`\n### Similar-merge parameters, replayed offline (exported distances; ${ref.estimated} pairs not exported are estimated from the nearest pre-merge run)\n`);
   const sweep: Array<Array<string | number>> = [];
   for (const [factor, rel] of [
     [2, 0.45],
@@ -231,17 +232,17 @@ async function mergeSection(d: Dataset) {
     [3, 5],
   ] as const) {
     const p = { ...DEFAULT_PARAMS, similarMergeFactor: factor, similarMergeRelative: rel };
-    const r = (await runOffline(d, [p]))[0]!;
+    const r = (await runOffline(d, [p], near))[0]!;
     const o = await fixtureCheck(fx[0], p);
     const f = await fixtureCheck(fx[1], p);
     sweep.push([factor, rel, ...r.perSession, r.total.editCost, fmtCounts(r.total), `${o.own}/${o.holds}${o.pass ? '' : ' ✗'}`, `${f.own}/${f.holds}${f.pass ? '' : ' ✗'}`]);
   }
   console.log(table(['Factor', 'Cap (× median)', ...sessions, 'Total', 'Missed / split / merge / false', 'Outdoor fixture own (≥ 80)', 'Finishing fixture own (9)'], sweep));
   const grid = gridRows({ vary: { similarMergeFactor: [2, 2.5, 3, 4], similarMergeRelative: [0.45, 0.6, 0.8, 1, 1.2, 1.5, 2] } });
-  const rows = await runOffline(d, grid);
+  const rows = await runOffline(d, grid, near);
   console.log('\nLeave one session out over factor × cap (28 sets):\n');
   console.log(table(['Held out', 'Chosen set', 'Cost', 'Defaults'], loso(rows, sessions, ref.perSession).map((l) => [l.session, diffText(l.diff), l.heldOutCost, l.defaultCost])));
-  const withMotion = await runOffline(d, gridRows({ vary: { similarMergeFactor: [2, 2.5, 3, 4], similarMergeRelative: [0.45, 0.6, 0.8, 1, 1.2, 1.5, 2], similarMergeMotion: [1.1, 1.3] } }));
+  const withMotion = await runOffline(d, gridRows({ vary: { similarMergeFactor: [2, 2.5, 3, 4], similarMergeRelative: [0.45, 0.6, 0.8, 1, 1.2, 1.5, 2], similarMergeMotion: [1.1, 1.3] } }), near);
   console.log('\nThe same with similarMergeMotion 1.1 | 1.3 (56 sets):\n');
   console.log(table(['Held out', 'Chosen set', 'Cost', 'Defaults'], loso(withMotion, sessions, ref.perSession).map((l) => [l.session, diffText(l.diff), l.heldOutCost, l.defaultCost])));
 

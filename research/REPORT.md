@@ -1,5 +1,9 @@
 # Research report — hold finding, asana naming, auto-crop
 
+> Sections B1–B3 and the proposal are the record of the 2026-10-13 export (three sessions).
+> `research/data/research.json` is now the 2026-11-05 export (seven sessions); section C repeats
+> the analyses on it. The scripts run on whatever export is committed.
+
 Data: the research export and one detection-lab run with the default grid (`research/data/`,
 app version `674b241`, 2026-10-13). Three fully labeled sessions: every hold labeled, "Not a pose"
 = false detection, uncovered time = no hold.
@@ -247,3 +251,78 @@ by best frame (`Analysis.poses`, key = sample index of the best time) instead of
 `ReviewCandidate`, so merges, splits and re-runs that keep a frame keep its pose and new frames are
 filled in. In the app: `labeling/pose.ts`, `labeling/align.ts`, `labeling.planSession`, review
 "Confirm all".
+
+## C — Second export (2026-11-05, seven sessions)
+
+Data: research export of app build `bc410786ba2b`-era, 2026-11-05. Seven sessions, six fully
+labeled (S5 and S6 with open candidates left, but every hold labeled), 455 holds, 446 with a pose,
+132 manual crops (127 on holds with a pose). S1–S6 Primary series, **S7 = the first Intermediate
+series** (2026-11-04: up to Pincha Mayurasana, then Urdhva Dhanurasana ×3 and the finishing
+sequence; Karandavasana … Baddha Hasta Sirsasana D and Paschimottanasana A skipped).
+
+| Session | Date | Videos | Holds | Candidates | Own | Missed | Split | Merge | False | Edit cost |
+|---|---|---|---|---|---|---|---|---|---|---|
+| S1 | 2025-04-21 | 1 | 93 | 108 | 75 | 1 | 7 | 11 | 11 | 31 |
+| S2 | 2025-08-28 | 7 | 56 | 53 | 40 | 1 | 8 | 8 | 0 | 18 |
+| S3 | 2026-05-19 | 2 | 16 | 16 | 16 | 0 | 0 | 0 | 0 | 0 |
+| S4 | 2026-05-26 | 1 | 45 | 44 | 38 | 5 | 1 | 1 | 3 | 15 |
+| S5 | 2026-10-10 | 2 | 95 | 97 | 75 | 8 | 5 | 15 | 0 | 36 |
+| S6 | 2026-10-15 | 4 | 85 | 96 | 76 | 4 | 1 | 12 | 4 | 25 |
+| S7 | 2026-11-04 | 6 | 65 | 78 | 54 | 0 | 6 | 11 | 8 | 25 |
+
+(S1, S2 and S5 are B1's S1–S3.)
+
+### C1 — Naming (`research/c1-naming.ts`)
+
+The app's `labeling.planSession`, every hold open, the other sessions as history (leave one
+session out), zero corrections = "Confirm all" (template order where the alignment does not apply).
+
+| | S1 | S2 | S3 | S4 | S5 | S6 | S7 (Intermediate) | All |
+|---|---|---|---|---|---|---|---|---|
+| before (minCoverage 0.5, unknown = median, no jump cap) | 90 % | 88 % | 88 % | 93 % | 89 % | 86 % | 63 % (template order) | 85 % |
+| **adopted** | 90 % | 88 % | 88 % | 93 % | 89 % | 86 % | **82 %** | **88 %** |
+
+Top to bottom, correcting as you go (top 1 / top 3): 88 / 97 % → **89 / 98 %** (S7 86 / 97 → 92 / 98 %; no session lower).
+
+Why S7 failed: the classifier knows only the shared standing and finishing asanas (≈ 39 % of the
+Intermediate entries), so the alignment was off (< 50 %) and template order took over: one extra
+Dhanurasana shifted every later card, and the 20 skipped entries after Pincha Mayurasana were never
+skipped. Simply lowering the coverage made it worse (55 %): an asana never seen was matched to the
+nearest *known* class (Pasasana → Baddha Hasta Sirsasana, then the finishing poses), because unknown
+entries cost the median distance, more than the nearest wrong class.
+
+Adopted (all three are needed; each alone leaves S7 at 55–65 %):
+
+- **Novelty** (`POSE_ALIGNMENT.novelty` 0.75): an entry without examples costs the 0.75 quantile of
+  the within-class nearest-example distances (an example vs the nearest *other* hold of its class,
+  `PoseClassifier.withinQuantile`), not the item's median. A pose far from every known class now
+  fits the unknown entries best. Quantiles 0.5–0.9 give the same result (with the jump cap).
+- **Jump cap** (`ALIGN_COSTS.skipMax` 5): a forward jump costs at most 5 skips. Ashtanga practice
+  stops at the last given pose and continues with the closing sequence; at 1 per skipped entry the
+  20-entry jump never paid. 3, 5, 8 and 12 give the same result.
+- **Coverage** 0.5 → 0.25.
+
+The remaining 12 errors in S7 are a shift among asanas with no example yet (Dhanurasana repeated
+after Parsva Dhanurasana; Eka Pada Sirsasana A and Kapotasana B left out) — they cannot be told
+apart without examples; the next Intermediate session has this one's.
+
+### C2 — Auto-crop
+
+`b3-crop.ts` on 127 manual crops: the fit chooses today's geometry (pad 0.18, padTop 0.05, footReach
+0.5) in every held-out session (S7: 36 of 43 contained). Contained 83 of 127 (stored auto crops: 34),
+median area ratio 1.19. **No change**; `crops.json` now holds the 127 cases, `fit.test.ts` floor 83.
+Causes of the rest: composition 146 sides (66 of them on top: headroom), toes 9, fingers 7, detection
+errors 3.
+
+### C3 — Hold finding
+
+Edits by cause (all seven): merge — sway 32, posture change 26; split — single-still clip rule 13
+(S7: a 4:15 clip with Eka Pada Sirsasana B R/L, Dwi Pada Sirsasana A, Yoga Nidrasana; a 2:49 clip with
+3 × Urdhva Dhanurasana), look-alike neighbours 12, joined gap 3; missed — pieces < 6 s 12, sway 5,
+< 6 s 2; false — vinyasa fragments 21, before/after 4, break 1.
+
+Similar-merge replay (1 distance pair not in the export, estimated): factor 3 with cap 1.2 × the
+median saves 16 of 150 edits and is chosen in every leave-one-session-out fold, but is worse in S4
+(16 vs 15) and drops the outdoor fixture to 77 own holds (floor 80; splits rise 28 → 38: look-alike
+asanas merged). `minHoldS` 6 is still best (5: 168, 6.5: 160). **No default change** (same rule as
+B1). The device lab grid (`lab-default-grid.json`) is still the October run of three sessions.

@@ -37,9 +37,9 @@ describe('automatic crop vs manual crops', () => {
   it('contains at least the fitted number of manual crops (floor), more than the previous geometry', () => {
     const now = fx.cases.filter((c) => contains(box(c.landmarks, c.aspect)!, c.manual, c.aspect)).length;
     const before = fx.cases.filter((c) => contains(box(c.landmarks, c.aspect, fx.previous)!, c.manual, c.aspect)).length;
-    expect(fx.cases.length).toBe(66);
-    expect(before).toBe(16);
-    expect(now).toBeGreaterThanOrEqual(37);
+    expect(fx.cases.length).toBe(127);
+    expect(before).toBe(34);
+    expect(now).toBeGreaterThanOrEqual(83);
   });
 
   it('keeps the median automatic crop within 1.2 × the previous area', () => {

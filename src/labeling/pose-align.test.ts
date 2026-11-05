@@ -79,6 +79,19 @@ describe('PoseClassifier', () => {
     expect(c.distances(null)).toBeNull();
     expect(new PoseClassifier([]).distances(pose(POSES.standing))).toBeNull();
   });
+
+  it('measures how far examples lie from their own class, never from their own mirror', () => {
+    const one = new PoseClassifier([{ asanaId: 'uhp', side: 'L', pose: pose(POSES.legUp) }]);
+    expect(one.withinQuantile(0.5)).toBeNull();
+    const c = new PoseClassifier([
+      { asanaId: 'tadasana', side: null, pose: pose(POSES.standing) },
+      { asanaId: 'tadasana', side: null, pose: pose(POSES.standing) },
+      { asanaId: 'urdhva', side: null, pose: pose(POSES.armsUp) },
+      { asanaId: 'urdhva', side: null, pose: pose(POSES.standing) },
+    ]);
+    expect(c.withinQuantile(0)).toBe(0);
+    expect(c.withinQuantile(1)).toBeGreaterThan(0);
+  });
 });
 
 describe('alignSlots', () => {
@@ -112,6 +125,14 @@ describe('alignSlots', () => {
     expect(late.path).toEqual([0, 3]);
     const sameVideo = alignSlots([open(0), { kind: 'open', newVideo: false, emission: (k) => (k === 3 ? 0 : 0.5) }], t, { ...ALIGN_COSTS, skip: 100 });
     expect(sameVideo.path).toEqual([0, 1]);
+  });
+
+  it('caps the cost of a long forward jump (stopping early, then the closing sequence)', () => {
+    const long: SequenceTemplate = { id: 'l', name: 'L', entries: Array.from({ length: 20 }, (_, i) => ({ asanaId: `e${i}` })) };
+    const at = (e: number): AlignSlot => ({ kind: 'open', newVideo: false, emission: (k) => (k === e ? 0 : 3) });
+    const slots = [at(0), at(1), at(18), at(19)];
+    expect(alignSlots(slots, long).path).toEqual([0, 1, 18, 19]);
+    expect(alignSlots(slots, long, { ...ALIGN_COSTS, skipMax: Infinity }).path).not.toEqual([0, 1, 18, 19]);
   });
 
   it('takes an item against the order for no hold, or, if that costs more, goes back', () => {
@@ -185,8 +206,9 @@ describe('planSession', () => {
 });
 
 /**
- * The user's three labeled sessions (research/data/research.json): every hold open, the other
- * sessions' poses as examples; research/REPORT.md, B2 measured 89 % right with zero corrections.
+ * The user's seven labeled sessions (research/data/research.json, six Primary and the first
+ * Intermediate): every hold open, the other sessions' poses as examples; research/REPORT.md, C1
+ * measured 88 % right with zero corrections (Intermediate 82 %, most of its asanas never seen).
  */
 describe('on the research data', () => {
   const x = JSON.parse(readFileSync(join(import.meta.dirname, '..', '..', 'research', 'data', 'research.json'), 'utf8')) as ResearchExport;
@@ -195,9 +217,10 @@ describe('on the research data', () => {
     h.pose?.world ? encodePose(h.pose.world.map(([px, py, pz, v]) => ({ x: px, y: py, z: pz ?? 0, visibility: v ?? 1 })), h.pose.posture) : null;
   const sessions = x.sessions.map((s) => ({ ...s, holds: s.videoIds.flatMap((v) => x.holds.filter((h) => h.videoId === v).sort((a, b) => a.startS - b.startS)) }));
 
-  it('labels at least 85 % of the holds right with zero corrections', () => {
+  it('labels at least 85 % of the holds right with zero corrections (a first Intermediate at least 80 %)', () => {
     let right = 0;
     let n = 0;
+    let intermediate = 0;
     for (const s of sessions) {
       const history = sessions
         .filter((o) => o.id !== s.id)
@@ -205,10 +228,13 @@ describe('on the research data', () => {
       const items: ReviewItem[] = s.holds.map((h) => ({ key: h.id, status: 'open', pose: poseOf(h), videoId: h.videoId }));
       const plan = planSession(items, catalog, x.templates.find((t) => t.id === s.templateId)!, history);
       const label = new Map(plan.confirmAll!.map((c) => [c.key, c.label]));
-      right += s.holds.filter((h) => label.get(h.id)?.asanaId === h.asanaId && (label.get(h.id)?.side ?? null) === h.side).length;
+      const ok = s.holds.filter((h) => label.get(h.id)?.asanaId === h.asanaId && (label.get(h.id)?.side ?? null) === h.side).length;
+      if (s.templateId === 'intermediate-series') intermediate = ok / s.holds.length;
+      right += ok;
       n += s.holds.length;
     }
-    expect(n).toBe(244);
+    expect(n).toBe(455);
+    expect(intermediate).toBeGreaterThanOrEqual(0.8);
     expect(right / n).toBeGreaterThanOrEqual(0.85);
   });
 });

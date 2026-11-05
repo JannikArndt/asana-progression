@@ -1,5 +1,5 @@
 import type { Asana, SequenceTemplate } from '../model/types';
-import { alignSlots, type AlignSlot } from './align';
+import { ALIGN_COSTS, alignSlots, type AlignCosts, type AlignSlot } from './align';
 import { classKey, PoseClassifier } from './pose';
 import type { HistoryEntry, Label, ReviewItem, Suggestion, SuggestionOptions } from './types';
 
@@ -190,7 +190,13 @@ export const POSE_ALIGNMENT = {
   /** Emission = weight × (distance to the entry's pose class − the item's nearest class distance). */
   weight: 2,
   /** Used only when the labeled poses cover at least this share of the template's entries. */
-  minCoverage: 0.5,
+  minCoverage: 0.25,
+  /**
+   * Entries without a labeled example (e.g. a series practised for the first time) count as this
+   * quantile of the within-class distances (`PoseClassifier.withinQuantile`): a pose that looks
+   * like no known class fits them better than any known one. 0 = the median distance of the item.
+   */
+  novelty: 0.75,
 } as const;
 
 export interface SessionPlan {
@@ -220,6 +226,7 @@ function poseAlignment(
   catalog: Map<string, Asana>,
   history: HistoryEntry[],
   limit: number,
+  settings: { weight: number; minCoverage: number; novelty: number; costs?: Partial<AlignCosts> } = POSE_ALIGNMENT,
 ): SessionPlan | null {
   const classifier = new PoseClassifier([
     ...history.map((h) => ({ asanaId: h.asanaId, side: h.side, pose: h.pose })),
@@ -232,7 +239,8 @@ function poseAlignment(
     const l = entryLabel(template, i, catalog);
     return classKey(l.asanaId, l.side);
   });
-  if (entryKeys.filter((k) => known.has(k)).length < POSE_ALIGNMENT.minCoverage * m) return null;
+  if (entryKeys.filter((k) => known.has(k)).length < settings.minCoverage * m) return null;
+  const novelty = settings.novelty > 0 ? classifier.withinQuantile(settings.novelty) : null;
   const sequence = items.filter((it) => it.status !== 'dismissed');
   const distances = sequence.map((it) => (it.status === 'open' ? classifier.distances(it.pose) : null));
   if (!distances.some(Boolean)) return null;
@@ -246,12 +254,12 @@ function poseAlignment(
     const d = distances[i];
     if (!d) return { kind: 'open', newVideo, emission: () => 0 };
     const values = [...d.values()];
-    const best = Math.min(...values);
-    const typical = median(values);
-    const em = entryKeys.map((k) => POSE_ALIGNMENT.weight * ((d.get(k) ?? typical) - best));
+    const unknown = novelty ?? median(values);
+    const best = Math.min(unknown, ...values);
+    const em = entryKeys.map((k) => settings.weight * ((d.get(k) ?? unknown) - best));
     return { kind: 'open', newVideo, emission: (k) => em[k]! };
   });
-  const { path, marginals } = alignSlots(slots, template);
+  const { path, marginals } = alignSlots(slots, template, { ...ALIGN_COSTS, ...settings.costs });
   const suggestions: Record<string, Suggestion[]> = {};
   const confirmAll: SessionPlan['confirmAll'] = [];
   sequence.forEach((it, i) => {
@@ -291,7 +299,7 @@ export function planSession(
   const fromTemplate = template ? templateSuggestions(items, template, byId, limit, lookahead) : new Map<string, Suggestion[]>();
   const fromHistory = historySuggestions(items, byId, history, limit, nowMs, new Set(fromTemplate.keys()));
   const base = Object.fromEntries([...fromTemplate, ...fromHistory]);
-  const aligned = template ? poseAlignment(items, template, byId, history, limit) : null;
+  const aligned = template ? poseAlignment(items, template, byId, history, limit, { ...POSE_ALIGNMENT, ...options.alignment }) : null;
   if (!aligned) return { suggestions: base, confirmAll: null };
   return { suggestions: { ...base, ...aligned.suggestions }, confirmAll: aligned.confirmAll };
 }

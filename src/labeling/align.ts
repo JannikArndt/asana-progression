@@ -16,10 +16,15 @@ export interface AlignCosts {
   noHold: number;
   /** Per skipped entry at the start or after a new video. */
   skipLead: number;
+  /**
+   * A forward jump costs at most this many skipped entries: a practice that stops at the last
+   * given pose and goes on with the closing sequence skips a long run of entries at once.
+   */
+  skipMax: number;
 }
 
-/** Costs tested in the research (zero-touch 89 % on three sessions with pose weight 2). */
-export const ALIGN_COSTS: Readonly<AlignCosts> = Object.freeze({ skip: 1, fewerReps: 0.5, extraRep: 1.5, back: 4, noHold: 3, skipLead: 0.05 });
+/** Costs tested in the research (zero-touch 88 % on seven sessions with pose weight 2; REPORT.md B2, C1). */
+export const ALIGN_COSTS: Readonly<AlignCosts> = Object.freeze({ skip: 1, fewerReps: 0.5, extraRep: 1.5, back: 4, noHold: 3, skipLead: 0.05, skipMax: 5 });
 
 export type AlignSlot =
   /** Labeled with this template entry. */
@@ -62,7 +67,7 @@ export function alignSlots(slots: AlignSlot[], t: SequenceTemplate, costs: Align
           nc = c + 1;
         } else {
           const fewer = Math.max(0, reps[j]! - c) * (newVideo ? costs.skipLead : costs.fewerReps);
-          tc = k > j ? (k - j - 1) * (newVideo ? costs.skipLead : costs.skip) + fewer : costs.back + Math.max(0, reps[j]! - c) * costs.fewerReps;
+          tc = k > j ? Math.min(k - j - 1, costs.skipMax) * (newVideo ? costs.skipLead : costs.skip) + fewer : costs.back + Math.max(0, reps[j]! - c) * costs.fewerReps;
         }
         cost[s * m + k] = tc;
         next[s * m + k] = k * R + cap(nc);

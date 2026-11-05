@@ -51,6 +51,8 @@ export interface SuggestionOptions {
   lookahead?: number;
   /** "Now" for recency weighting (ISO). */
   now?: string;
+  /** Overrides of `POSE_ALIGNMENT` (research). */
+  alignment?: { weight?: number; minCoverage?: number; novelty?: number; costs?: Partial<import('./align').AlignCosts> };
 }
 
 /** Signals needed to (re)compute best frame and clip window of edited spans. */

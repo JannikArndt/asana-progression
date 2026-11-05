@@ -157,21 +157,25 @@ Re-analysis with new parameters reads the stored pooled frames (no decoding) —
   with a template and poses, suggestions come from a whole-session Viterbi alignment of the cards
   to the template entries (`alignSlots`: states entry × reps; costs `ALIGN_COSTS` skip 1, fewer
   reps 0.5, extra rep 1.5, back 4, no hold 3, skip at the start / after a new video 0.05 per
-  entry; labeled cards pinned to their entry, labels outside the template change nothing) with a
+  entry, a forward jump costs at most 5 skips (`skipMax`: a practice that stops at the last given
+  pose and goes on with the closing sequence); labeled cards pinned to their entry, labels outside the template change nothing) with a
   pose emission 2 × (distance − nearest class distance) per open card (`POSE_ALIGNMENT`); the top
   3 are the min-marginals (`reason: 'pose'`). Pose distance (`labeling/pose.ts`,
   `PoseClassifier`): nearest labeled example of each asana + side over the user's holds (all
   sessions incl. this one's labeled cards; sided examples also count mirrored for the other
   side) on world joints hip-centred, torso-scaled, rotated to a canonical facing, plus 9 joint
-  angles (weight 0.5). Active only when the classifier knows ≥ 50 % of the template's entries
+  angles (weight 0.5). Active only when the classifier knows ≥ 25 % of the template's entries
   (`minCoverage`) and some open card has a pose; otherwise the template order above (it is better
-  without poses). Classes never seen get the median distance. `confirmAll` = the aligned label of
+  without poses). Entries never seen (a series practised for the first time) count as the 0.75
+  quantile of the within-class distances (`novelty`, `PoseClassifier.withinQuantile`), so a pose
+  that looks like no known class fits them better than any known one. `confirmAll` = the aligned label of
   every open card with a pose that the path does not call "no hold"; the review shows "Confirm
   all N" (from 2) with a confirmation dialog (`SessionReview.confirmAll`: one batch of holds, one
-  analysis write per video). On the three labeled sessions, taking every first suggestion without
-  a correction labels 89 % of the holds right vs 9 % before (one card per hold; on the raw
-  detector candidates 60–67 % vs 15 %; research/REPORT.md, B2; `pose-align.test.ts` keeps ≥ 85 %
-  on `research/data/research.json`).
+  analysis write per video). On the seven labeled sessions (2026-11-05 export), taking every first
+  suggestion without a correction labels 88 % of the holds right (the first Intermediate session,
+  most of its asanas never seen before: 82 %, was 63 %; research/REPORT.md, B2 and C1;
+  `research/c1-naming.ts`; `pose-align.test.ts` keeps ≥ 85 % overall and ≥ 80 % for the
+  Intermediate session on `research/data/research.json`).
 - Re-running detection reconciles: labeled holds and manual candidates are kept, dismissals are
   carried over to overlapping new candidates.
 - Screens: Home (tabs Asanas / Sessions), session review (`#/session/<id>`: timeline, cards with
@@ -260,7 +264,8 @@ videos page, asana page; `components/VideoFinder.svelte`; the hold viewer and De
   the foot index extended 0.5 × from the heel, then padded 0.18 × its longer side in pixels (at
   least 2 % of the image height) plus 0.05 headroom above; landmarks below visibility 0.3 are
   ignored. See `BOX_DEFAULTS` (`BoxOptions.geometry` overrides it for research fits). Fitted to the
-  user's manual crops (research/REPORT.md, B3): 37 of 66 contained instead of 16 at 1.2 × the
+  user's manual crops (research/REPORT.md, B3; confirmed in C2 on the 2026-11-05 export: the same
+  geometry wins in every held-out session): 83 of 127 contained instead of 34 at 1.2 × the
   median area; `crop/__fixtures__/crops.json` (landmarks + manual boxes, no images) and
   `crop/fit.test.ts` keep that floor. Crops are display metadata only (`manual ?? auto ?? full frame`); `CropEditor`
   writes `crop.manual`. `crop.autoVersion` = `CROP_VERSION` of the box; holds with an older

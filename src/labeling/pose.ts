@@ -97,14 +97,16 @@ export interface PoseExample {
 
 /** Nearest-example classifier over labeled poses. */
 export class PoseClassifier {
-  private readonly examples: Array<{ key: string; f: PoseFeatures }> = [];
+  private readonly examples: Array<{ key: string; f: PoseFeatures; hold: number }> = [];
 
   constructor(examples: Iterable<PoseExample>) {
+    let hold = 0;
     for (const e of examples) {
       const joints = decodePose(e.pose);
       if (!joints) continue;
-      this.examples.push({ key: classKey(e.asanaId, e.side), f: poseFeatures(joints) });
-      if (e.side) this.examples.push({ key: classKey(e.asanaId, e.side === 'R' ? 'L' : 'R'), f: poseFeatures(joints, true) });
+      hold++;
+      this.examples.push({ key: classKey(e.asanaId, e.side), f: poseFeatures(joints), hold });
+      if (e.side) this.examples.push({ key: classKey(e.asanaId, e.side === 'R' ? 'L' : 'R'), f: poseFeatures(joints, true), hold });
     }
   }
 
@@ -115,6 +117,31 @@ export class PoseClassifier {
 
   get size(): number {
     return this.examples.length;
+  }
+
+  private within: number[] | null = null;
+
+  /**
+   * The `q`-quantile of how far an example lies from the nearest other example of its own class
+   * (mirrored copies of the same hold excluded): the distance at which a pose still "looks like"
+   * a known class. Null with fewer than 2 examples in every class.
+   */
+  withinQuantile(q: number): number | null {
+    if (!this.within) {
+      const w: number[] = [];
+      this.examples.forEach((a, i) => {
+        let best = Infinity;
+        this.examples.forEach((b, j) => {
+          if (i === j || a.key !== b.key || a.hold === b.hold) return;
+          const d = poseDistance(a.f, b.f);
+          if (d < best) best = d;
+        });
+        if (Number.isFinite(best)) w.push(best);
+      });
+      this.within = w.sort((x, y) => x - y);
+    }
+    const w = this.within;
+    return w.length ? w[Math.min(w.length - 1, Math.floor(q * w.length))]! : null;
   }
 
   /** Distance of `pose` to every known class (its nearest example); null without a usable pose. */
