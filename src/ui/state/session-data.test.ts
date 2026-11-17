@@ -4,6 +4,10 @@ import {
   asanaStats,
   combineSessions,
   familyStats,
+  familyPicks,
+  restoreSelection,
+  selectionKey,
+  sessionsByTime,
   compareVideos,
   coverageGaps,
   coverageRows,
@@ -145,6 +149,46 @@ describe('session data', () => {
     expect(st.get('navasana')!.preview).toBe(holds[3]);
     expect(st.has('other')).toBe(false);
     expect(familyStats([], [s1], holds).size).toBe(0);
+  });
+
+  it('picks the photo per family for latest, first and a session (back in time, else later)', () => {
+    const s0: Session = { id: 's0', date: '2026-09-20T07:00:00+02:00', note: '', videoIds: ['v0'] };
+    const sessions = [s2, s0, s1];
+    expect(sessionsByTime(sessions).map((s) => s.id)).toEqual(['s0', 's1', 's2']);
+    const families = [{ members: [{ id: 'spa' }, { id: 'spb' }] }, { members: [{ id: 'navasana' }] }, { members: [{ id: 'late' }] }];
+    const holds = [
+      hold('a0', 's0', 'v0', 'spa', 5, 'R'),
+      hold('b0', 's0', 'v0', 'spb', 9, 'R'),
+      hold('a2', 's2', 'v3', 'spa', 5, 'R'),
+      hold('b2', 's2', 'v3', 'spb', 9, 'R'),
+      hold('n1', 's1', 'v1', 'navasana', 3),
+      hold('n1b', 's1', 'v1', 'navasana', 30),
+      hold('l2', 's2', 'v3', 'late', 1),
+      hold('x', 'gone', 'v9', 'navasana', 1),
+    ];
+    const captured = new Set(['a0', 'b2', 'n1', 'l2']);
+    const pick = (sel: Parameters<typeof familyPicks>[4]) =>
+      Object.fromEntries([...familyPicks(families, sessions, holds, captured, sel)].map(([k, p]) => [k, `${p.hold.id}${p.inSelection ? '' : '*'}`]));
+    expect(pick('latest')).toEqual({ spa: 'b2', navasana: 'n1', late: 'l2' });
+    // First: the oldest session; within it the captured hold, then the earlier one.
+    expect(pick('first')).toEqual({ spa: 'a0', navasana: 'n1', late: 'l2' });
+    // s1 has only Navasana (the captured one wins over the later one); the others go back to s0 or, practised only later, forward.
+    expect(pick({ sessionId: 's1' })).toEqual({ spa: 'a0*', navasana: 'n1', late: 'l2*' });
+    expect(pick({ sessionId: 's2' })).toEqual({ spa: 'b2', navasana: 'n1*', late: 'l2' });
+    expect(pick({ sessionId: 'unknown' })).toEqual({ spa: 'a0*', navasana: 'n1*', late: 'l2*' });
+  });
+
+  it('restores the photo selection only on the same day', () => {
+    const raw = (sel: unknown, day = '2026-11-17') => JSON.stringify({ sel, day });
+    expect(restoreSelection(raw({ sessionId: 's1' }), '2026-11-17', [s1])).toEqual({ sessionId: 's1' });
+    expect(restoreSelection(raw({ sessionId: 's1' }, '2026-11-16'), '2026-11-17', [s1])).toBe('latest');
+    expect(restoreSelection(raw({ sessionId: 'gone' }), '2026-11-17', [s1])).toBe('latest');
+    expect(restoreSelection(raw('first'), '2026-11-17', [])).toBe('first');
+    expect(restoreSelection(raw(null), '2026-11-17', [])).toBe('latest');
+    expect(restoreSelection(null, '2026-11-17', [])).toBe('latest');
+    expect(restoreSelection('{', '2026-11-17', [])).toBe('latest');
+    expect(selectionKey({ sessionId: 's1' })).toBe('s1');
+    expect(selectionKey('first')).toBe('first');
   });
 
   it('summarizes sessions and finds orphans', () => {

@@ -113,9 +113,17 @@ test('import → review → asana', async ({ page }) => {
   // Sessions list and the asana page.
   await page.getByRole('button', { name: '‹ Sessions' }).click();
   await expect(page.getByText(/2 labeled · 2 open · Primary series/)).toBeVisible();
-  // The session row shows a captured still (the whole frame) as its thumbnail.
+  // The session row shows a captured still (the whole frame) as its thumbnail, so does the strip.
   await expect(page.locator('.row.session .thumb img')).toBeVisible({ timeout: 60_000 });
-  await page.getByRole('tab', { name: 'Asanas' }).click();
+  await expect(page.getByRole('group', { name: 'Show photos from' }).locator('img')).toBeVisible();
+  await page.getByRole('button', { name: 'All sessions' }).click();
+  // The strip: First / the session / Latest; a session shows its labeled count and opens from there.
+  const strip = page.getByRole('group', { name: 'Show photos from' });
+  await strip.getByRole('button', { name: 'First photo of each asana' }).click();
+  await expect(page.getByText('Each asana’s first photo')).toBeVisible();
+  await strip.getByRole('button').nth(1).click();
+  await expect(page.locator('.picker').getByText('2 labeled')).toBeVisible();
+  await expect(page.locator('.picker').getByRole('button', { name: 'Open session' })).toBeVisible();
   const row = page.getByRole('button', { name: /Utthita Trikonasana\s+1 hold/ });
   await expect(row).toBeVisible();
   // The tile previews the captured colour still, not the gray analysis frame.
@@ -240,8 +248,8 @@ test('import → review → asana', async ({ page }) => {
 
   // The session in poses: the labeled holds as cropped photos in practice order, and their export.
   await page.getByRole('button', { name: '‹ Asanas' }).click();
-  await page.getByRole('tab', { name: 'Sessions' }).click();
-  await page.locator('.row.session').first().click();
+  await page.getByRole('button', { name: 'All sessions' }).click();
+  await page.locator('.row.session').first().getByRole('button', { name: 'Open session' }).click();
   await page.getByRole('link', { name: 'Poses ›' }).click();
   await expect(page).toHaveURL(/#\/session\/[^/]+\/poses$/);
   await expect(page.locator('.grid .tile')).toHaveCount(2);
@@ -298,12 +306,12 @@ test('import → review → asana', async ({ page }) => {
   await page.getByRole('button', { name: 'Mark as completely labeled' }).click();
   await expect(page.getByRole('button', { name: 'Completely labeled ✓' })).toBeVisible();
   await page.getByRole('link', { name: '‹ Sessions' }).click();
-  await page.locator('.row.session').first().click();
+  await page.locator('.row.session').first().getByRole('button', { name: 'Open session' }).click();
   await expect(page).toHaveURL(/#\/session\/[^/]+\/poses$/);
   await page.getByRole('link', { name: 'Edit', exact: true }).click();
   await expect(page.getByText('Completely labeled: the session opens in Poses.')).toBeVisible();
   await page.getByRole('button', { name: '‹ Sessions' }).click();
-  await page.getByRole('tab', { name: 'Asanas' }).click();
+  await page.getByRole('button', { name: 'All sessions' }).click();
 
   // Re-importing the same file asks what to do.
   await page.locator('input[type=file]').first().setInputFiles(video);
@@ -568,7 +576,7 @@ test('lettered variants: one row with letters, separate progressions per letter'
   await expect(first.getByText('Supta Padangusthasana B R')).toBeVisible();
 
   await page.getByRole('button', { name: '‹ Sessions' }).click();
-  await page.getByRole('tab', { name: 'Asanas' }).click();
+  await page.getByRole('button', { name: 'All sessions' }).click();
   await page.getByRole('button', { name: /Supta Padangusthasana\s+1 hold\s+·\s+A\s*B/ }).click();
   // The letter with the newest hold opens; the other letter is its own (empty) progression.
   await expect(page).toHaveURL(/#\/asana\/supta-padangusthasana-b$/);
@@ -708,9 +716,9 @@ test('backup export → delete all data → import restores labels, stills and f
   await Promise.all([page.waitForEvent('load'), page.getByRole('button', { name: 'Reload app' }).click()]);
 
   await page.goto('./');
-  await page.getByRole('tab', { name: 'Sessions' }).click();
+  await page.getByRole('button', { name: 'All sessions' }).click();
   await expect(page.getByText(/1 labeled · 2 open/)).toBeVisible();
-  await page.getByText(/1 labeled · 2 open/).click();
+  await page.locator('.row.session').first().getByRole('button', { name: 'Open session' }).click();
   await expect(cards(page)).toHaveCount(3);
   await expect(cards(page).nth(0)).toHaveAttribute('data-status', 'labeled');
   // Tiny frames came back with the analysis frames.

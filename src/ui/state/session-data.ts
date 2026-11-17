@@ -610,3 +610,83 @@ export function lastTemplateId(sessions: readonly Session[], templates: Readonly
   for (const s of sessions) if (s.templateId && ids.has(s.templateId) && (!best || s.date > best.date)) best = s;
   return best?.templateId;
 }
+
+/** Which photos the Asanas grid shows: each asana's newest, its first, or as of one session. */
+export type PhotoSelection = 'latest' | 'first' | { sessionId: string };
+
+export interface FamilyPick {
+  hold: Hold;
+  /** The hold's session. */
+  sessionId: string;
+  /** False when the selected session has no hold of the family and an older (else newer) one stands in. */
+  inSelection: boolean;
+}
+
+/** Sessions oldest first (date, then id): the strip's order and "back in time". */
+export function sessionsByTime(sessions: Session[]): Session[] {
+  return [...sessions].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+}
+
+/**
+ * The hold each family's tile shows for `sel`, keyed by the first member's id. Latest = the
+ * familyStats preview (newest captured, else newest). First = the oldest session with a hold of
+ * the family. A session = that session's hold, else the latest one at that time (the newest older
+ * session with one), else (practised only later) the oldest newer one; the last two are not
+ * `inSelection`. Within a session a captured hold wins, then the later (first: earlier) one.
+ */
+export function familyPicks(
+  families: ReadonlyArray<{ members: ReadonlyArray<{ id: string }> }>,
+  sessions: Session[],
+  holds: Hold[],
+  captured: ReadonlySet<string>,
+  sel: PhotoSelection,
+): Map<string, FamilyPick> {
+  const out = new Map<string, FamilyPick>();
+  if (sel === 'latest') {
+    for (const [key, st] of familyStats(families, sessions, holds, captured)) {
+      if (st.preview) out.set(key, { hold: st.preview, sessionId: st.preview.sessionId, inSelection: true });
+    }
+    return out;
+  }
+  const rank = new Map(sessionsByTime(sessions).map((s, i) => [s.id, i]));
+  const keyOf = new Map<string, string>();
+  for (const f of families) for (const m of f.members) keyOf.set(m.id, f.members[0]!.id);
+  const target = sel === 'first' ? -1 : (rank.get(sel.sessionId) ?? -1);
+  /** Lower is better: the session distance (older before newer), then captured, then time. */
+  const score = (h: Hold, r: number): [number, number, number] => {
+    const dist = sel === 'first' ? r : r <= target ? target - r : 1e6 + (r - target);
+    return [dist, captured.has(h.id) ? 0 : 1, sel === 'first' ? h.bestS : -h.bestS];
+  };
+  const better = (a: [number, number, number], b: [number, number, number]) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+  const best = new Map<string, { hold: Hold; s: [number, number, number] }>();
+  for (const h of holds) {
+    const key = keyOf.get(h.asanaId);
+    const r = rank.get(h.sessionId);
+    if (key === undefined || r === undefined) continue;
+    const s = score(h, r);
+    const cur = best.get(key);
+    if (!cur || better(s, cur.s) < 0) best.set(key, { hold: h, s });
+  }
+  for (const [key, { hold, s }] of best) out.set(key, { hold, sessionId: hold.sessionId, inSelection: sel === 'first' || s[0] === 0 });
+  return out;
+}
+
+const SELECTION_DAY_KEY = 'asana.home.photos';
+export { SELECTION_DAY_KEY };
+
+/** Stored selection (`{sel, day}`) if it was made on `today` (local YYYY-MM-DD) and still exists; else latest. */
+export function restoreSelection(raw: string | null, today: string, sessions: Session[]): PhotoSelection {
+  try {
+    const v = raw ? (JSON.parse(raw) as { sel?: unknown; day?: unknown }) : null;
+    if (!v || v.day !== today) return 'latest';
+    if (v.sel === 'first' || v.sel === 'latest') return v.sel;
+    const id = (v.sel as { sessionId?: unknown } | null)?.sessionId;
+    return typeof id === 'string' && sessions.some((s) => s.id === id) ? { sessionId: id } : 'latest';
+  } catch {
+    return 'latest';
+  }
+}
+
+export function selectionKey(sel: PhotoSelection): string {
+  return typeof sel === 'string' ? sel : sel.sessionId;
+}

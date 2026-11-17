@@ -652,6 +652,19 @@ dismisses past 30 % of its height or on a flick ≥ 0.5 px/ms (upward flick keep
 springs back; the backdrop fades with the offset. `prefers-reduced-motion`: no slide animations.
 Focus moves into the sheet, Tab is trapped, focus returns on close.
 
+Home has no tabs: under the header a **session strip** (`components/SessionStrip.svelte`) of
+48 px session thumbnails, evenly spaced (not on a time scale), oldest → newest between "First" and
+"Latest", scrolls sideways with snapping; the cell in the middle is the selection, live while it
+scrolls (a tap centres a cell). Below it: date, series mark (I = Primary, II = Intermediate, else
+the template's initial) and "N labeled", then "Open ›" (the session) and "All ⌄" (the session list,
+route `#/sessions`; a row selects the session for the grid, its › opens it). Once the strip scrolls
+under the header it folds into a toolbar pill "‹ 12 Nov ›" (steps; the date drops the strip down
+again until the page scrolls 40 px). The tiles show `session-data.familyPicks`: Latest = the
+familyStats preview, First = the oldest session's hold, a session = its hold, else the latest one
+at that time (newest older session), else the oldest later one — those two faded with a date
+badge (badges also on First/Latest). The choice is remembered for the day (localStorage
+`asana.home.photos` `{sel, day}`, `restoreSelection`), then Latest again.
+
 Asanas list (Home): a 2-column grid of square tiles, one per variant family (base name; `session-data.familyStats` joins the
 members). The preview is the newest hold that has a captured image (thumb, else still),
 filling a square via `progression.fillCrop` around the display crop; the gray analysis frame only
@@ -659,7 +672,7 @@ when nothing is captured. The line reads "N holds", plus "· M days" when they s
 plus the letters of a family ("· A B", letters without holds fainter). A tap opens the letter
 with the newest hold.
 
-Home header: "+" (import, a file input) and a gear (Settings). Sessions list (Home): a 56 px square
+Home header: "+" (import, a file input) and a gear (Settings). Sessions list (Home, "All"): a 56 px square
 thumbnail of the captured image (thumb, else still) of the chosen hold (`coverHoldId`), else the
 first down dog, else the hold nearest the middle of the session (`sessionPreview`), the **whole frame** cover-cropped
 (`fillCrop(null, …)`: place and light identify a session, not the body); else the analysis frame
