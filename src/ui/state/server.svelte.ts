@@ -223,6 +223,17 @@ class ServerState {
     return ((await res.json()) as { shares: ShareLink[] }).shares;
   }
 
+  /** The cropped picture link previews show (og:image); replaces the previous one. */
+  async setSharePreview(token: string, jpeg: Blob): Promise<void> {
+    const res = await fetch(`/api/shares/${encodeURIComponent(token)}/preview`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'image/jpeg' },
+      body: jpeg,
+    });
+    if (!res.ok) throw new SyncError(`HTTP ${res.status}`, res.status);
+  }
+
   async unshare(token: string): Promise<void> {
     const res = await fetch(`/api/shares/${encodeURIComponent(token)}`, { method: 'DELETE', credentials: 'same-origin' });
     if (!res.ok) throw new SyncError(`HTTP ${res.status}`, res.status);
@@ -246,6 +257,9 @@ export async function offerShareLink(kind: 'session' | 'hold', id: string, title
     return;
   }
   const url = link.url ?? `${location.origin}/s/${link.token}`;
+  // The cropped photo for message previews, made fresh each time (the crop may have changed).
+  // Without it the server falls back to the uncropped thumbnail.
+  await updateSharePreview(link.token, kind, id).catch(() => {});
   const canShare = typeof navigator.share === 'function';
   const choice = await dialog.ask({
     title: 'Link ready',
@@ -258,4 +272,19 @@ export async function offerShareLink(kind: 'session' | 'hold', id: string, title
   });
   if (choice === 'share') await navigator.share({ title, url }).catch(() => {});
   else if (choice === 'copy') await copyText(url);
+}
+
+/** Uploads the cropped preview picture of a share: the hold itself, or the session's cover hold. */
+async function updateSharePreview(token: string, kind: 'session' | 'hold', id: string): Promise<void> {
+  const { app } = await import('./app.svelte');
+  const { cropPreview } = await import('./crop-export.svelte');
+  const { sessionPreview } = await import('./session-data');
+  let holdId: string | null = kind === 'hold' ? id : null;
+  if (kind === 'session') {
+    const session = app.sessions.find((s) => s.id === id);
+    const captured = new Set(app.assets.filter((a) => a.kind === 'still').map((a) => a.holdId));
+    holdId = session ? (sessionPreview(session, app.holds, captured)?.id ?? null) : null;
+  }
+  const jpeg = holdId ? await cropPreview(holdId) : null;
+  if (jpeg) await server.setSharePreview(token, jpeg);
 }

@@ -63,6 +63,33 @@ async function cropStill(item: ProgressionItem): Promise<{ blob: Blob; width: nu
   }
 }
 
+/**
+ * A hold's photo cut to its display crop and scaled to at most `maxSide` px: the picture a share
+ * link shows in message previews (iMessage takes og:image as is). Null without a still.
+ */
+export async function cropPreview(holdId: string, maxSide = 1200): Promise<Blob | null> {
+  const hold = app.holds.find((h) => h.id === holdId);
+  const still = app.assets
+    .filter((a) => a.holdId === holdId && a.kind === 'still')
+    .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))[0];
+  if (!hold || !still) return null;
+  const blob = await store.get(still.storageKey);
+  if (!blob) return null;
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const r = cropPixels(displayCrop(hold), bitmap.width, bitmap.height);
+    const scale = Math.min(1, maxSide / Math.max(r.w, r.h));
+    const w = Math.max(1, Math.round(r.w * scale));
+    const h = Math.max(1, Math.round(r.h * scale));
+    return await encode(w, h, (ctx) => {
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(bitmap, r.x, r.y, r.w, r.h, 0, 0, w, h);
+    });
+  } finally {
+    bitmap.close();
+  }
+}
+
 /** The photo of a hold as shown (the latest hold record, so a crop edited a moment ago counts). */
 export async function preparePhoto(item: ProgressionItem, position?: number, digits?: number): Promise<PreparedPhoto | null> {
   const hold = app.holds.find((h) => h.id === item.hold.id) ?? item.hold;

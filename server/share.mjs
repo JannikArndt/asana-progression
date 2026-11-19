@@ -32,6 +32,14 @@ export function listShares(db) {
 
 export function deleteShare(db, token) {
   db.prepare('DELETE FROM shares WHERE token = ?').run(String(token));
+  db.prepare('DELETE FROM files WHERE key = ?').run(previewKey(token));
+}
+
+/** Files key of a share's cropped preview picture (og:image), uploaded by the app. */
+export const previewKey = (token) => `previews/${token}.jpg`;
+
+export function hasPreview(db, token) {
+  return db.prepare('SELECT 1 FROM files WHERE key = ?').get(previewKey(token)) !== undefined;
 }
 
 function titleOf(db, share) {

@@ -93,7 +93,11 @@ over HTTP with a software passkey (ES256, attestation none).
   `share.html` (second Vite entry, `src/ui/share/main.ts`, plain DOM) reads
   `/api/public/<token>`: day, series name, asana, side, rep, crop, still/thumb URLs that only
   serve files of that share. Never notes, places, coordinates, clips or frames. The server fills
-  in `og:title`/`og:image` (the thumb) for link previews; `noindex`, `no-referrer`.
+  in `og:title`/`og:image` for link previews (`noindex`, `no-referrer`): `og:image` is the cropped
+  picture the app uploads with every Share/Link tap (`PUT /api/shares/<token>/preview`, files key
+  `previews/<token>.jpg`, served at `/api/public/<token>/preview.jpg`; `crop-export.cropPreview`:
+  the hold's still cut to its display crop, ≤ 1200 px; for a session the `sessionPreview` hold),
+  else the uncropped thumb. Messages caches a preview per URL, so an old preview can stick.
 
 ### Sync on the device (`src/sync`, `ui/state/server.svelte.ts`)
 

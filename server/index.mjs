@@ -5,7 +5,7 @@
 //
 // The video analysis stays on the phone; the server only stores what the app sends.
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readFileSync, statSync, createReadStream } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, createReadStream } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +13,7 @@ import { backupDb, openDb } from './db.mjs';
 import { Auth } from './auth.mjs';
 import { HttpError, MIME, readJson, sendJson, splitUrl } from './http.mjs';
 import { listFiles, pull, push, putFile, sendFile, status } from './sync.mjs';
-import { createShare, deleteShare, findShare, listShares, shareView, sharedAsset } from './share.mjs';
+import { createShare, deleteShare, findShare, hasPreview, listShares, previewKey, shareView, sharedAsset } from './share.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -101,7 +101,12 @@ export function createApp(cfg = config()) {
     }
     const title = view ? view.title : 'Link not available';
     const first = view?.items.find((i) => i.thumb || i.still);
-    const img = first ? `${cfg.origin}/api/public/${token}/file/${(first.thumb ?? first.still).id}` : null;
+    // The app uploads a cropped picture; until then the uncropped thumbnail.
+    const img = view && hasPreview(db, token)
+      ? `${cfg.origin}/api/public/${token}/preview.jpg`
+      : first
+        ? `${cfg.origin}/api/public/${token}/file/${(first.thumb ?? first.still).id}`
+        : null;
     const og = [
       `<meta property="og:title" content="${escapeHtml(title)}">`,
       `<meta property="og:type" content="website">`,
@@ -193,12 +198,28 @@ export function createApp(cfg = config()) {
       const s = createShare(db, body.kind, body.id);
       return sendJson(req, res, 200, { ...s, url: `${cfg.origin}/s/${s.token}` });
     }
+    const prev = /^\/api\/shares\/([\w-]+)\/preview$/.exec(path);
+    if (prev && m === 'PUT') {
+      need(req);
+      if (!findShare(db, prev[1])) throw new HttpError(404, 'No such link');
+      if (!String(req.headers['content-type'] || '').startsWith('image/jpeg')) throw new HttpError(415, 'Send a JPEG');
+      if (Number(req.headers['content-length']) > 8 * 1024 * 1024) throw new HttpError(413, 'Preview too large');
+      const bytes = await putFile(db, filesDir, previewKey(prev[1]), req);
+      return sendJson(req, res, 200, { bytes });
+    }
     if (path.startsWith('/api/shares/') && m === 'DELETE') {
       need(req);
-      deleteShare(db, path.slice('/api/shares/'.length));
+      const token = path.slice('/api/shares/'.length);
+      deleteShare(db, token);
+      if (/^[\w-]{10,64}$/.test(token)) rmSync(join(filesDir, previewKey(token)), { force: true });
       return sendJson(req, res, 200, { ok: true });
     }
 
+    const pubPreview = /^\/api\/public\/([\w-]+)\/preview\.jpg$/.exec(path);
+    if (pubPreview && (m === 'GET' || m === 'HEAD')) {
+      if (!findShare(db, pubPreview[1]) || !hasPreview(db, pubPreview[1])) throw new HttpError(404, 'No preview');
+      return sendFile(req, res, filesDir, previewKey(pubPreview[1]), { cache: 'public, max-age=300' });
+    }
     const pub = /^\/api\/public\/([\w-]+)(?:\/file\/([\w-]+))?$/.exec(path);
     if (pub && (m === 'GET' || m === 'HEAD')) {
       const share = findShare(db, pub[1]);

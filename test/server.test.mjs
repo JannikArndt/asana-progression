@@ -202,9 +202,18 @@ test('share links show photos without notes or places, and can be revoked', asyn
   assert.equal(file.status, 200);
   assert.equal((await call(`/api/public/${s.json.token}/file/zzz`)).status, 404);
   const page = await call(`/s/${s.json.token}`);
-  assert.match(await page.res.text(), /og:image/);
+  assert.match(await page.res.text(), /og:image" content="[^"]*\/file\//, 'the thumbnail until the app sends a cropped preview');
+  assert.equal((await call(`/api/shares/${s.json.token}/preview`, { method: 'PUT', cookie, raw: Buffer.from([1]), headers: { 'content-type': 'text/plain' } })).status, 415);
+  const put = await call(`/api/shares/${s.json.token}/preview`, { method: 'PUT', cookie, raw: Buffer.from([0xff, 0xd8, 0xff]), headers: { 'content-type': 'image/jpeg' } });
+  assert.equal(put.status, 200);
+  assert.match(await (await call(`/s/${s.json.token}`)).res.text(), /og:image" content="https:\/\/asana\.test\/api\/public\/[\w-]+\/preview\.jpg"/);
+  const preview = await call(`/api/public/${s.json.token}/preview.jpg`);
+  assert.equal(preview.headers.get('content-type'), 'image/jpeg');
+  assert.deepEqual([...new Uint8Array(await preview.res.arrayBuffer())], [0xff, 0xd8, 0xff]);
+  assert.equal((await call(`/api/shares/${s.json.token}/preview`, { method: 'PUT', raw: Buffer.from([1]), headers: { 'content-type': 'image/jpeg' } })).status, 401);
   await call(`/api/shares/${s.json.token}`, { method: 'DELETE', cookie });
   assert.equal((await call(`/api/public/${s.json.token}`)).status, 404);
+  assert.equal((await call(`/api/public/${s.json.token}/preview.jpg`)).status, 404);
 });
 
 test('sign out ends the session', async () => {

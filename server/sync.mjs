@@ -20,7 +20,7 @@ export const STORES = {
 };
 
 const KEY = /^[\w.:-]{1,200}$/;
-export const FILE_KEY = /^(assets\/[A-Za-z0-9_-]{1,100}\.(jpg|png|webp|mp4|mov|bin)|samples\/[A-Za-z0-9_-]{1,100}\.bin\.gz)$/;
+export const FILE_KEY = /^(assets\/[A-Za-z0-9_-]{1,100}\.(jpg|png|webp|mp4|mov|bin)|samples\/[A-Za-z0-9_-]{1,100}\.bin\.gz|previews\/[\w-]{10,64}\.jpg)$/;
 export const MAX_FILE_BYTES = 1024 * 1024 * 1024;
 
 /**
