@@ -5,7 +5,6 @@
   import { formatDay } from '../format';
   import { dialog } from '../state/dialog.svelte';
 
-  let code = $state<{ code: string; expiresAt: string } | null>(null);
   let links = $state<ShareLink[] | null>(null);
   let message = $state<string | null>(null);
   let error = $state<string | null>(null);
@@ -95,18 +94,7 @@
     </p>
     <div class="actions">
       <button class="btn" type="button" disabled={server.syncing} onclick={() => act(() => server.sync({ pull: true, files: true }))}>Sync now</button>
-      <button class="btn" type="button" onclick={() => act(async () => (code = await server.uploadCode()))}>Code for the old app</button>
     </div>
-    {#if code}
-      <div class="code">
-        <p class="small">
-          In the old app (jannikarndt.github.io/asana-progression, the Home Screen icon you used before): Settings → Move to
-          asana.jannikarndt.de, then paste this code. Valid until {new Date(code.expiresAt).toLocaleString()}.
-        </p>
-        <p class="mono big">{code.code}</p>
-        <button class="btn" type="button" onclick={() => act(async () => { await copyText(code!.code); message = 'Copied'; })}>Copy code</button>
-      </div>
-    {/if}
 
     <h4 class="sub">Share links</h4>
     {#if links === null}
@@ -170,20 +158,6 @@
     margin: var(--space-2) 0 0;
     font-size: var(--text-s);
     font-weight: 600;
-  }
-  .code {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    padding: var(--space-3);
-    border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-m);
-  }
-  .big {
-    font-size: 1.15rem;
-    letter-spacing: 0.04em;
-    user-select: all;
-    -webkit-user-select: all;
   }
   .links {
     list-style: none;

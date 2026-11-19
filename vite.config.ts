@@ -49,14 +49,14 @@ function mediapipeWasm(): Plugin {
 }
 
 /**
- * The app is served from the root of its own server (asana.jannikarndt.de). APP_BASE builds the
- * old GitHub Pages copy (`APP_BASE=/asana-progression/`). API_URL proxies /api and /s to a local
- * server in `npm run dev` (e.g. API_URL=http://localhost:8787 next to `npm run server`).
+ * The app is served from the root of its own server (asana.jannikarndt.de). API_URL proxies /api
+ * and /s to a local server in `npm run dev` (e.g. API_URL=http://localhost:8787 next to
+ * `npm run server`).
  */
 const apiUrl = process.env.API_URL;
 
 export default defineConfig({
-  base: process.env.APP_BASE || '/',
+  base: '/',
   plugins: [svelte(), mediapipeWasm()],
   worker: { format: 'es' },
   build: {

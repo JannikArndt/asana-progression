@@ -25,7 +25,6 @@
   import { theme } from '../theme.svelte';
   import { server } from '../state/server.svelte';
   import ServerSettings from '../components/ServerSettings.svelte';
-  import MoveToServer from '../components/MoveToServer.svelte';
 
   let est = $state<StorageEstimateInfo | null>(null);
   let opfs = $state<number | null>(null);
@@ -209,7 +208,6 @@
   </header>
   <h2>Settings</h2>
 
-  {#if server.mode === 'legacy'}<MoveToServer />{/if}
   {#if server.mode === 'server'}<ServerSettings />{/if}
 
   <section class="group">

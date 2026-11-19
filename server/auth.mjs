@@ -1,8 +1,7 @@
-// server/auth.mjs — passkeys (WebAuthn via @simplewebauthn/server), sign-in cookies and
-// upload codes for the old GitHub Pages app.
+// server/auth.mjs — passkeys (WebAuthn via @simplewebauthn/server) and sign-in cookies.
 //
 // One owner. The first passkey needs SETUP_TOKEN (a CapRover env var); every further passkey
-// needs a signed-in device. Tokens (cookies, upload codes) are stored as SHA-256 hashes only.
+// needs a signed-in device. Session tokens are stored as SHA-256 hashes only.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   generateAuthenticationOptions,
@@ -14,20 +13,10 @@ import { HttpError, parseCookies } from './http.mjs';
 
 export const COOKIE = 'asana_sid';
 const SESSION_DAYS = 400;
-const UPLOAD_HOURS = 24;
 const CHALLENGE_MS = 5 * 60_000;
 
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 const now = () => new Date();
-
-/** Upload codes: 20 characters of Crockford base32 (100 bits), shown as 4 groups of 5. */
-const B32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-export function newUploadCode() {
-  const bytes = randomBytes(20);
-  const s = Array.from(bytes, (b) => B32[b & 31]).join('');
-  return s.match(/.{5}/g).join('-');
-}
-export const normalizeCode = (code) => String(code || '').toUpperCase().replace(/[^0-9A-Z]/g, '').replace(/[IL]/g, '1').replace(/O/g, '0');
 
 export class Auth {
   constructor(db, { rpId, origin, setupToken, rpName = 'Asana progression' }) {
@@ -48,12 +37,11 @@ export class Auth {
   // ---- tokens ---------------------------------------------------------------------------
 
   issueToken(kind, ms, label) {
-    const raw = kind === 'upload' ? newUploadCode() : randomBytes(32).toString('base64url');
-    const key = kind === 'upload' ? normalizeCode(raw) : raw;
+    const raw = randomBytes(32).toString('base64url');
     const t = now();
     this.db
       .prepare('INSERT INTO tokens (hash, kind, created_at, expires_at, label) VALUES (?, ?, ?, ?, ?)')
-      .run(sha(key), kind, t.toISOString(), new Date(t.getTime() + ms).toISOString(), label ?? null);
+      .run(sha(raw), kind, t.toISOString(), new Date(t.getTime() + ms).toISOString(), label ?? null);
     return { token: raw, expiresAt: new Date(t.getTime() + ms).toISOString() };
   }
 
@@ -68,13 +56,10 @@ export class Auth {
     return row;
   }
 
-  /** 'session' (cookie), 'upload' (Bearer code of the old app) or null. */
+  /** 'session' when the request carries a valid sign-in cookie, else null. */
   who(req) {
     const sid = parseCookies(req.headers.cookie)[COOKIE];
-    if (sid && this.findToken('session', sid)) return 'session';
-    const m = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
-    if (m && this.findToken('upload', normalizeCode(m[1]))) return 'upload';
-    return null;
+    return sid && this.findToken('session', sid) ? 'session' : null;
   }
 
   sessionCookie(token) {
@@ -92,10 +77,6 @@ export class Auth {
   signOut(req) {
     const sid = parseCookies(req.headers.cookie)[COOKIE];
     if (sid) this.db.prepare("DELETE FROM tokens WHERE hash = ? AND kind = 'session'").run(sha(sid));
-  }
-
-  uploadCode() {
-    return this.issueToken('upload', UPLOAD_HOURS * 3600_000, 'upload code');
   }
 
   pruneTokens() {

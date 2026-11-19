@@ -4,7 +4,6 @@
   import SessionStrip, { type StripItem } from '../components/SessionStrip.svelte';
   import { app } from '../state/app.svelte';
   import { router } from '../state/router.svelte';
-  import { server } from '../state/server.svelte';
   import { importFiles } from '../import.svelte';
   import { pipeline } from '../pipeline/controller.svelte';
   import { formatDuration, formatTime } from '../components/timeline';
@@ -261,11 +260,6 @@
       </div>
     {/if}
   </header>
-  {#if server.mode === 'legacy'}
-    <button type="button" class="moved" onclick={() => router.go({ name: 'settings' })}>
-      This app moved to asana.jannikarndt.de. <strong>Move your data ›</strong>
-    </button>
-  {/if}
 
   {#if pipeline.running}
     <button class="card banner" type="button" onclick={() => router.go({ name: 'process' })}>
@@ -728,18 +722,5 @@
 
   .error {
     color: var(--color-danger);
-  }
-  .moved {
-    display: block;
-    width: 100%;
-    text-align: left;
-    margin: var(--space-2) 0;
-    padding: var(--space-3);
-    border: 1px solid var(--color-accent);
-    border-radius: var(--radius-m);
-    background: var(--color-accent-tint);
-    color: inherit;
-    font: inherit;
-    font-size: var(--text-s);
   }
 </style>

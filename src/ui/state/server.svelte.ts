@@ -3,11 +3,11 @@
  * (push the outbox, pull what other devices changed, upload missing files).
  */
 import { OpfsAssetStore, type MetadataStore } from '../../storage';
-import { httpApi, pullChanges, pushChanges, SyncError, uploadAll, uploadMissingFiles, type FileOptions, type SyncApi, type SyncProgress } from '../../sync';
+import { httpApi, pullChanges, pushChanges, SyncError, uploadMissingFiles, type FileOptions, type SyncApi, type SyncProgress } from '../../sync';
 import { createPasskey, getPasskey } from '../webauthn';
-import { isLegacyHost, remoteFile } from './remote';
+import { remoteFile } from './remote';
 
-export type Mode = 'local' | 'server' | 'legacy';
+export type Mode = 'local' | 'server';
 
 const SERVER_SEEN = 'asana.server';
 const FILE_OPTIONS = 'asana.sync.files';
@@ -46,7 +46,7 @@ export interface ShareLink {
 }
 
 class ServerState {
-  mode = $state<Mode>(isLegacyHost() ? 'legacy' : 'local');
+  mode = $state<Mode>('local');
   /** Detection finished (the first screen waits for it). */
   checked = $state(false);
   signedIn = $state(false);
@@ -83,10 +83,6 @@ class ServerState {
   }
 
   async detect(): Promise<void> {
-    if (this.mode === 'legacy') {
-      this.checked = true;
-      return;
-    }
     try {
       const res = await fetch('/api/auth/state', { credentials: 'same-origin', cache: 'no-store' });
       const json = (await res.json().catch(() => null)) as { app?: string; signedIn?: boolean; hasPasskey?: boolean } | null;
@@ -125,10 +121,6 @@ class ServerState {
     await post('/api/auth/logout');
     this.signedIn = false;
     this.stop();
-  }
-
-  async uploadCode(): Promise<{ code: string; expiresAt: string }> {
-    return post('/api/upload-code');
   }
 
   setFiles(f: FileOptions) {
@@ -238,44 +230,6 @@ class ServerState {
 }
 
 export const server = new ServerState();
-
-// ---- the old app: moving the data to the server ----------------------------------------
-
-export { SERVER_ORIGIN } from './remote';
-
-export async function moveToServer(db: MetadataStore, code: string, files: FileOptions, onProgress: (p: SyncProgress) => void, origin: string): Promise<{ files: number; records: number }> {
-  const api = httpApi({ base: origin, token: code.trim() });
-  await api.status(); // checks the code before anything is sent
-  return uploadAll(db, new OpfsAssetStore(), api, files, onProgress);
-}
-
-/** The old app's "Move to asana.jannikarndt.de" (state outlives the Settings screen). */
-class MoveState {
-  running = $state(false);
-  progress = $state<SyncProgress | null>(null);
-  result = $state<{ files: number; records: number } | null>(null);
-  error = $state<string | null>(null);
-
-  async run(db: MetadataStore, code: string, files: FileOptions, origin: string, keepAwake?: { enable(): Promise<void>; disable(): Promise<void> }) {
-    if (this.running) return;
-    this.running = true;
-    this.error = null;
-    this.result = null;
-    await keepAwake?.enable().catch(() => {});
-    try {
-      this.result = await moveToServer(db, code, files, (p) => (this.progress = p), origin);
-    } catch (e) {
-      const err = e as SyncError;
-      this.error = err.status === 401 ? 'The code is wrong or expired. Create a new one on asana.jannikarndt.de (Settings → Code for the old app).' : err.message;
-    } finally {
-      this.running = false;
-      this.progress = null;
-      await keepAwake?.disable().catch(() => {});
-    }
-  }
-}
-
-export const move = new MoveState();
 
 /**
  * Creates (or reuses) the unlisted link of a session or hold, then offers Share… / Copy: the

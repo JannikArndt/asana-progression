@@ -6,7 +6,8 @@ other users. The video analysis runs on the phone (the videos stay there); recor
 thumbnails and (optionally) clips and analysis frames live on the owner's server, so other devices
 see everything and sessions or poses can be shared by link. Live: https://asana.jannikarndt.de
 (CapRover app `asana` on timpanini, volume `asana-data` at `/data`). The old GitHub Pages copy
-(https://jannikarndt.github.io/asana-progression/) only offers "Move to asana.jannikarndt.de".
+(https://jannikarndt.github.io/asana-progression/) is frozen at its last build ("Move to
+asana.jannikarndt.de"); the data has moved and the server no longer accepts its uploads.
 
 The goal is comparing **asanas**. The Ashtanga primary series is only suggestion data
 (a `SequenceTemplate`); never build the series structure into detection, storage or progression.
@@ -60,7 +61,7 @@ API). `src/architecture.test.ts` enforces the allowed dependencies:
 | `capture` | Still (exact frame → JPEG q 0.9 + 512 px thumb + preview for the cropper; `framePreview` = the preview alone) and clip (720p/1080p H.264 re-encode via WebCodecs, or `original` = stream copy snapped to key frames; falls back to `original` when AVC encoding is unavailable or fails; a failed clip never costs the still) | `source`, `model` |
 | `crop` | `Cropper` interface; MediaPipe Pose Landmarker (lite, CPU, lazy, Cache Storage `mediapipe-pose-v1` for offline) → body box + coarse posture class (+ image landmarks with z, world landmarks); `nullCropper` fallback | `model` |
 | `progression` | Views over holds + assets: items per asana (oldest first), display crop, tile aspect, grid density, swipe, flipbook timing | `model` |
-| `sync` | Records and files between this device and the server: `pushChanges` (outbox), `pullChanges` (by revision), `uploadMissingFiles`, `uploadAll` (the old app's move, a device's first sync), `httpApi` | `model`, `storage` |
+| `sync` | Records and files between this device and the server: `pushChanges` (outbox), `pullChanges` (by revision), `uploadMissingFiles`, `httpApi` | `model`, `storage` |
 | `ui` | Screens, components, workers, research export + detection lab (`ui/research/`); the **only** place modules are wired together | public APIs of all modules |
 
 Imports into another module must go through its `index.ts` or `types.ts`.
@@ -80,9 +81,7 @@ over HTTP with a software passkey (ES256, attestation none).
   to the owner's other Apple devices anyway). Cookie `asana_sid` (HttpOnly, SameSite=Lax, Secure,
   400 days); cookie requests with a foreign `Origin` are refused. Tokens are stored as SHA-256.
   `RP_ID`/`ORIGIN` default to asana.jannikarndt.de: a domain change needs new passkeys.
-- **Upload codes** (`POST /api/upload-code`, 24 h, Crockford base32, typed with or without dashes):
-  the old Pages app sends them as `Authorization: Bearer`; CORS allows only `LEGACY_ORIGIN`
-  (https://jannikarndt.github.io) and only push, status and file upload/list, never pull.
+- Same-origin only: no CORS, no bearer tokens (the old app's one-time upload codes are gone).
 - **Records**: `POST /api/sync/push {ops}` (one transaction; every op gets the next `rev`; the
   body's key field must match), `GET /api/sync/pull?since=` (pages by count and ~8 MB; deletes are
   tombstones). Stores: the backup's records plus non-device settings, never `jobs`. Last write wins
@@ -98,10 +97,9 @@ over HTTP with a software passkey (ES256, attestation none).
 
 ### Sync on the device (`src/sync`, `ui/state/server.svelte.ts`)
 
-- Modes (`ui/state/remote.ts`): `server` (`/api/auth/state` answers as this app), `legacy` (host
-  jannikarndt.github.io: banner + Settings → Move), `local` (anything else: vite dev/preview and
-  the e2e tests run as before, no sign-in, no sync). A device that has seen the server works
-  offline on its local copy.
+- Modes (`server.detect`): `server` (`/api/auth/state` answers as this app), `local` (anything
+  else: vite dev/preview and the e2e tests run as before, no sign-in, no sync). A device that has
+  seen the server works offline on its local copy.
 - IndexedDB v2 adds `outbox` (`<store>/<key>`, `at`): every write of a synced store (and of a
   non-device setting) adds its entry in the same transaction; `batch(ops, {track: false})` is for
   writes that came from the server. `isDeviceSetting` (`storage/device-settings.ts`) also covers
@@ -118,12 +116,9 @@ over HTTP with a software passkey (ES256, attestation none).
   capture worker, photo export) fetches a missing `assets/…` file and keeps it in OPFS where the
   context can write; `ui/state/samples.ts` does the same for the gzipped frames.
 - Settings → Server: sync state, "Upload clips" (default on) / "Upload analysis frames" (default
-  off; localStorage `asana.sync.files`), Sync now, "Code for the old app", share links (copy,
-  remove), passkeys, sign out. Share: Poses page header "Share" (session), Save sheet "Link…"
+  off; localStorage `asana.sync.files`), Sync now, share links (copy, remove), passkeys, sign out. Share: Poses page header "Share" (session), Save sheet "Link…"
   (hold); `offerShareLink` opens a dialog so Share…/Copy follow a fresh tap (iOS).
-- The old app's move (`MoveToServer.svelte`, `move` state, wake lock, a quiet check for updates):
-  `uploadAll` = files the server lacks (stills/thumbs always, clips and frames as chosen, 3 in
-  parallel) then every record in ~2 MB gzipped requests. Re-running only sends what is missing.
+- Uploads: files the server lacks first (3 in parallel), then records in ~2 MB gzipped requests.
   Stills and clips are JPEG/MP4 and do not compress; only records and frames are gzipped.
 
 ### Processing pipeline (`src/ui/pipeline/`)
@@ -667,14 +662,13 @@ matches the one `verify` produced. Shipping the built dist/ keeps the Vite build
 makes the live build id exactly CI's. The image (`Dockerfile`, node:24-alpine by digest) installs
 only the server's dependencies, starts as root just to `chown` /data (`docker-entrypoint.sh`,
 su-exec) and runs as `node`; `HEALTHCHECK` on `/version`; SIGTERM closes the server and the
-database. `pages` (temporary) gives the old GitHub Pages copy its final build (`APP_BASE=/asana-progression/`,
-the only job with `pages: write`/`id-token: write`); remove the job once the data has moved —
-Pages keeps serving that last build. Every action is pinned to a SHA and every job has a timeout;
-`test/deploy-contract.test.mjs` holds that, the CapRover deploy rules and the Dockerfile rules.
+database. Nothing publishes to GitHub Pages any more (its site keeps the last build). Every action
+is pinned to a SHA and every job has a timeout; `test/deploy-contract.test.mjs` holds that, the
+CapRover deploy rules and the Dockerfile rules.
 Dependabot (`.github/dependabot.yml`: npm (root and `/server`), docker, github-actions; grouped,
 majors ignored) PRs merge themselves once verify passes and start `deploy.yml`
 (`.github/workflows/dependabot-merge.yml`); majors (Node, Vite, Svelte, TypeScript, …) are moved by
-hand. Vite `base: '/'` (`APP_BASE` overrides it).
+hand. Vite `base: '/'`.
 
 **The build id.** `scripts/stamp-build.mjs` runs after `vite build`: `build` = 12 hex of a content
 hash over everything in `dist/` except `version.json`, plus the server files that ship with it
@@ -693,8 +687,8 @@ unsaved): when the page is hidden, or on tap. The automatic reload (page hidden)
 a video file is selected (`updates.addHiddenCheck`: switching to Photos to find the next file hides
 the page, and a reload drops the files); the tap then asks "Update now?" first. The automatic reload
 also never happens in the page's first 20 s and never twice for the same build
-(sessionStorage `asana.update.reloaded`): one build behind beats a reload loop. Background sync and the
-old app's move are quiet checks too.
+(sessionStorage `asana.update.reloaded`): one build behind beats a reload loop. Background sync is a
+quiet check too.
 
 ## Design
 

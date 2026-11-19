@@ -1,5 +1,5 @@
 // test/server.test.mjs — the server end to end over HTTP, with a software passkey (ES256,
-// attestation "none"): setup token, sign-in, upload codes, push/pull, files, share links.
+// attestation "none"): setup token, sign-in, push/pull, files, share links.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -11,7 +11,6 @@ import { gzipSync } from 'node:zlib';
 import { createApp } from '../server/index.mjs';
 
 const ORIGIN = 'https://asana.test';
-const LEGACY = 'https://legacy.test';
 let dir, app, server, base;
 
 // ---- a minimal CBOR encoder (maps, ints, byte and text strings) -----------------------------
@@ -92,7 +91,7 @@ before(async () => {
   writeFileSync(join(dist, 'index.html'), '<!doctype html><title>app</title>');
   writeFileSync(join(dist, 'share.html'), '<!doctype html><title>x</title><!--OG-->');
   writeFileSync(join(dist, 'version.json'), JSON.stringify({ build: 'abc123abc123', version: 't', builtAt: 'now' }));
-  app = createApp({ port: 0, dataDir: join(dir, 'data'), distDir: dist, origin: ORIGIN, rpId: 'asana.test', setupToken: 'let-me-in', legacyOrigin: LEGACY });
+  app = createApp({ port: 0, dataDir: join(dir, 'data'), distDir: dist, origin: ORIGIN, rpId: 'asana.test', setupToken: 'let-me-in' });
   server = createServer(app.handler);
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -179,21 +178,13 @@ test('files: upload, list, download; keys are checked', async () => {
   assert.equal((await call('/api/files/assets/a1.jpg')).status, 401);
 });
 
-test('upload codes work cross-origin from the old app, for pushing only', async () => {
-  const code = (await call('/api/upload-code', { method: 'POST', cookie, body: {} })).json.code;
-  assert.match(code, /^[0-9A-Z]{5}(-[0-9A-Z]{5}){3}$/);
-  const pre = await fetch(`${base}/api/sync/push`, { method: 'OPTIONS', headers: { origin: LEGACY, 'access-control-request-method': 'POST' } });
-  assert.equal(pre.status, 204);
-  assert.equal(pre.headers.get('access-control-allow-origin'), LEGACY);
-  const auth = { authorization: `Bearer ${code.toLowerCase()}`, origin: LEGACY };
-  const st = await call('/api/sync/status', { headers: auth });
-  assert.equal(st.status, 200);
-  assert.equal(st.headers.get('access-control-allow-origin'), LEGACY);
+test('no cross-origin access: no CORS headers, no bearer tokens', async () => {
+  const pre = await fetch(`${base}/api/sync/push`, { method: 'OPTIONS', headers: { origin: 'https://other.test', 'access-control-request-method': 'POST' } });
+  assert.equal(pre.headers.get('access-control-allow-origin'), null);
+  assert.equal((await call('/api/sync/status', { headers: { authorization: 'Bearer AAAAA-AAAAA-AAAAA-AAAAA' } })).status, 401);
+  assert.equal((await call('/api/sync/push', { method: 'POST', cookie, headers: { origin: 'https://other.test' }, body: { ops: [] } })).status, 403);
+  const st = await call('/api/sync/status', { cookie });
   assert.equal(st.json.records.holds, 2);
-  const pushed = await call('/api/sync/push', { method: 'POST', headers: auth, body: { ops: [{ store: 'asanas', key: 'x', body: { id: 'x', name: 'X', sided: false } }] } });
-  assert.equal(pushed.status, 200);
-  assert.equal((await call('/api/sync/pull', { headers: auth })).status, 401);
-  assert.equal((await call('/api/sync/status', { headers: { authorization: 'Bearer AAAAA-AAAAA-AAAAA-AAAAA', origin: LEGACY } })).status, 401);
 });
 
 test('share links show photos without notes or places, and can be revoked', async () => {

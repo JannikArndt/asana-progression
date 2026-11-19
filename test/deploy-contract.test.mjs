@@ -48,10 +48,9 @@ test("CLAUDE.md exists and names every npm script", () => {
 
 const job = (y, name) => (y.split(new RegExp(`^ {2}${name}:\\s*$`, "m"))[1] || "").split(/^ {2}[\w-]+:\s*$/m)[0];
 
-test("only the Pages job may publish there; the CapRover deploy is gated and confirms /version", () => {
+test("the CapRover deploy is gated by verify and e2e and confirms /version; nothing publishes to Pages", () => {
   const y = read(".github/workflows/deploy.yml");
-  assert.doesNotMatch(y.split(/^jobs:/m)[0], /pages: write|id-token: write/, "pages/id-token write belongs on the pages job only");
-  for (const name of ["verify", "e2e", "deploy"]) assert.doesNotMatch(job(y, name), /pages: write|id-token: write/, `${name} must not publish to Pages`);
+  assert.doesNotMatch(y, /pages: write|id-token: write/, "the app is not on GitHub Pages any more");
   const deploy = job(y, "deploy");
   assert.match(deploy, /needs: \[verify, e2e\]|needs: \[e2e, verify\]/, "e2e must gate the deploy");
   assert.match(deploy, /caprover@\d+\.\d+\.\d+ deploy/, "the CapRover CLI is pinned");

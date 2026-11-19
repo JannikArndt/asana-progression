@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { MemoryAssetStore, openMetadataStore, sampleFileName, typedJsonReplacer, typedJsonReviver } from '../storage';
 import type { Analysis, Asset, Hold } from '../model';
 import { DEFAULT_PARAMS } from '../detection';
-import { gunzip, localSizes, pullChanges, pushChanges, samplesKey, uploadAll, uploadMissingFiles } from './index';
+import { gunzip, pullChanges, pushChanges, samplesKey, uploadMissingFiles } from './index';
 import type { PullPage, PushOp, RemoteFile, SyncApi } from './types';
 
 /** The server's semantics in memory (records by revision, files by key). */
@@ -71,7 +71,7 @@ function analysis(): Analysis {
 }
 
 describe('sync', () => {
-  it('uploadAll sends files the server lacks, then every record; options leave out clips and frames', async () => {
+  it('pushChanges sends the files the server lacks, then the records; options leave out clips and frames', async () => {
     const db = await open();
     const files = new MemoryAssetStore();
     await db.holds.put(hold('h1'));
@@ -85,14 +85,13 @@ describe('sync', () => {
     await db.settings.set('catalogVersion', 5);
     const api = new FakeServer();
     const progress: string[] = [];
-    const r = await uploadAll(db, files, api, { clips: false, frames: false }, (p) => progress.push(`${p.phase} ${p.done}/${p.total}`));
-    expect(r).toEqual({ files: 2, records: 6 });
+    expect(await pushChanges(db, files, api, { clips: false, frames: false }, (p) => progress.push(`${p.phase} ${p.done}/${p.total}`))).toBe(6);
     expect([...api.files.keys()].sort()).toEqual(['assets/st.jpg', 'assets/th.jpg']);
     expect([...api.records.keys()].sort()).toEqual(['analyses/v1', 'assets/cl', 'assets/st', 'assets/th', 'holds/h1', 'settings/clipQuality']);
     expect(progress.at(-1)).toBe('records 6/6');
     expect(await db.outbox.count()).toBe(0);
 
-    // Again with clips and frames: only the new files go.
+    // Clips and frames switched on later: only the new files go.
     expect(await uploadMissingFiles(db, files, api, { clips: true, frames: true })).toBe(2);
     const frames = api.files.get(samplesKey('v1'))!;
     expect(frames.rawBytes).toBe(16);
@@ -145,16 +144,6 @@ describe('sync', () => {
     mac.close();
   });
 
-  it('localSizes adds up images, clips and frames', async () => {
-    const db = await open();
-    const files = new MemoryAssetStore();
-    await db.assets.put(asset('st', 'still'));
-    await db.assets.put(asset('cl', 'clip'));
-    await db.analyses.put(analysis());
-    await files.put(sampleFileName('v1'), new Blob([new Uint8Array(10)]));
-    expect(await localSizes(db, files)).toEqual({ records: 3, images: { count: 1, bytes: 3 }, clips: { count: 1, bytes: 3 }, frames: { count: 1, bytes: 10 } });
-    db.close();
-  });
 });
 
 describe('first pull', () => {

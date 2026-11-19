@@ -1,7 +1,7 @@
 // server/index.mjs — asana-progression on CapRover: serves the built app (dist/), passkey
 // sign-in, sync of records and files into the data volume, and unlisted share links.
 //
-//   node server/index.mjs        (PORT, DATA_DIR, DIST_DIR, ORIGIN, SETUP_TOKEN, LEGACY_ORIGIN)
+//   node server/index.mjs        (PORT, DATA_DIR, DIST_DIR, ORIGIN, SETUP_TOKEN)
 //
 // The video analysis stays on the phone; the server only stores what the app sends.
 import { createServer } from 'node:http';
@@ -26,7 +26,6 @@ export function config(env = process.env) {
     origin,
     rpId: env.RP_ID || new URL(origin).hostname,
     setupToken: env.SETUP_TOKEN || '',
-    legacyOrigin: (env.LEGACY_ORIGIN || 'https://jannikarndt.github.io').replace(/\/$/, ''),
   };
 }
 
@@ -50,22 +49,12 @@ export function createApp(cfg = config()) {
   const version = versionOf(cfg.distDir);
   const distRoot = resolve(cfg.distDir);
 
-  function cors(req, res) {
-    if (req.headers.origin === cfg.legacyOrigin) {
-      res.setHeader('access-control-allow-origin', cfg.legacyOrigin);
-      res.setHeader('vary', 'Origin');
-    }
-  }
-
-  /** Who may call: 'session' (cookie) or 'upload' (code of the old app). Throws 401 otherwise. */
-  function need(req, ...allowed) {
-    const w = auth.who(req);
-    if (!w || !allowed.includes(w)) throw new HttpError(401, w ? 'Not allowed with an upload code' : 'Sign in first');
+  /** Signed in (cookie) or 401. Throws 403 for a request from another site. */
+  function need(req) {
+    if (auth.who(req) !== 'session') throw new HttpError(401, 'Sign in first');
     // Cookie requests must come from the app itself (SameSite=Lax plus this: no cross-site writes).
     const o = req.headers.origin;
-    if (w === 'session' && o && o !== cfg.origin) throw new HttpError(403, 'Wrong origin');
-    if (w === 'upload' && o && o !== cfg.origin && o !== cfg.legacyOrigin) throw new HttpError(403, 'Wrong origin');
-    return w;
+    if (o && o !== cfg.origin) throw new HttpError(403, 'Wrong origin');
   }
 
   async function serveStatic(req, res, path) {
@@ -128,17 +117,6 @@ export function createApp(cfg = config()) {
   async function route(req, res) {
     const { path, query } = splitUrl(req.url);
     const m = req.method;
-    cors(req, res);
-
-    if (m === 'OPTIONS' && path.startsWith('/api/')) {
-      if (req.headers.origin !== cfg.legacyOrigin) throw new HttpError(403, 'Origin not allowed');
-      res.writeHead(204, {
-        'access-control-allow-methods': 'GET, PUT, POST',
-        'access-control-allow-headers': 'authorization, content-type, content-encoding, x-raw-bytes',
-        'access-control-max-age': '600',
-      });
-      return res.end();
-    }
 
     if (path === '/version' && (m === 'GET' || m === 'HEAD')) {
       return sendJson(req, res, 200, { ...version, startedAt, node: process.versions.node });
@@ -169,59 +147,54 @@ export function createApp(cfg = config()) {
       return sendJson(req, res, 200, { ok: true }, { 'set-cookie': auth.clearCookie() });
     }
     if (path === '/api/auth/passkeys' && m === 'GET') {
-      need(req, 'session');
+      need(req);
       return sendJson(req, res, 200, { passkeys: auth.passkeys() });
-    }
-    if (path === '/api/upload-code' && m === 'POST') {
-      need(req, 'session');
-      const { token, expiresAt } = auth.uploadCode();
-      return sendJson(req, res, 200, { code: token, expiresAt });
     }
 
     if (path === '/api/sync/status' && m === 'GET') {
-      const w = need(req, 'session', 'upload');
-      return sendJson(req, res, 200, { ...status(db), as: w });
+      need(req);
+      return sendJson(req, res, 200, status(db));
     }
     if (path === '/api/sync/push' && m === 'POST') {
-      need(req, 'session', 'upload');
+      need(req);
       const body = await readJson(req, 64 * 1024 * 1024);
       return sendJson(req, res, 200, { rev: push(db, body.ops) });
     }
     if (path === '/api/sync/pull' && m === 'GET') {
-      need(req, 'session');
+      need(req);
       const since = Math.max(0, Number(query.get('since')) || 0);
       const limit = Math.min(5000, Math.max(1, Number(query.get('limit')) || 2000));
       return sendJson(req, res, 200, pull(db, since, limit));
     }
     if (path === '/api/files' && m === 'GET') {
-      need(req, 'session', 'upload');
+      need(req);
       return sendJson(req, res, 200, { files: listFiles(db, query.get('prefix') || '') });
     }
     if (path.startsWith('/api/files/')) {
       const key = path.slice('/api/files/'.length);
       if (m === 'PUT') {
-        need(req, 'session', 'upload');
+        need(req);
         const bytes = await putFile(db, filesDir, key, req);
         return sendJson(req, res, 200, { key, bytes });
       }
       if (m === 'GET' || m === 'HEAD') {
-        need(req, 'session');
+        need(req);
         return sendFile(req, res, filesDir, key);
       }
     }
 
     if (path === '/api/shares' && m === 'GET') {
-      need(req, 'session');
+      need(req);
       return sendJson(req, res, 200, { shares: listShares(db) });
     }
     if (path === '/api/shares' && m === 'POST') {
-      need(req, 'session');
+      need(req);
       const body = await readJson(req);
       const s = createShare(db, body.kind, body.id);
       return sendJson(req, res, 200, { ...s, url: `${cfg.origin}/s/${s.token}` });
     }
     if (path.startsWith('/api/shares/') && m === 'DELETE') {
-      need(req, 'session');
+      need(req);
       deleteShare(db, path.slice('/api/shares/'.length));
       return sendJson(req, res, 200, { ok: true });
     }

@@ -4,8 +4,6 @@ import { SyncError, type PullPage, type PushOp, type RemoteFile, type ServerStat
 export interface HttpApiOptions {
   /** Server origin, '' for the page's own (cookie sign-in). */
   base: string;
-  /** Upload code of the old app (Authorization: Bearer). */
-  token?: string;
   fetch?: typeof fetch;
 }
 
@@ -33,13 +31,11 @@ async function failure(res: Response): Promise<SyncError> {
 /** The sync endpoints over HTTP. Record bodies keep typed arrays (`{$typed, b64}`). */
 export function httpApi(opts: HttpApiOptions): SyncApi {
   const f = opts.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
-  const auth: Record<string, string> = opts.token ? { authorization: `Bearer ${opts.token}` } : {};
-  const credentials: RequestCredentials = opts.token ? 'omit' : 'same-origin';
 
   async function call(path: string, init: RequestInit = {}): Promise<Response> {
     let res: Response;
     try {
-      res = await f(`${opts.base}${path}`, { ...init, credentials, headers: { ...auth, ...(init.headers as Record<string, string>) } });
+      res = await f(`${opts.base}${path}`, { ...init, credentials: 'same-origin' });
     } catch (e) {
       throw new SyncError(`Server not reachable (${(e as Error).message})`, 0);
     }

@@ -23,7 +23,7 @@
   import { cropExport } from './state/crop-export.svelte';
   import { updates } from './update.svelte';
   import SignIn from './screens/SignIn.svelte';
-  import { server, move } from './state/server.svelte';
+  import { server } from './state/server.svelte';
 
   // Old milestone-1 links (#/video/<id>) open the session containing the video.
   $effect(() => {
@@ -55,7 +55,7 @@
     updates.addQuietCheck(() => !backup.exporting && !backup.importing && !backup.ready);
     updates.addQuietCheck(() => !research.busy && !research.ready);
     updates.addQuietCheck(() => !cropExport.preparing && !cropExport.ready);
-    updates.addQuietCheck(() => !move.running && !server.syncing);
+    updates.addQuietCheck(() => !server.syncing);
     // Selected video files are lost on reload: switching to Photos to find the next file hides the page.
     updates.addHiddenCheck(() => app.files.size === 0);
     updates.start();

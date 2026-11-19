@@ -1,9 +1,7 @@
 import type { Analysis, Asset } from '../model';
 import { isDeviceSetting, sampleFileName, type AssetStore, type BatchOp, type MetadataStore, type OutboxEntry, type SyncedStore } from '../storage';
 import { gzip } from './api';
-import type { FileOptions, LocalSizes, PulledRecord, PushOp, RemoteFile, SyncApi, SyncProgress } from './types';
-
-export const RECORD_STORES = ['asanas', 'templates', 'sessions', 'videos', 'analyses', 'holds', 'assets'] as const;
+import type { FileOptions, PulledRecord, PushOp, RemoteFile, SyncApi, SyncProgress } from './types';
 
 /** Server key of a video's analysis frames. */
 export const samplesKey = (videoId: string) => `samples/${videoId}.bin.gz`;
@@ -37,19 +35,6 @@ async function readRecord(db: MetadataStore, store: SyncedStore, key: string): P
     return value === undefined ? undefined : { key, value };
   }
   return db[store].get(key);
-}
-
-/** Every synced record on this device, as push operations. */
-async function allOps(db: MetadataStore): Promise<PushOp[]> {
-  const ops: PushOp[] = [];
-  for (const store of RECORD_STORES) {
-    for (const r of (await db[store].all()) as unknown as Array<Record<string, unknown>>) {
-      const key = String(store === 'analyses' ? r.videoId : r.id);
-      ops.push({ store, key, body: r });
-    }
-  }
-  for (const e of await db.settings.entries()) if (!isDeviceSetting(e.key)) ops.push({ store: 'settings', key: e.key, body: e });
-  return ops;
 }
 
 /** Sends ops in requests of about CHUNK_BYTES; calls `after` with each sent chunk. */
@@ -151,20 +136,6 @@ export async function uploadMissingFiles(db: MetadataStore, files: AssetStore, a
   return runUploads(api, uploads, onProgress);
 }
 
-/**
- * Everything on this device to the server: missing files first, then every record (the server
- * keeps the newest write per record). Used by the old app's "Move" and a device's first sync.
- */
-export async function uploadAll(db: MetadataStore, files: AssetStore, api: SyncApi, opts: FileOptions, onProgress?: Progress): Promise<{ files: number; records: number }> {
-  const pending = await db.outbox.list();
-  const sentFiles = await uploadMissingFiles(db, files, api, opts, onProgress);
-  const ops = await allOps(db);
-  await pushChunked(api, ops, onProgress);
-  // What was pending before the upload is on the server now (later writes stay pending).
-  await db.outbox.ack(pending);
-  return { files: sentFiles, records: ops.length };
-}
-
 /** Pushes the outbox: the records' files first, then the records; acknowledges per request. */
 export async function pushChanges(db: MetadataStore, files: AssetStore, api: SyncApi, opts: FileOptions, onProgress?: Progress): Promise<number> {
   const entries = await db.outbox.list();
@@ -249,23 +220,4 @@ export async function pullChanges(
     if (!page.more) break;
   }
   return result;
-}
-
-/** Sizes of what an upload would send, for the choices (clips, frames) before it starts. */
-export async function localSizes(db: MetadataStore, files: AssetStore): Promise<LocalSizes> {
-  const sizes: LocalSizes = { records: 0, images: { count: 0, bytes: 0 }, clips: { count: 0, bytes: 0 }, frames: { count: 0, bytes: 0 } };
-  for (const a of await db.assets.all()) {
-    const s = a.kind === 'clip' ? sizes.clips : sizes.images;
-    s.count++;
-    s.bytes += a.bytes;
-  }
-  for (const an of await db.analyses.all()) {
-    const f = await files.get(sampleFileName(an.videoId));
-    if (f?.size) {
-      sizes.frames.count++;
-      sizes.frames.bytes += f.size;
-    }
-  }
-  for (const store of RECORD_STORES) sizes.records += (await db[store].all()).length;
-  return sizes;
 }

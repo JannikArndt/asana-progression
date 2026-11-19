@@ -17,16 +17,15 @@ function fakeFetch(respond: (url: string, init: RequestInit) => Response) {
 }
 
 describe('httpApi', () => {
-  it('sends the upload code as a bearer token without cookies, gzips large pushes, keeps typed arrays', async () => {
+  it('sends the sign-in cookie, gzips large pushes, keeps typed arrays', async () => {
     const { f, calls } = fakeFetch(() => Response.json({ rev: 7 }));
-    const api = httpApi({ base: 'https://srv', token: 'ABCDE-FGHIJ', fetch: f });
+    const api = httpApi({ base: 'https://srv', fetch: f });
     const m = new Float32Array(2000).fill(1.5);
     expect(await api.push([{ store: 'analyses', key: 'v1', body: { videoId: 'v1', m } }])).toBe(7);
     const { url, init } = calls[0]!;
     expect(url).toBe('https://srv/api/sync/push');
-    expect(init.credentials).toBe('omit');
+    expect(init.credentials).toBe('same-origin');
     const h = init.headers as Record<string, string>;
-    expect(h.authorization).toBe('Bearer ABCDE-FGHIJ');
     expect(h['content-encoding']).toBe('gzip');
     const json = JSON.parse(await (await gunzip(init.body as Blob)).text());
     expect(json.ops[0].body.m.$typed).toBe('Float32Array');

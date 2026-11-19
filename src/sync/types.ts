@@ -64,14 +64,6 @@ export interface SyncProgress {
   bytesTotal: number;
 }
 
-export interface LocalSizes {
-  records: number;
-  /** Stills and thumbnails. */
-  images: { count: number; bytes: number };
-  clips: { count: number; bytes: number };
-  frames: { count: number; bytes: number };
-}
-
 export class SyncError extends Error {
   override name = 'SyncError';
   constructor(

@@ -2,8 +2,7 @@
 #
 # verify builds dist/ (version.json = {build, …}, a content hash over dist/ and the server
 # files); deploy ships exactly that dist/ with the server in a tarball and waits until
-# /version serves the same build. The old GitHub Pages copy only gets its final update from
-# the `pages` job, which is removed once the data has moved.
+# /version serves the same build.
 name: Deploy
 
 on:
@@ -113,50 +112,4 @@ jobs:
             sleep 10
           done
           echo "::error::$url never reported build $want (last: HTTP $code, build ${got:-none}). Read the log: npm run logs."
-          exit 1
-
-  # The old GitHub Pages copy (https://jannikarndt.github.io/asana-progression/): its final update
-  # (the "Move to asana.jannikarndt.de" upload). Remove this job once the data has moved.
-  pages:
-    needs: [verify, e2e]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-        env:
-          APP_BASE: /asana-progression/
-      - id: build
-        run: echo "build=$(node -p 'require("./dist/version.json").build')" >> "$GITHUB_OUTPUT"
-      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          path: ./dist
-      - id: deployment
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
-      - name: Confirm the new build is live
-        env:
-          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
-          want: ${{ steps.build.outputs.build }}
-        run: |
-          url="${PAGE_URL%/}/version.json"
-          for i in $(seq 1 60); do
-            got="$(curl -sS --max-time 10 "$url?t=$(date +%s)" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).build)}catch{}})' || true)"
-            if [ "$got" = "$want" ]; then echo "PAGES LIVE: $got"; exit 0; fi
-            echo "attempt $i: serving ${got:-nothing}, want $want"
-            sleep 10
-          done
-          echo "::error::$url never reported build $want"
           exit 1
