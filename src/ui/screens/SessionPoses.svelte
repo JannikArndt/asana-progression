@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { offerShareLink, server } from '../state/server.svelte';
   import LazyAsset from '../components/LazyAsset.svelte';
   import TinyFrame from '../components/TinyFrame.svelte';
   import HoldViewer from '../components/HoldViewer.svelte';
@@ -101,6 +102,9 @@
     <span class="links">
       {#if withStills}
         <button class="btn quiet" type="button" onclick={exportCrops} disabled={!!cropExport.preparing}>Export</button>
+      {/if}
+      {#if server.mode === 'server' && server.signedIn && session && withStills}
+        <button class="btn quiet" type="button" onclick={() => offerShareLink('session', id, formatDay(session!.date))}>Share</button>
       {/if}
       {#if session?.complete}<a class="btn quiet" href={routeHash({ name: 'session', id })}>Edit</a>{/if}
     </span>

@@ -1,10 +1,10 @@
 {
-  "id": "/asana-progression/",
+  "id": "./",
   "name": "Asana Progression",
   "short_name": "Asanas",
   "description": "Find held yoga poses in practice videos and follow each asana's progression.",
-  "start_url": "/asana-progression/",
-  "scope": "/asana-progression/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#f7f5f1",

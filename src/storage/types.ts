@@ -23,6 +23,28 @@ export interface KeyValueStore {
 
 export type RecordStoreName = 'asanas' | 'templates' | 'sessions' | 'videos' | 'analyses' | 'holds' | 'assets' | 'jobs';
 
+/** Stores whose changes go to the server (settings only when not device-specific). */
+export type SyncedStore = 'asanas' | 'templates' | 'sessions' | 'videos' | 'analyses' | 'holds' | 'assets' | 'settings';
+
+/** A record changed on this device since the server last took it (one entry per record). */
+export interface OutboxEntry {
+  /** `<store>/<key>` */
+  id: string;
+  store: SyncedStore;
+  key: string;
+  /** Increases with every write of the record. */
+  at: number;
+}
+
+export interface Outbox {
+  list(limit?: number): Promise<OutboxEntry[]>;
+  count(): Promise<number>;
+  /** Removes the entries whose record was not written again since they were listed. */
+  ack(entries: OutboxEntry[]): Promise<void>;
+  /** Ids (`<store>/<key>`) of all pending entries. */
+  pendingIds(): Promise<Set<string>>;
+}
+
 /** One write of an atomic batch (settings are written as `{ key, value }`). */
 export type BatchOp = { store: RecordStoreName | 'settings'; put: unknown } | { store: RecordStoreName | 'settings'; delete: string };
 
@@ -36,8 +58,13 @@ export interface MetadataStore {
   assets: Repository<Asset>;
   jobs: Repository<ProcessingJob>;
   settings: KeyValueStore;
-  /** Applies all writes in one transaction: either every write is stored or none. */
-  batch(ops: BatchOp[]): Promise<void>;
+  /**
+   * Applies all writes in one transaction: either every write is stored or none. `track: false`
+   * keeps them out of the outbox (writes that came from the server).
+   */
+  batch(ops: BatchOp[], opts?: { track?: boolean }): Promise<void>;
+  /** Local changes waiting for the server. */
+  outbox: Outbox;
   close(): void;
 }
 

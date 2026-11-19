@@ -80,9 +80,14 @@ class AppState {
   files = new SvelteMap<string, File>();
   private sources = new Map<string, Promise<VideoSource>>();
 
-  async init() {
+  /**
+   * `beforeSeed`: the server's data comes in first on a device that never synced; it answers
+   * whether that brought a catalog (seeded on another device already).
+   */
+  async init(beforeSeed?: (db: MetadataStore) => Promise<boolean>) {
     try {
       this.store = await openMetadataStore();
+      const catalogFromServer = (await beforeSeed?.(this.store)) ?? false;
       const [params, skip] = await Promise.all([
         this.store.settings.get<Partial<DetectionParams>>('detectionParams'),
         this.store.settings.get<boolean>('skipNonReference'),
@@ -90,7 +95,7 @@ class AppState {
       this.params = normalizeParams(params);
       this.skipNonReference = skip ?? true;
       this.clipQuality = (await this.store.settings.get<'720p' | '1080p' | 'original'>('clipQuality')) ?? '1080p';
-      await this.seedCatalog();
+      await this.seedCatalog(catalogFromServer);
       await this.migrate();
       await this.refresh();
       this.ready = true;
@@ -114,11 +119,16 @@ class AppState {
   }
 
   /** Seeds the asana catalog and the Primary and Intermediate series templates on first run; upgrades older seeds. */
-  private async seedCatalog() {
+  private async seedCatalog(catalogFromServer = false) {
     const db = this.db;
     const version = (await db.settings.get<number>('catalogVersion')) ?? 0;
     if (version >= CATALOG_VERSION) return;
     const asanas = await db.asanas.all();
+    // A catalog that just came from the server was seeded (and maybe edited) on another device.
+    if (version === 0 && asanas.length > 0 && catalogFromServer) {
+      await db.settings.set('catalogVersion', CATALOG_VERSION);
+      return;
+    }
     if (asanas.length === 0) for (const a of SEED_ASANAS) await db.asanas.put({ ...a });
     else {
       const have = new Set(asanas.map((a) => a.id));
@@ -295,6 +305,12 @@ class AppState {
   /** Stores frame poses (by `poseKey`) in a video's analysis. */
   addFramePoses(videoId: string, poses: Record<string, CompactPose | null>): Promise<Analysis | null> {
     return this.updateAnalysis(videoId, (a) => ({ ...a, poses: { ...a.poses, ...poses } }));
+  }
+
+  /** Records another device changed came in (server sync): reload the lists, update open reviews. */
+  async applyRemote(analyses: Analysis[]) {
+    await this.refresh();
+    for (const a of analyses) for (const l of this.analysisListeners) l(a);
   }
 
   /** Called after every `updateAnalysis` write; returns the unsubscribe function. */

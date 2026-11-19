@@ -1,4 +1,17 @@
-import { openSampleReader, sampleFileName, type SampleReader } from '../../storage';
+import { blobSampleReader, openSampleReader, OpfsAssetStore, sampleFileName, type SampleReader } from '../../storage';
+import { gunzip, samplesKey } from '../../sync';
+import { remoteFile } from './remote';
+
+/** The local frame file, else the server's copy (kept in OPFS for next time). */
+async function openReader(videoId: string, recordBytes: number): Promise<SampleReader | null> {
+  const local = await openSampleReader(sampleFileName(videoId), recordBytes);
+  if (local) return local;
+  const gz = await remoteFile(samplesKey(videoId));
+  if (!gz) return null;
+  const raw = await gunzip(gz);
+  await new OpfsAssetStore().put(sampleFileName(videoId), raw).catch(() => {});
+  return blobSampleReader(raw, recordBytes);
+}
 
 /** Cached read-only access to a video's stored analysis frames (main thread). */
 const readers = new Map<string, Promise<SampleReader | null>>();
@@ -7,7 +20,7 @@ export function sampleReader(videoId: string, recordBytes: number): Promise<Samp
   const key = `${videoId}:${recordBytes}`;
   let r = readers.get(key);
   if (!r) {
-    r = openSampleReader(sampleFileName(videoId), recordBytes);
+    r = openReader(videoId, recordBytes).catch(() => null);
     readers.set(key, r);
   }
   return r;

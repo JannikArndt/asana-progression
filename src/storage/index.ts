@@ -1,9 +1,11 @@
 export type * from './types';
 export { openMetadataStore, DB_NAME, DB_VERSION } from './metadata';
+export { isDeviceSetting } from './device-settings';
 export {
   MemorySamples,
   openSampleWriter,
   openSampleReader,
+  blobSampleReader,
   deleteFile,
   opfsUsage,
   sampleFileName,
@@ -18,8 +20,9 @@ export {
   planImport,
   importBackup,
   sampleBytes,
-  isDeviceSetting,
   BackupError,
+  replacer as typedJsonReplacer,
+  reviver as typedJsonReviver,
   BACKUP_FORMAT,
   BACKUP_VERSION,
   type BackupManifest,

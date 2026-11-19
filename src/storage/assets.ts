@@ -119,6 +119,12 @@ async function dirSize(dir: Dir): Promise<number> {
  * (not available on the main thread of older Safari versions: write from a worker there).
  */
 export class OpfsAssetStore implements AssetStore {
+  /**
+   * `remote`: where a file missing here can come from (the server, on a device that pulled the
+   * records but not yet the files). A fetched file is kept in OPFS when this context can write.
+   */
+  constructor(private readonly opts: { remote?: (key: string) => Promise<Blob | null> } = {}) {}
+
   async put(key: string, data: Blob): Promise<void> {
     const { dirs, name } = splitKey(key);
     const dir = await directory(dirs, true);
@@ -138,9 +144,12 @@ export class OpfsAssetStore implements AssetStore {
       const fh = (await dir.getFileHandle(name)) as unknown as FileHandle;
       return typed(await fh.getFile(), key);
     } catch (e) {
-      if (isNotFound(e)) return null;
-      throw e;
+      if (!isNotFound(e)) throw e;
     }
+    const blob = this.opts.remote ? await this.opts.remote(key) : null;
+    if (!blob) return null;
+    await this.put(key, blob).catch(() => {});
+    return typed(blob, key);
   }
 
   async delete(key: string): Promise<void> {

@@ -11,11 +11,12 @@ import { describe, expect, it } from 'vitest';
  *  - labeling: may import model and detection (best-frame helpers on signals)
  *  - capture: may import source (the VideoSource interface) and model
  *  - crop, progression: may import model
+ *  - sync: may import model and storage
  *  - ui: the only composition layer; imports other modules only through their index (or types)
  * Tests and fixtures are exempt.
  */
 const SRC = resolve(import.meta.dirname);
-const MODULES = ['detection', 'source', 'storage', 'model', 'labeling', 'capture', 'crop', 'progression', 'ui'] as const;
+const MODULES = ['detection', 'source', 'storage', 'model', 'labeling', 'capture', 'crop', 'progression', 'sync', 'ui'] as const;
 type Module = (typeof MODULES)[number];
 
 const ALLOWED: Record<Module, Module[]> = {
@@ -27,7 +28,8 @@ const ALLOWED: Record<Module, Module[]> = {
   capture: ['source', 'model'],
   crop: ['model'],
   progression: ['model'],
-  ui: ['detection', 'source', 'storage', 'model', 'labeling', 'capture', 'crop', 'progression'],
+  sync: ['model', 'storage'],
+  ui: ['detection', 'source', 'storage', 'model', 'labeling', 'capture', 'crop', 'progression', 'sync'],
 };
 
 function files(dir: string): string[] {

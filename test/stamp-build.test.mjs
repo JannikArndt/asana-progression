@@ -35,3 +35,18 @@ test("stamping twice gives the same build", () => {
   const dir = fakeDist();
   assert.equal(stampBuild(dir), stampBuild(dir));
 });
+
+test("the server files are part of the build", () => {
+  const root = mkdtempSync(join(tmpdir(), 'root-'));
+  mkdirSync(join(root, 'server', 'node_modules', 'x'), { recursive: true });
+  writeFileSync(join(root, 'server', 'index.mjs'), 'a');
+  writeFileSync(join(root, 'server', 'node_modules', 'x', 'i.js'), 'dep');
+  writeFileSync(join(root, 'Dockerfile'), 'FROM x');
+  const a = stampBuild(fakeDist(), new Date(), root);
+  assert.notEqual(a, stampBuild(fakeDist()));
+  writeFileSync(join(root, 'server', 'node_modules', 'x', 'i.js'), 'other');
+  writeFileSync(join(root, 'server', 'README.md'), 'docs');
+  assert.equal(stampBuild(fakeDist(), new Date(), root), a, 'node_modules and docs do not count');
+  writeFileSync(join(root, 'server', 'index.mjs'), 'b');
+  assert.notEqual(stampBuild(fakeDist(), new Date(), root), a);
+});

@@ -46,13 +46,28 @@ test("CLAUDE.md exists and names every npm script", () => {
   for (const s of scripts) assert.match(claude, new RegExp(`npm (run )?${s}\\b`), `CLAUDE.md does not mention npm run ${s}`);
 });
 
-test("only the deploy job may publish, and it confirms the build is live", () => {
+const job = (y, name) => (y.split(new RegExp(`^ {2}${name}:\\s*$`, "m"))[1] || "").split(/^ {2}[\w-]+:\s*$/m)[0];
+
+test("only the Pages job may publish there; the CapRover deploy is gated and confirms /version", () => {
   const y = read(".github/workflows/deploy.yml");
-  assert.doesNotMatch(y.split(/^jobs:/m)[0], /pages: write|id-token: write/, "pages/id-token write belongs on the deploy job only");
-  const deploy = y.split(/^ {2}deploy:\s*$/m)[1] || "";
-  assert.match(deploy, /pages: write/);
-  assert.match(deploy, /version\.json/, "the deploy job does not poll version.json");
+  assert.doesNotMatch(y.split(/^jobs:/m)[0], /pages: write|id-token: write/, "pages/id-token write belongs on the pages job only");
+  for (const name of ["verify", "e2e", "deploy"]) assert.doesNotMatch(job(y, name), /pages: write|id-token: write/, `${name} must not publish to Pages`);
+  const deploy = job(y, "deploy");
   assert.match(deploy, /needs: \[verify, e2e\]|needs: \[e2e, verify\]/, "e2e must gate the deploy");
+  assert.match(deploy, /caprover@\d+\.\d+\.\d+ deploy/, "the CapRover CLI is pinned");
+  assert.match(deploy, /< \/dev\/null/, "the CLI runs with stdin closed");
+  assert.match(deploy, /\/version/, "the deploy job does not poll /version");
+  assert.doesNotMatch(deploy, / deploy [^\n]*(\$CAPROVER_APP_TOKEN|-p |--caproverPassword)/, "the token goes in the environment only");
+});
+
+test("the image: pinned base, non-root, health check on /version, exec-form CMD", () => {
+  const d = read("Dockerfile");
+  for (const [, from] of d.matchAll(/^FROM\s+(\S+)/gm)) assert.match(from, /@sha256:[0-9a-f]{64}$/, `FROM ${from} is not pinned by digest`);
+  assert.match(d, /HEALTHCHECK[\s\S]*\/version/);
+  assert.match(d, /^CMD \[/m);
+  assert.match(d, /su-exec|^USER node/m, "the app must not run as root");
+  assert.match(read("captain-definition"), /"dockerfilePath": "\.\/Dockerfile"/);
+  assert.match(read("server/package.json"), /"node": ">=24"/);
 });
 
 test("the build stamps dist/version.json", () => {

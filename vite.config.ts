@@ -3,6 +3,7 @@ import { defineConfig, type Connect, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 const MEDIAPIPE_FILES: Record<string, string> = {
   'vision_wasm_module_internal.js': 'text/javascript',
@@ -47,18 +48,30 @@ function mediapipeWasm(): Plugin {
   };
 }
 
+/**
+ * The app is served from the root of its own server (asana.jannikarndt.de). APP_BASE builds the
+ * old GitHub Pages copy (`APP_BASE=/asana-progression/`). API_URL proxies /api and /s to a local
+ * server in `npm run dev` (e.g. API_URL=http://localhost:8787 next to `npm run server`).
+ */
+const apiUrl = process.env.API_URL;
+
 export default defineConfig({
-  base: '/asana-progression/',
+  base: process.env.APP_BASE || '/',
   plugins: [svelte(), mediapipeWasm()],
   worker: { format: 'es' },
-  build: { target: 'es2022', sourcemap: true },
+  build: {
+    target: 'es2022',
+    sourcemap: true,
+    rollupOptions: { input: { main: fileURLToPath(new URL('index.html', import.meta.url)), share: fileURLToPath(new URL('share.html', import.meta.url)) } },
+  },
+  server: apiUrl ? { proxy: { '/api': apiUrl, '/s/': apiUrl } } : {},
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',
     coverage: {
       provider: 'v8',
       // Browser-only code (WebCodecs sampler, UI wiring) is covered by the Playwright smoke tests.
-      include: ['src/detection/**/*.ts', 'src/labeling/**/*.ts', 'src/model/**/*.ts', 'src/storage/**/*.ts', 'src/source/**/*.ts', 'src/ui/components/timeline.ts', 'src/ui/components/session-timeline.ts', 'src/ui/components/sheet-gesture.ts', 'src/ui/state/session-data.ts', 'src/ui/research/**/*.ts'],
+      include: ['src/detection/**/*.ts', 'src/labeling/**/*.ts', 'src/model/**/*.ts', 'src/storage/**/*.ts', 'src/source/**/*.ts', 'src/sync/**/*.ts', 'src/ui/components/timeline.ts', 'src/ui/components/session-timeline.ts', 'src/ui/components/sheet-gesture.ts', 'src/ui/state/session-data.ts', 'src/ui/research/**/*.ts'],
       exclude: ['**/*.test.ts', '**/types.ts', '**/index.ts', '**/__fixtures__/**', 'src/source/sampler.ts', 'src/source/exact.ts'],
       reporter: ['text-summary', 'text'],
       thresholds: {

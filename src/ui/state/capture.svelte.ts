@@ -6,6 +6,7 @@ import { app } from './app.svelte';
 import { CROP_VERSION, type BodyBox, type PoseDetection } from '../../crop';
 import { needsCapture, recropStill, replacedAssets, withAutoCrop } from './capture-plan';
 import { captureDiagnostics, type CaptureDiagnostics } from '../diagnostics';
+import { remoteFile } from './remote';
 
 export type CaptureStatus = 'queued' | 'capturing' | 'done' | 'error' | 'needs-file';
 
@@ -16,7 +17,7 @@ export interface PoseResult {
   error?: string;
 }
 
-const assetStore = new OpfsAssetStore();
+const assetStore = new OpfsAssetStore({ remote: remoteFile });
 const urls = new Map<string, Promise<string | null>>();
 
 /** Object URL for an asset file (cached for the page's lifetime). */

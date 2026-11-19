@@ -3,6 +3,7 @@ import { withPhotoMetadata } from '../../capture';
 import { cropFileName, cropPixels, displayCrop, type ProgressionItem } from '../../progression';
 import { app } from './app.svelte';
 import { holdPhotoMetadata } from './photo-meta';
+import { remoteFile } from './remote';
 
 /** JPEG quality of exported crops (stills are captured at 0.9; re-encoding keeps close to that). */
 const QUALITY = 0.92;
@@ -43,7 +44,7 @@ async function encode(width: number, height: number, draw: (ctx: CanvasRendering
   return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('JPEG encoding failed'))), 'image/jpeg', QUALITY));
 }
 
-const store = new OpfsAssetStore();
+const store = new OpfsAssetStore({ remote: remoteFile });
 
 /**
  * The hold's full-resolution still (the whole video frame) cut to its current display crop, as a

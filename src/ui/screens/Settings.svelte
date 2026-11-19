@@ -23,6 +23,9 @@
   import { capture } from '../state/capture.svelte';
   import { research } from '../state/research.svelte';
   import { theme } from '../theme.svelte';
+  import { server } from '../state/server.svelte';
+  import ServerSettings from '../components/ServerSettings.svelte';
+  import MoveToServer from '../components/MoveToServer.svelte';
 
   let est = $state<StorageEstimateInfo | null>(null);
   let opfs = $state<number | null>(null);
@@ -205,6 +208,9 @@
     <button class="btn quiet back" type="button" onclick={() => router.go({ name: 'home' })}>‹ Videos</button>
   </header>
   <h2>Settings</h2>
+
+  {#if server.mode === 'legacy'}<MoveToServer />{/if}
+  {#if server.mode === 'server'}<ServerSettings />{/if}
 
   <section class="group">
     <h3 class="section-title">Appearance</h3>

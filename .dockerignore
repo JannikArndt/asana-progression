@@ -1,0 +1,8 @@
+# The deploy tarball holds only what the image needs; this keeps a local `docker build .` the same.
+*
+!Dockerfile
+!docker-entrypoint.sh
+!server
+server/node_modules
+server/**/*.test.mjs
+!dist

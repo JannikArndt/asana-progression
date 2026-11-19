@@ -130,6 +130,11 @@ export async function openSampleWriter(name: string, recordBytes: number): Promi
   return new OpfsSampleWriter(await fh.createSyncAccessHandle(), recordBytes);
 }
 
+/** Read-only view of sample records held in a Blob (e.g. fetched from the server). */
+export function blobSampleReader(blob: Blob, recordBytes: number): SampleReader {
+  return new BlobSampleReader(blob, recordBytes);
+}
+
 /** Read-only view of a sample file (any context). Null if it does not exist. */
 export async function openSampleReader(name: string, recordBytes: number): Promise<SampleReader | null> {
   try {

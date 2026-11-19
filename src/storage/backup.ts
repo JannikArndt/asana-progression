@@ -48,10 +48,8 @@ interface BackupJson {
   settings: Array<{ key: string; value: unknown }>;
 }
 
-/** Settings that describe the device or the local seed state; never exported or imported. */
-export function isDeviceSetting(key: string): boolean {
-  return key === 'persistRequested' || key === 'persistGranted' || key === 'catalogVersion' || key.startsWith('diag.') || key.startsWith('backup.');
-}
+export { isDeviceSetting } from './device-settings';
+import { isDeviceSetting } from './device-settings';
 
 function keyOf(store: RecordStore, record: unknown): string {
   const r = record as { id?: unknown; videoId?: unknown };
@@ -88,7 +86,7 @@ function fromBase64(b64: string): Uint8Array<ArrayBuffer> {
 }
 
 /** Typed arrays (Analysis.m/C) become `{$typed, b64}` (little-endian bytes, keeps NaN). */
-function replacer(_key: string, value: unknown): unknown {
+export function replacer(_key: string, value: unknown): unknown {
   if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
     const name = value.constructor.name;
     if (!(name in TYPED)) throw new Error(`Cannot back up ${name}`);
@@ -97,7 +95,7 @@ function replacer(_key: string, value: unknown): unknown {
   return value;
 }
 
-function reviver(_key: string, value: unknown): unknown {
+export function reviver(_key: string, value: unknown): unknown {
   const v = value as { $typed?: unknown; b64?: unknown } | null;
   if (v && typeof v === 'object' && typeof v.$typed === 'string' && typeof v.b64 === 'string') {
     const Ctor = TYPED[v.$typed as TypedName];

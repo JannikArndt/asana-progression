@@ -16,7 +16,9 @@
     "research": "node research/run.mjs",
     "verify": "node scripts/verify.mjs",
     "live": "node scripts/live.mjs",
-    "ship": "node scripts/ship.mjs"
+    "ship": "node scripts/ship.mjs",
+    "logs": "node scripts/logs.mjs",
+    "server": "node server/index.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.2.3",

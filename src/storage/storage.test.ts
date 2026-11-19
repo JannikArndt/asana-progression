@@ -337,3 +337,56 @@ describe('quota helpers', () => {
     expect(removed).toBe(2);
   });
 });
+
+describe('outbox', () => {
+  it('records every synced write once per record, in the same transaction', async () => {
+    const store = await openMetadataStore(new IDBFactory(), 'test-outbox');
+    await store.videos.put(video('v1', 'fp1'));
+    await store.videos.put(video('v1', 'fp1b'));
+    await store.settings.set('clipQuality', '720p');
+    await store.settings.set('catalogVersion', 5);
+    await store.settings.set('sync.rev', 3);
+    await store.jobs.delete('nothing');
+    await store.batch([
+      { store: 'holds', delete: 'h1' },
+      { store: 'settings', put: { key: 'diag.x', value: 1 } },
+    ]);
+    const list = await store.outbox.list();
+    expect(list.map((e) => e.id)).toEqual(['videos/v1', 'settings/clipQuality', 'holds/h1']);
+    expect(await store.outbox.count()).toBe(3);
+    expect(await store.outbox.pendingIds()).toEqual(new Set(['videos/v1', 'settings/clipQuality', 'holds/h1']));
+    store.close();
+  });
+
+  it('ack keeps entries written again after they were listed; untracked batches add none', async () => {
+    const store = await openMetadataStore(new IDBFactory(), 'test-outbox-ack');
+    await store.videos.put(video('v1', 'fp1'));
+    await store.videos.put(video('v2', 'fp2'));
+    const listed = await store.outbox.list(1);
+    expect(listed.map((e) => e.key)).toEqual(['v1']);
+    const all = await store.outbox.list();
+    await store.videos.put(video('v2', 'fp2b'));
+    await store.outbox.ack(all);
+    expect((await store.outbox.list()).map((e) => e.key)).toEqual(['v2']);
+    await store.outbox.ack([]);
+    await store.batch([{ store: 'videos', put: video('v3', 'fp3') }], { track: false });
+    expect((await store.outbox.list()).map((e) => e.key)).toEqual(['v2']);
+    expect(await store.videos.get('v3')).toBeDefined();
+    store.close();
+  });
+
+  it('upgrades a version 1 database and keeps its records', async () => {
+    const factory = new IDBFactory();
+    const v1 = await openDatabase(factory, 'test-upgrade', 1, (db) => {
+      db.createObjectStore('videos', { keyPath: 'id' }).createIndex('fingerprint', 'fingerprint');
+    });
+    const tx = v1.transaction('videos', 'readwrite');
+    tx.objectStore('videos').put(video('old', 'fp'));
+    await new Promise((r) => (tx.oncomplete = r));
+    v1.close();
+    const store = await openMetadataStore(factory, 'test-upgrade');
+    expect((await store.videos.get('old'))?.id).toBe('old');
+    expect(await store.outbox.count()).toBe(0);
+    store.close();
+  });
+});

@@ -4,6 +4,7 @@
   import { canShareFiles, cropExport, preparePhoto, saveFile, shareFiles, type PreparedPhoto } from '../state/crop-export.svelte';
   import { formatBytes } from '../diagnostics';
   import type { ProgressionItem } from '../../progression';
+  import { offerShareLink, server } from '../state/server.svelte';
 
   interface Props {
     item: ProgressionItem;
@@ -55,6 +56,9 @@
       <div class="actions">
         {#if canShare}<button class="btn primary" type="button" onclick={share}>Share…</button>{/if}
         <button class="btn" class:primary={!canShare} type="button" onclick={() => file && saveFile(file)}>Save</button>
+        {#if server.mode === 'server' && server.signedIn}
+          <button class="btn" type="button" onclick={() => offerShareLink('hold', item.hold.id, file?.name.replace(/\.jpg$/, '') ?? 'Asana')}>Link…</button>
+        {/if}
       </div>
     {:else if !error}
       <p class="small muted">Cropping the still…</p>

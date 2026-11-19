@@ -22,6 +22,8 @@
   import { research } from './state/research.svelte';
   import { cropExport } from './state/crop-export.svelte';
   import { updates } from './update.svelte';
+  import SignIn from './screens/SignIn.svelte';
+  import { server, move } from './state/server.svelte';
 
   // Old milestone-1 links (#/video/<id>) open the session containing the video.
   $effect(() => {
@@ -31,15 +33,29 @@
     router.go(s ? { name: 'session', id: s.id } : { name: 'home' }, true);
   });
 
-  onMount(() => {
+  let started = false;
+  async function startApp() {
+    if (started) return;
+    started = true;
+    await app.init((db) => server.beforeSeed(db));
+    if (!app.ready) return;
     // Stills cropped by an older crop version get a new automatic crop in the background.
-    void app.init().then(() => app.ready && capture.recropStale(app.holds));
+    capture.recropStale(app.holds);
+    server.start(app.db, (r) => void app.applyRemote(r.analyses));
+  }
+
+  onMount(() => {
+    // Server mode needs a sign-in before the first load (the server's data comes in first).
+    void server.detect().then(() => {
+      if (!server.needsSignIn) void startApp();
+    });
     updates.addQuietCheck(() => !pipeline.running);
     updates.addQuietCheck(() => !capture.busy);
     // A prepared backup file would be lost, e.g. while the share sheet hides the page.
     updates.addQuietCheck(() => !backup.exporting && !backup.importing && !backup.ready);
     updates.addQuietCheck(() => !research.busy && !research.ready);
     updates.addQuietCheck(() => !cropExport.preparing && !cropExport.ready);
+    updates.addQuietCheck(() => !move.running && !server.syncing);
     // Selected video files are lost on reload: switching to Photos to find the next file hides the page.
     updates.addHiddenCheck(() => app.files.size === 0);
     updates.start();
@@ -47,7 +63,11 @@
   });
 </script>
 
-{#if router.route.name === 'home'}
+{#if !server.checked}
+  <!-- detecting the server -->
+{:else if server.needsSignIn}
+  <SignIn onsignedin={() => void startApp()} />
+{:else if router.route.name === 'home'}
   <Home tab={router.route.tab ?? (app.holds.length ? 'asanas' : 'sessions')} />
 {:else if router.route.name === 'process'}
   <Processing />

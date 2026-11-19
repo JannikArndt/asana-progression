@@ -13,13 +13,14 @@ import { openVideo } from '../../source';
 import { OpfsAssetStore } from '../../storage';
 import type { CaptureEvent, CaptureRequest } from './capture-protocol';
 import { workerCropper } from './cropper';
+import { remoteFile } from '../state/remote';
 
 const scope = self as unknown as {
   postMessage(message: CaptureEvent): void;
   onmessage: ((e: MessageEvent<CaptureRequest>) => void) | null;
 };
 
-const store = new OpfsAssetStore();
+const store = new OpfsAssetStore({ remote: remoteFile });
 const getCropper = workerCropper();
 let current: AbortController | null = null;
 

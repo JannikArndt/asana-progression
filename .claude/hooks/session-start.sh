@@ -10,6 +10,7 @@ cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}"
 
 # install, not ci: a container that already has them keeps them
 [ -f package.json ] && npm install --no-audit --no-fund
+[ -f server/package.json ] && npm install --prefix server --no-audit --no-fund
 
 # Playwright: cloud containers ship a Chromium (PLAYWRIGHT_BROWSERS_PATH);
 # fetching a second one is a download nobody needs.

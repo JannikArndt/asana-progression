@@ -1,0 +1,12 @@
+{
+  "name": "asana-progression-server",
+  "private": true,
+  "type": "module",
+  "description": "Server for asana-progression: passkey sign-in, sync of records and files, share links, the built app.",
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "^14.1.0"
+  }
+}

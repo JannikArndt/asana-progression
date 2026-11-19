@@ -1,4 +1,4 @@
-// scripts/live.mjs — is this tree's build what GitHub Pages serves?
+// scripts/live.mjs — is this tree's build what asana.jannikarndt.de serves (GET /version)?
 //   node scripts/live.mjs                 answers now (exit 1 if not)
 //   node scripts/live.mjs --wait          polls every 10 s, up to 15 min
 //   node scripts/live.mjs --url <base>    another host
@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const DEFAULT_URL = "https://jannikarndt.github.io/asana-progression";
+const DEFAULT_URL = "https://asana.jannikarndt.de";
 const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : undefined; };
 const base = (arg("--url") || process.env.APP_URL || DEFAULT_URL).replace(/\/$/, "");
 const wait = process.argv.includes("--wait");
@@ -19,10 +19,10 @@ function newest(path) {
   if (!existsSync(path)) return 0;
   const st = statSync(path);
   if (!st.isDirectory()) return st.mtimeMs;
-  return Math.max(0, ...readdirSync(path).map((n) => newest(join(path, n))));
+  return Math.max(0, ...readdirSync(path).filter((n) => n !== "node_modules").map((n) => newest(join(path, n))));
 }
 const stamp = "dist/version.json";
-const sources = ["src", "public", "index.html", "vite.config.ts", "package.json", "package-lock.json", "scripts/stamp-build.mjs", "tsconfig.json"];
+const sources = ["src", "public", "index.html", "share.html", "vite.config.ts", "package.json", "package-lock.json", "scripts/stamp-build.mjs", "tsconfig.json", "server", "Dockerfile", "docker-entrypoint.sh"];
 if (!existsSync(stamp) || Math.max(...sources.map(newest)) > statSync(stamp).mtimeMs) {
   console.log("building (dist/ is missing or older than the sources)…");
   if (spawnSync("npm", ["run", "--silent", "build"], { stdio: "inherit" }).status !== 0) {
@@ -35,8 +35,7 @@ const started = Date.now();
 
 async function served() {
   try {
-    // Pages caches for ~10 min (max-age=600): the query string gets past it.
-    const res = await fetch(`${base}/version.json?t=${Date.now()}`, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+    const res = await fetch(`${base}/version?t=${Date.now()}`, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
     const body = await res.json().catch(() => ({}));
     return body.build || `HTTP ${res.status}`;
   } catch (err) {
