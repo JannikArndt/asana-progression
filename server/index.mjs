@@ -259,6 +259,8 @@ export function createApp(cfg = config()) {
     try {
       await route(req, res);
     } catch (e) {
+      // The client went away mid-download (a closed tab, a cancelled image): nothing to report.
+      if (e?.code === 'ERR_STREAM_PREMATURE_CLOSE') return void res.destroy();
       const status = e instanceof HttpError ? e.status : 500;
       if (status >= 500) console.error(`${req.method} ${req.url}:`, e);
       if (!res.headersSent) sendJson(req, res, status, { error: status >= 500 ? 'Server error' : e.message });
