@@ -13,6 +13,8 @@
   import FrameScrubber from '../components/FrameScrubber.svelte';
   import { displayCrop, hasReps, itemAspect, nextColumns, progressionItems, repLabel, typicalAspect, type ProgressionItem, type RepFilter, type SideFilter } from '../../progression';
   import { app } from '../state/app.svelte';
+  import { clampColumns, viewport, type ColumnRange } from '../viewport.svelte';
+  import ColumnStepper from '../components/ColumnStepper.svelte';
   import { router } from '../state/router.svelte';
   import { capture } from '../state/capture.svelte';
   import { chooseBestFrame, setManualCrop } from '../state/hold-actions';
@@ -29,20 +31,31 @@
 
   type Mode = 'feed' | 'grid';
   const VIEW_KEY = 'asana.progression.view';
-  function savedView(): { mode: Mode; columns: number } {
+  // Phone 2–4 columns (pinch), desktop 3–8 (− / + or ctrl+wheel); each remembered on its own.
+  const PHONE_COLS: ColumnRange = { min: 2, max: 4, initial: 3 };
+  const WIDE_COLS: ColumnRange = { min: 3, max: 8, initial: 5 };
+  const range = $derived(viewport.wide ? WIDE_COLS : PHONE_COLS);
+  type Saved = { mode?: Mode; columns?: number; columnsWide?: number };
+  function savedView(): Saved {
     try {
-      const v = JSON.parse(localStorage.getItem(VIEW_KEY) ?? '{}') as { mode?: Mode; columns?: number };
-      return { mode: v.mode === 'grid' ? 'grid' : 'feed', columns: Math.min(4, Math.max(2, Math.round(v.columns ?? 3))) };
+      return JSON.parse(localStorage.getItem(VIEW_KEY) ?? '{}') as Saved;
     } catch {
-      return { mode: 'feed', columns: 3 };
+      return {};
     }
   }
   const initial = savedView();
-  let mode = $state<Mode>(initial.mode);
-  let columns = $state(initial.columns);
+  let mode = $state<Mode>(initial.mode === 'grid' ? 'grid' : 'feed');
+  let phoneColumns = $state(clampColumns(initial.columns, PHONE_COLS));
+  let wideColumns = $state(clampColumns(initial.columnsWide, WIDE_COLS));
+  const columns = $derived(viewport.wide ? wideColumns : phoneColumns);
+  function setColumns(n: number) {
+    const c = clampColumns(n, range);
+    if (viewport.wide) wideColumns = c;
+    else phoneColumns = c;
+  }
   $effect(() => {
     try {
-      localStorage.setItem(VIEW_KEY, JSON.stringify({ mode, columns }));
+      localStorage.setItem(VIEW_KEY, JSON.stringify({ mode, columns: phoneColumns, columnsWide: wideColumns }));
     } catch {
       /* private mode */
     }
@@ -169,7 +182,7 @@
   function onGridUp(e: PointerEvent) {
     if (!touches.delete(e.pointerId)) return;
     if (pinchStart > 0 && touches.size < 2) {
-      columns = nextColumns(columns, pinchScale);
+      setColumns(nextColumns(columns, pinchScale, range.min, range.max));
       pinchStart = 0;
       pinchScale = 1;
       suppressClickUntil = performance.now() + 400;
@@ -182,7 +195,7 @@
     e.preventDefault();
     wheelAcc += e.deltaY;
     if (Math.abs(wheelAcc) > 40) {
-      columns = nextColumns(columns, wheelAcc < 0 ? 1.3 : 0.7);
+      setColumns(nextColumns(columns, wheelAcc < 0 ? 1.3 : 0.7, range.min, range.max));
       wheelAcc = 0;
     }
   }
@@ -239,6 +252,9 @@
         <button type="button" role="radio" aria-checked={mode === 'feed'} class:on={mode === 'feed'} onclick={() => (mode = 'feed')}>Feed</button>
         <button type="button" role="radio" aria-checked={mode === 'grid'} class:on={mode === 'grid'} onclick={() => (mode = 'grid')}>Grid</button>
       </div>
+      {#if mode === 'grid' && viewport.mouse}
+        <ColumnStepper value={columns} min={range.min} max={range.max} onchange={setColumns} />
+      {/if}
     </div>
 
     {#if waiting.length || attachMessage}
@@ -606,5 +622,38 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* Desktop: the page uses the width; the feed becomes a grid of cards. */
+  @media (min-width: 1000px) {
+    .asana {
+      max-width: 1280px;
+      padding-left: var(--space-6);
+      padding-right: var(--space-6);
+    }
+    .feed {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: var(--space-5) var(--space-4);
+      align-items: start;
+    }
+    .card.notice {
+      max-width: 720px;
+    }
+    /* Filters keep their natural size instead of spanning the page. */
+    .bar {
+      align-items: center;
+    }
+    .segmented {
+      flex: 0 0 auto;
+      min-width: 320px;
+    }
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .item,
+    .grid button {
+      cursor: zoom-in;
+    }
   }
 </style>

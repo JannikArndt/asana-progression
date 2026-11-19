@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { clampColumns, viewport, type ColumnRange } from '../viewport.svelte';
+  import ColumnStepper from '../components/ColumnStepper.svelte';
   import { offerShareLink, server } from '../state/server.svelte';
   import LazyAsset from '../components/LazyAsset.svelte';
   import TinyFrame from '../components/TinyFrame.svelte';
@@ -21,19 +23,26 @@
   }
   let { id }: Props = $props();
 
+  // Phone 1–3 columns, desktop 2–8 (an even count keeps R and L of an asana side by side).
   const COLUMNS_KEY = 'asana.sessionPoses.columns';
-  function savedColumns(): number {
+  const WIDE_KEY = 'asana.sessionPoses.columnsWide';
+  const PHONE_COLS: ColumnRange = { min: 1, max: 3, initial: 2 };
+  const WIDE_COLS: ColumnRange = { min: 2, max: 8, initial: 4 };
+  function saved(key: string, r: ColumnRange): number {
     try {
-      const n = Number(localStorage.getItem(COLUMNS_KEY));
-      return n >= 1 && n <= 3 ? Math.round(n) : 2;
+      const v = localStorage.getItem(key);
+      return clampColumns(v === null ? undefined : Number(v) || undefined, r);
     } catch {
-      return 2;
+      return r.initial;
     }
   }
-  let columns = $state(savedColumns());
+  let phoneColumns = $state(saved(COLUMNS_KEY, PHONE_COLS));
+  let wideColumns = $state(saved(WIDE_KEY, WIDE_COLS));
+  const columns = $derived(viewport.wide ? wideColumns : phoneColumns);
   $effect(() => {
     try {
-      localStorage.setItem(COLUMNS_KEY, String(columns));
+      localStorage.setItem(COLUMNS_KEY, String(phoneColumns));
+      localStorage.setItem(WIDE_KEY, String(wideColumns));
     } catch {
       /* private mode */
     }
@@ -125,11 +134,15 @@
           <button class="btn quiet" type="button" onclick={() => setComplete(true)}>Mark as completely labeled</button>
         {/if}
       </div>
-      <div class="segmented" role="radiogroup" aria-label="Columns">
-        {#each [1, 2, 3] as n (n)}
-          <button type="button" role="radio" aria-checked={columns === n} class:on={columns === n} onclick={() => (columns = n)}>{n} {n === 1 ? 'column' : 'columns'}</button>
-        {/each}
-      </div>
+      {#if viewport.wide}
+        <div><ColumnStepper value={columns} min={WIDE_COLS.min} max={WIDE_COLS.max} onchange={(n) => (wideColumns = clampColumns(n, WIDE_COLS))} /></div>
+      {:else}
+        <div class="segmented" role="radiogroup" aria-label="Columns">
+          {#each [1, 2, 3] as n (n)}
+            <button type="button" role="radio" aria-checked={columns === n} class:on={columns === n} onclick={() => (phoneColumns = n)}>{n} {n === 1 ? 'column' : 'columns'}</button>
+          {/each}
+        </div>
+      {/if}
     {/if}
 
     {#if waiting.length || attachMessage}
@@ -383,5 +396,22 @@
   .above-viewer {
     position: relative;
     z-index: 70;
+  }
+
+  @media (min-width: 1000px) {
+    .poses {
+      max-width: 1440px;
+      padding-left: var(--space-6);
+      padding-right: var(--space-6);
+    }
+    .card.notice {
+      max-width: 720px;
+    }
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .grid button {
+      cursor: zoom-in;
+    }
   }
 </style>

@@ -723,4 +723,36 @@
   .error {
     color: var(--color-danger);
   }
+
+  /* Desktop: the page uses the width; the asana tiles fill it (phone layout unchanged below 1000 px). */
+  @media (min-width: 1000px) {
+    .home {
+      max-width: 1280px;
+      padding-left: var(--space-6);
+      padding-right: var(--space-6);
+    }
+    .tiles {
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap: var(--space-5) var(--space-4);
+    }
+    section[aria-label='Sessions'] {
+      max-width: 720px;
+    }
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .tile {
+      cursor: pointer;
+    }
+    .tile .tile-img {
+      transition: filter var(--duration) var(--ease);
+    }
+    .tile:hover .tile-img {
+      filter: brightness(1.06);
+    }
+    .tile:hover .name {
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+  }
 </style>

@@ -93,9 +93,14 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (editing || framing) return;
+    if (editing || framing || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'ArrowRight') step = Math.min(steps.length - 1, step + 1);
     else if (e.key === 'ArrowLeft') step = Math.max(0, step - 1);
+    // Enter confirms, unless a control has the focus (it handles Enter itself).
+    else if (e.key === 'Enter' && !busy && group.length && !(e.target as Element | null)?.closest?.('button, a, input, select, textarea, [role="dialog"]')) {
+      e.preventDefault();
+      void confirmAndNext();
+    }
   }
 </script>
 
@@ -165,11 +170,11 @@
 
 {#if group.length}
   <footer class="nav">
-    <button class="btn" type="button" onclick={() => (step = Math.max(0, step - 1))} disabled={step === 0} aria-label="Previous pose">‹</button>
-    <button class="btn primary confirm" type="button" onclick={confirmAndNext} disabled={busy}>
+    <button class="btn" type="button" onclick={() => (step = Math.max(0, step - 1))} disabled={step === 0} aria-label="Previous pose" title="Previous pose (←)">‹</button>
+    <button class="btn primary confirm" type="button" onclick={confirmAndNext} disabled={busy} title="Enter">
       {step >= steps.length - 1 ? 'Confirm & finish' : 'Confirm & next'}
     </button>
-    <button class="btn" type="button" onclick={() => (step = Math.min(steps.length - 1, step + 1))} disabled={step >= steps.length - 1} aria-label="Skip">›</button>
+    <button class="btn" type="button" onclick={() => (step = Math.min(steps.length - 1, step + 1))} disabled={step >= steps.length - 1} aria-label="Skip" title="Skip (→)">›</button>
   </footer>
 {/if}
 
@@ -337,5 +342,30 @@
 
   .nav .confirm {
     flex: 1;
+  }
+
+  @media (min-width: 1000px) {
+    .crops {
+      max-width: 1280px;
+      padding-left: var(--space-6);
+      padding-right: var(--space-6);
+    }
+    .notice {
+      align-self: flex-start;
+      width: min(100%, 720px);
+    }
+    /* The bar's buttons stay together in the middle instead of spanning the screen. */
+    .nav {
+      justify-content: center;
+    }
+    .nav .confirm {
+      flex: 0 1 480px;
+    }
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .photo:not(:disabled) {
+      cursor: pointer;
+    }
   }
 </style>

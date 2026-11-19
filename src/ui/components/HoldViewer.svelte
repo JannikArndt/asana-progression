@@ -15,6 +15,7 @@
   import { weakRecordedAt } from '../state/session-data';
   import { copyText } from '../diagnostics';
   import { dismissOffset, dismissProgress, gestureAxis, isTap, shouldDismiss, type Axis } from './viewer-gestures';
+  import { viewport } from '../viewport.svelte';
 
   interface Props {
     /** All holds of the asana, oldest first (or of one session, in practice order). */
@@ -306,6 +307,12 @@
         <p class="hint">No clip captured for this hold.</p>
       {/if}
     </div>
+
+    {#if viewport.mouse && items.length > 1}
+      <!-- A mouse has no swipe: previous / next at the sides (and ← → on the keyboard). -->
+      <button class="nav prev" type="button" aria-label="Previous" title="Previous (←)" disabled={index === 0} onclick={() => (index = Math.max(0, index - 1))}>‹</button>
+      <button class="nav next" type="button" aria-label="Next" title="Next (→)" disabled={index === items.length - 1} onclick={() => (index = Math.min(items.length - 1, index + 1))}>›</button>
+    {/if}
 
     {#if poseLabel}
       <p class="chip pose-label" role="status">{poseLabel}</p>
@@ -778,5 +785,36 @@
   .others button span {
     text-align: center;
     white-space: nowrap;
+  }
+
+  .nav {
+    position: absolute;
+    top: 50%;
+    z-index: 3;
+    width: 48px;
+    height: 48px;
+    margin-top: -24px;
+    border: 0;
+    border-radius: 24px;
+    background: var(--color-glass);
+    color: var(--color-on-photo);
+    font-size: 1.6rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.75;
+    transition: opacity var(--duration-fast) var(--ease);
+  }
+  .nav:hover:not(:disabled) {
+    opacity: 1;
+  }
+  .nav:disabled {
+    opacity: 0.2;
+    cursor: default;
+  }
+  .nav.prev {
+    left: var(--space-4);
+  }
+  .nav.next {
+    right: var(--space-4);
   }
 </style>

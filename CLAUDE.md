@@ -696,6 +696,18 @@ quiet check too.
 
 ## Design
 
+**Desktop** (the same app; `ui/viewport.svelte.ts`: `viewport.wide` = `(min-width: 1000px)`,
+`viewport.mouse` = `(hover: hover) and (pointer: fine)`; below 1000 px everything is the phone
+layout). Wide: Home, the asana page, Poses and Improve crops use up to 1280–1440 px; the asana
+tiles fill the width (`auto-fill`, ≥ 190 px), the asana feed becomes a grid of cards (≥ 340 px),
+filters keep their natural width, notices stay ≤ 720 px. Grid columns are remembered per layout:
+asana page phone 2–4 / desktop 3–8 (`asana.progression.view` `columns` / `columnsWide`), Poses
+phone 1–3 / desktop 2–8 (`asana.sessionPoses.columns` / `…columnsWide`); a mouse gets
+`ColumnStepper` (− n +) besides pinch and ctrl+wheel. The viewer shows ‹ › at the sides for a
+mouse (← → work everywhere), Improve crops takes ← → and Enter (= Confirm & next, unless a control
+has the focus), the session strip steps one session per mouse-wheel notch. Pointer devices get
+hover cues (cursor, tile brightness).
+
 Tokens in `src/ui/styles/tokens.css` (colours, spacing, radii, type scale, motion, safe areas);
 use them everywhere, including canvas drawing (TimelineGraph reads them via
 `getComputedStyle`). Calm and light: off-white `--color-bg`, near-black text, one muted sage

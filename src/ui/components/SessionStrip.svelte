@@ -63,6 +63,18 @@
   });
 
   /** Scrubbing: the cell in the middle is the selection, live while the strip moves. */
+  /** A mouse wheel turns vertically: step one session per notch (trackpads scroll sideways natively). */
+  let wheelAcc = 0;
+  function onwheel(e: WheelEvent) {
+    if (!el || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+    e.preventDefault();
+    wheelAcc += e.deltaY;
+    if (Math.abs(wheelAcc) < 40) return;
+    const i = Math.max(0, Math.min(items.length - 1, nearest() + Math.sign(wheelAcc)));
+    wheelAcc = 0;
+    el.scrollTo({ left: i * STEP, behavior: 'smooth' });
+  }
+
   function onscroll() {
     // Tearing the strip down clamps scrollLeft to 0: that is no choice of "First".
     if (gone || !el?.isConnected) return;
@@ -72,7 +84,7 @@
   }
 </script>
 
-<div class="strip" bind:this={el} {onscroll} role="group" aria-label="Show photos from">
+<div class="strip" bind:this={el} {onscroll} {onwheel} role="group" aria-label="Show photos from">
   {#each items as item (item.key)}
     <button
       type="button"
